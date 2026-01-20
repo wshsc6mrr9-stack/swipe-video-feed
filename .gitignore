@@ -56,3 +56,4 @@ public/hls/
 *.mov
 *.m3u8
 *.ts
+hls/
