@@ -55,5 +55,6 @@ public/hls/
 *.mp4
 *.mov
 *.m3u8
-*.ts
 hls/
+hls/**/*.ts
+public/hls/**/*.ts
