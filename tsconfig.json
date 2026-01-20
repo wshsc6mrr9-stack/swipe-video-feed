@@ -6,7 +6,6 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
-
     "esModuleInterop": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
@@ -14,20 +13,15 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "plugins": [{ "name": "next" }],
-
-    // ★これが大事（@components / @lib / @ を解決する）
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"],
-      "@components/*": ["src/components/*"],
-      "@lib/*": ["src/lib/*"],
-      "@app/*": ["src/app/*"]
-    }
+    "plugins": [{ "name": "next" }]
   },
-
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-
-  // ★これが大事（hls配下のtsが「バイナリ扱い」で落ちるのを防ぐ）
-  "exclude": ["node_modules", ".next", "hls/**/*.ts", "public/hls/**/*.ts"]
+  "exclude": [
+    "node_modules",
+    ".next",
+    "hls",
+    "hls/**/*.ts",
+    "public/hls",
+    "public/hls/**/*.ts"
+  ]
 }
