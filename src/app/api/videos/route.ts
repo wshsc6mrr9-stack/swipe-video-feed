@@ -1,25 +1,38 @@
 // src/app/api/videos/route.ts
 import { NextResponse } from "next/server";
-import type { VideoItem } from "@/lib/types";
-import { promises as fs } from "fs";
-import path from "path";
+import { addVideo, deleteVideoById, listVideos } from "@/lib/videosStore";
 
 export async function GET() {
+  const items = await listVideos();
+  return NextResponse.json({ ok: true, items });
+}
+
+export async function POST(req: Request) {
   try {
-    const p = path.join(process.cwd(), "public", "videos.json");
-    const txt = await fs.readFile(p, "utf-8");
-    const v = JSON.parse(txt);
-    const items: VideoItem[] = Array.isArray(v) ? v : [];
-    return NextResponse.json({ ok: true, items });
+    const body = await req.json().catch(() => null);
+    const item = await addVideo(body);
+    return NextResponse.json({ ok: true, item });
   } catch (e: any) {
-    return NextResponse.json({ ok: true, items: [] });
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "bad request" },
+      { status: 400 }
+    );
   }
 }
 
-// ✅ 本番は「見せるだけ」なので塞ぐ
-export async function POST() {
-  return NextResponse.json({ ok: false, error: "read-only" }, { status: 403 });
-}
-export async function DELETE() {
-  return NextResponse.json({ ok: false, error: "read-only" }, { status: 403 });
+export async function DELETE(req: Request) {
+  try {
+    const body = await req.json().catch(() => null);
+    const id = String(body?.id ?? "").trim();
+    if (!id) {
+      return NextResponse.json({ ok: false, error: "id is required" }, { status: 400 });
+    }
+    await deleteVideoById(id);
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "bad request" },
+      { status: 400 }
+    );
+  }
 }

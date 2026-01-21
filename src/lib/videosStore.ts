@@ -3,15 +3,14 @@ import type { VideoItem } from "@/lib/types";
 import { promises as fs } from "fs";
 import path from "path";
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const DATA_PATH = path.join(DATA_DIR, "videos.json");
-const TMP_PATH = path.join(DATA_DIR, "videos.tmp.json");
+const PUBLIC_DIR = path.join(process.cwd(), "public");
+const DATA_PATH = path.join(PUBLIC_DIR, "videos.json");
+const TMP_PATH = path.join(PUBLIC_DIR, "videos.tmp.json");
 
 function guessSrcType(url: string): VideoItem["srcType"] {
   return url.includes(".m3u8") ? "hls" : "mp4";
 }
 
-// 互換：affiliateUrl/affiliateLabel で来ても内部保存は affUrl/affLabel に統一
 function normalizeAff(input: any): { affUrl?: string; affLabel?: string } {
   const rawUrl = (input?.affUrl ?? input?.affiliateUrl ?? undefined) as string | undefined;
   const rawLabel = (input?.affLabel ?? input?.affiliateLabel ?? undefined) as string | undefined;
@@ -23,7 +22,7 @@ function normalizeAff(input: any): { affUrl?: string; affLabel?: string } {
 }
 
 async function ensureFile() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.mkdir(PUBLIC_DIR, { recursive: true });
   try {
     await fs.access(DATA_PATH);
   } catch {
@@ -69,9 +68,7 @@ export async function addVideo(input: any): Promise<VideoItem> {
   const title = (input?.title ?? "").toString().trim();
   const url = (input?.url ?? input?.src ?? "").toString().trim();
 
-  if (!title || !url) {
-    throw new Error("title と url は必須");
-  }
+  if (!title || !url) throw new Error("title と url は必須");
 
   const poster =
     typeof input?.poster === "string" && input.poster.trim()
