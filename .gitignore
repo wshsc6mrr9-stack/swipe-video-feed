@@ -43,3 +43,7 @@ public/hls/**/*.ts
 
 # editor
 .vscode/
+
+# HLS output (do not commit)
+hls/
+public/hls/
