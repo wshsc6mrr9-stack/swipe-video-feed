@@ -1,15 +1,17 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function AdminLoginPage() {
+  const router = useRouter();
   const [password, setPassword] = useState("");
-  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setMsg(null);
+    setErr(null);
     setLoading(true);
 
     try {
@@ -20,46 +22,47 @@ export default function AdminLoginPage() {
         credentials: "include",
       });
 
-      const data = await r.json().catch(() => ({}));
+      const j = await r.json().catch(() => null);
 
-      if (!r.ok || !data?.ok) {
-        setMsg(data?.error ?? "login failed");
+      if (!r.ok || !j?.ok) {
+        setErr(j?.error ?? `login failed (${r.status})`);
         setLoading(false);
         return;
       }
 
-      // ✅ ログイン成功 → /admin へ
-      window.location.href = "/admin";
-    } catch (err) {
-      setMsg("network error");
+      // ✅ Cookie付いた前提で /admin へ
+      router.replace("/admin");
+      router.refresh();
+    } catch (e: any) {
+      setErr(e?.message ?? "network error");
+    } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen grid place-items-center bg-black text-white p-6">
+    <main className="min-h-screen bg-black text-white flex items-center justify-center p-6">
       <form onSubmit={onSubmit} className="w-full max-w-md space-y-4">
-        <h1 className="text-xl font-semibold">Admin Login</h1>
+        <h1 className="text-2xl font-bold">Admin Login</h1>
 
         <input
+          className="w-full px-4 py-3 rounded bg-neutral-800 outline-none"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-md bg-neutral-900 border border-neutral-700 px-4 py-3"
-          placeholder="Password"
-          autoComplete="current-password"
+          placeholder="password"
         />
 
         <button
-          type="submit"
+          className="w-full px-4 py-3 rounded bg-white text-black font-bold disabled:opacity-60"
           disabled={loading}
-          className="w-full rounded-md bg-white text-black py-3 font-semibold disabled:opacity-60"
+          type="submit"
         >
           {loading ? "..." : "ログイン"}
         </button>
 
-        {msg ? <p className="text-red-400 text-sm">{msg}</p> : null}
+        {err ? <p className="text-red-400 text-sm">{err}</p> : null}
       </form>
-    </div>
+    </main>
   );
 }

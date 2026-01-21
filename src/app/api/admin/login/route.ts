@@ -1,37 +1,33 @@
-// app/api/admin/login/route.ts
+// src/app/api/admin/login/route.ts
 import { NextResponse } from "next/server";
-
-export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const password = typeof body?.password === "string" ? body.password : "";
 
-  const expected = process.env.ADMIN_PASSWORD || "";
-  if (!expected) {
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminPassword) {
     return NextResponse.json(
-      { ok: false, error: "ADMIN_PASSWORD is not set" },
+      { ok: false, error: "ADMIN_PASSWORD is not set on server" },
       { status: 500 }
     );
   }
 
-  if (password !== expected) {
-    return NextResponse.json(
-      { ok: false, error: "invalid password" },
-      { status: 401 }
-    );
+  if (password !== adminPassword) {
+    return NextResponse.json({ ok: false, error: "invalid password" }, { status: 401 });
   }
 
-  // ✅ Cookie 付与
+  // ✅ Cookie 発行（これが無いとログイン状態にならない）
   const res = NextResponse.json({ ok: true });
+
   res.cookies.set({
     name: "admin_auth",
     value: "1",
     httpOnly: true,
-    secure: true,
     sameSite: "lax",
+    secure: true, // Vercel(https)前提
     path: "/",
-    maxAge: 60 * 60 * 24 * 7,
+    maxAge: 60 * 60 * 24 * 7, // 7日
   });
 
   return res;
