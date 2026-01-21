@@ -1,53 +1,65 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState } from "react";
 
 export default function AdminLoginPage() {
-  const router = useRouter();
-  const [pw, setPw] = useState("");
-  const [msg, setMsg] = useState("");
+  const [password, setPassword] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  async function login(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setMsg("");
+    setMsg(null);
+    setLoading(true);
 
-    const res = await fetch("/api/admin/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: pw }),
-    });
+    try {
+      const r = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+        credentials: "include",
+      });
 
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      setMsg(`失敗: ${data.error ?? "Invalid password"}`);
-      return;
+      const data = await r.json().catch(() => ({}));
+
+      if (!r.ok || !data?.ok) {
+        setMsg(data?.error ?? "login failed");
+        setLoading(false);
+        return;
+      }
+
+      // ✅ ログイン成功 → /admin へ
+      window.location.href = "/admin";
+    } catch (err) {
+      setMsg("network error");
+      setLoading(false);
     }
-
-    router.push("/admin");
   }
 
   return (
-    <div className="min-h-dvh bg-black text-white flex items-center justify-center p-6">
-      <div className="w-full max-w-sm space-y-3">
-        <h1 className="text-xl font-bold">Admin Login</h1>
+    <div className="min-h-screen grid place-items-center bg-black text-white p-6">
+      <form onSubmit={onSubmit} className="w-full max-w-md space-y-4">
+        <h1 className="text-xl font-semibold">Admin Login</h1>
 
-        <form onSubmit={login} className="space-y-3">
-          <input
-            className="w-full rounded bg-white/10 p-3 outline-none"
-            type="password"
-            placeholder="Password"
-            value={pw}
-            onChange={(e) => setPw(e.target.value)}
-          />
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="w-full rounded-md bg-neutral-900 border border-neutral-700 px-4 py-3"
+          placeholder="Password"
+          autoComplete="current-password"
+        />
 
-          <button className="w-full rounded bg-white text-black py-3 font-bold">
-            ログイン
-          </button>
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full rounded-md bg-white text-black py-3 font-semibold disabled:opacity-60"
+        >
+          {loading ? "..." : "ログイン"}
+        </button>
 
-          {msg && <p className="text-sm text-red-300">{msg}</p>}
-        </form>
-      </div>
+        {msg ? <p className="text-red-400 text-sm">{msg}</p> : null}
+      </form>
     </div>
   );
 }

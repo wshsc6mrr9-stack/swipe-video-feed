@@ -1,20 +1,19 @@
+// middleware.ts（該当部分だけ）
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
-export function middleware(req: any) {
-  const pathname = req.nextUrl?.pathname ?? "";
+export function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
 
-  // /admin 以外は一切触らない
-  if (!pathname.startsWith("/admin")) return NextResponse.next();
+  if (pathname.startsWith("/admin")) {
+    if (pathname.startsWith("/admin/login")) return NextResponse.next();
 
-  // ログインページは通す
-  if (pathname === "/admin/login") return NextResponse.next();
-
-  // Cookie が無ければログインへ
-  const ok = req.cookies?.get("/admin")?.value === "1";
-  if (!ok) {
-    const url = req.nextUrl.clone();
-    url.pathname = "/admin/login";
-    return NextResponse.redirect(url);
+    const authed = req.cookies.get("admin_auth")?.value === "1";
+    if (!authed) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/admin/login";
+      return NextResponse.redirect(url);
+    }
   }
 
   return NextResponse.next();
