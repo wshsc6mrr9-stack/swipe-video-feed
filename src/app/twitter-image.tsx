@@ -1,10 +1,22 @@
 import { ImageResponse } from "next/og";
 
 export const runtime = "edge";
+export const alt = "Swipe Video Feed";
+export const size = { width: 1200, height: 675 }; // Xでよく使う比率（少し縦長）
 export const contentType = "image/png";
-export const size = { width: 1200, height: 675 };
 
-export default function TwitterImage() {
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL || "https://swipe-video-feed.vercel.app";
+
+const HOST = (() => {
+  try {
+    return new URL(SITE_URL).host;
+  } catch {
+    return "swipe-video-feed.vercel.app";
+  }
+})();
+
+export default function Image() {
   return new ImageResponse(
     (
       <div
@@ -12,53 +24,56 @@ export default function TwitterImage() {
           width: "100%",
           height: "100%",
           display: "flex",
-          flexDirection: "column",
           justifyContent: "center",
-          padding: "72px",
-          background:
-            "linear-gradient(135deg, #0b0b0f 0%, #111827 45%, #0b0b0f 100%)",
-          color: "#ffffff",
-          position: "relative",
+          alignItems: "center",
+          background: "linear-gradient(135deg, #0b1220 0%, #000000 65%)",
+          color: "#fff",
           fontFamily:
             'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial',
+          position: "relative",
+          padding: 72,
         }}
       >
         <div
           style={{
             position: "absolute",
-            inset: 0,
-            background:
-              "radial-gradient(circle at 25% 35%, rgba(59,130,246,0.30), transparent 55%), radial-gradient(circle at 75% 65%, rgba(34,197,94,0.20), transparent 55%)",
+            left: 56,
+            top: 56,
+            bottom: 56,
+            width: 8,
+            borderRadius: 999,
+            background: "linear-gradient(180deg, #60a5fa 0%, #34d399 100%)",
+            opacity: 0.95,
           }}
         />
-        <div style={{ position: "relative", display: "flex", gap: "22px" }}>
+
+        <div style={{ width: "100%", maxWidth: 980 }}>
           <div
             style={{
-              width: 14,
-              borderRadius: 999,
-              background: "linear-gradient(180deg, #3b82f6, #22c55e)",
+              fontSize: 76,
+              fontWeight: 800,
+              letterSpacing: -1,
+              lineHeight: 1.05,
             }}
-          />
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ fontSize: 60, fontWeight: 850, letterSpacing: -1 }}>
-              Swipe Video Feed
-            </div>
-            <div style={{ fontSize: 28, opacity: 0.9 }}>
-              縦スワイプでショート動画を連続視聴
-            </div>
+          >
+            Swipe Video Feed
+          </div>
+
+          <div style={{ marginTop: 22, fontSize: 30, opacity: 0.9 }}>
+            縦スワイプでショート動画を連続視聴
           </div>
         </div>
 
         <div
           style={{
             position: "absolute",
-            right: 28,
-            bottom: 24,
+            right: 48,
+            bottom: 40,
             fontSize: 18,
-            opacity: 0.7,
+            opacity: 0.6,
           }}
         >
-          swipe-video-feed.vercel.app
+          {HOST}
         </div>
       </div>
     ),

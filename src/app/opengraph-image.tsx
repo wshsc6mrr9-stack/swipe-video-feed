@@ -1,10 +1,22 @@
 import { ImageResponse } from "next/og";
 
 export const runtime = "edge";
-export const contentType = "image/png";
+export const alt = "Swipe Video Feed";
 export const size = { width: 1200, height: 630 };
+export const contentType = "image/png";
 
-export default function OpenGraphImage() {
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL || "https://swipe-video-feed.vercel.app";
+
+const HOST = (() => {
+  try {
+    return new URL(SITE_URL).host;
+  } catch {
+    return "swipe-video-feed.vercel.app";
+  }
+})();
+
+export default function Image() {
   return new ImageResponse(
     (
       <div
@@ -12,95 +24,83 @@ export default function OpenGraphImage() {
           width: "100%",
           height: "100%",
           display: "flex",
-          flexDirection: "column",
           justifyContent: "center",
-          padding: "72px",
-          background:
-            "linear-gradient(135deg, #0b0b0f 0%, #111827 40%, #0b0b0f 100%)",
-          color: "#ffffff",
-          position: "relative",
+          alignItems: "center",
+          background: "linear-gradient(135deg, #0b1220 0%, #000000 65%)",
+          color: "#fff",
           fontFamily:
             'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial',
+          position: "relative",
+          padding: 72,
         }}
       >
+        {/* 左のアクセント */}
         <div
           style={{
             position: "absolute",
-            inset: 0,
-            background:
-              "radial-gradient(circle at 20% 30%, rgba(99,102,241,0.35), transparent 55%), radial-gradient(circle at 80% 70%, rgba(16,185,129,0.25), transparent 55%)",
+            left: 56,
+            top: 56,
+            bottom: 56,
+            width: 8,
+            borderRadius: 999,
+            background: "linear-gradient(180deg, #60a5fa 0%, #34d399 100%)",
+            opacity: 0.95,
           }}
         />
-        <div style={{ position: "relative", display: "flex", gap: "22px" }}>
+
+        <div style={{ width: "100%", maxWidth: 980 }}>
           <div
             style={{
-              width: 14,
-              borderRadius: 999,
-              background: "linear-gradient(180deg, #6366f1, #10b981)",
+              fontSize: 76,
+              fontWeight: 800,
+              letterSpacing: -1,
+              lineHeight: 1.05,
             }}
-          />
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ fontSize: 64, fontWeight: 800, letterSpacing: -1 }}>
-              Swipe Video Feed
-            </div>
-            <div style={{ fontSize: 28, opacity: 0.9 }}>
-              縦スワイプでショート動画を連続視聴
-            </div>
-            <div
-              style={{
-                marginTop: 18,
-                display: "flex",
-                gap: 12,
-                alignItems: "center",
-              }}
-            >
+          >
+            Swipe Video Feed
+          </div>
+
+          <div style={{ marginTop: 22, fontSize: 30, opacity: 0.9 }}>
+            縦スワイプでショート動画を連続視聴
+          </div>
+
+          <div
+            style={{
+              marginTop: 34,
+              display: "flex",
+              gap: 12,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            {["Next.js", "TikTok風UI", "Swipe"].map((t) => (
               <div
+                key={t}
                 style={{
-                  padding: "10px 16px",
+                  padding: "10px 14px",
                   borderRadius: 999,
-                  background: "rgba(255,255,255,0.10)",
-                  border: "1px solid rgba(255,255,255,0.18)",
-                  fontSize: 18,
+                  border: "1px solid rgba(255,255,255,0.22)",
+                  background: "rgba(255,255,255,0.06)",
+                  fontSize: 20,
+                  opacity: 0.92,
                 }}
               >
-                Next.js
+                {t}
               </div>
-              <div
-                style={{
-                  padding: "10px 16px",
-                  borderRadius: 999,
-                  background: "rgba(255,255,255,0.10)",
-                  border: "1px solid rgba(255,255,255,0.18)",
-                  fontSize: 18,
-                }}
-              >
-                TikTok風UI
-              </div>
-              <div
-                style={{
-                  padding: "10px 16px",
-                  borderRadius: 999,
-                  background: "rgba(255,255,255,0.10)",
-                  border: "1px solid rgba(255,255,255,0.18)",
-                  fontSize: 18,
-                }}
-              >
-                Swipe
-              </div>
-            </div>
+            ))}
           </div>
         </div>
 
         <div
           style={{
             position: "absolute",
-            right: 28,
-            bottom: 24,
+            right: 48,
+            bottom: 40,
             fontSize: 18,
-            opacity: 0.7,
+            opacity: 0.6,
           }}
         >
-          swipe-video-feed.vercel.app
+          {HOST}
         </div>
       </div>
     ),
