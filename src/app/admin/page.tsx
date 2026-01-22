@@ -2,24 +2,37 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import type { VideoItem } from "@/lib/types";
+
+type VideoItem = {
+  id: string;
+  title: string;
+  url: string;
+  poster?: string;
+  affUrl?: string;
+  affLabel?: string;
+  createdAt: number;
+};
 
 export default function AdminPage() {
   const [items, setItems] = useState<VideoItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  // form
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [poster, setPoster] = useState("");
-  const [affiliateUrl, setAffiliateUrl] = useState("");
-  const [affiliateLabel, setAffiliateLabel] = useState("");
+  const [affUrl, setAffUrl] = useState("");
+  const [affLabel, setAffLabel] = useState("");
+
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   async function load() {
+    setErr(null);
     const r = await fetch("/api/videos", { cache: "no-store" });
     const j = await r.json().catch(() => null);
-    if (j?.ok) setItems(j.items ?? []);
+    if (!r.ok || !j?.ok) {
+      setErr(j?.error ?? "load failed");
+      return;
+    }
+    setItems(Array.isArray(j.items) ? j.items : []);
   }
 
   useEffect(() => {
@@ -29,8 +42,7 @@ export default function AdminPage() {
   async function onAdd(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
-    setLoading(true);
-
+    setBusy(true);
     try {
       const r = await fetch("/api/videos", {
         method: "POST",
@@ -38,50 +50,52 @@ export default function AdminPage() {
         body: JSON.stringify({
           title,
           url,
-          poster: poster.trim() ? poster : undefined,
-          affiliateUrl: affiliateUrl.trim() ? affiliateUrl : undefined,
-          affiliateLabel: affiliateLabel.trim() ? affiliateLabel : undefined,
+          poster: poster || undefined,
+          affUrl: affUrl || undefined,
+          affLabel: affLabel || undefined,
         }),
       });
+
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) {
         setErr(j?.error ?? `add failed (${r.status})`);
-        setLoading(false);
         return;
       }
 
       setTitle("");
       setUrl("");
       setPoster("");
-      setAffiliateUrl("");
-      setAffiliateLabel("");
-
+      setAffUrl("");
+      setAffLabel("");
       await load();
-    } catch (e: any) {
-      setErr(e?.message ?? "network error");
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   }
 
   async function onDelete(id: string) {
-    if (!confirm("削除する？")) return;
+    if (!id) {
+      setErr("idが必要");
+      return;
+    }
 
     setErr(null);
+    setBusy(true);
     try {
-      const r = await fetch("/api/videos", {
+      // ✅ bodyじゃなく query で送る（これで “idが必要” が消える）
+      const r = await fetch(`/api/videos?id=${encodeURIComponent(id)}`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
       });
+
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) {
         setErr(j?.error ?? `delete failed (${r.status})`);
         return;
       }
+
       await load();
-    } catch (e: any) {
-      setErr(e?.message ?? "network error");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -90,8 +104,9 @@ export default function AdminPage() {
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Admin</h1>
         <button
-          className="px-4 py-2 rounded bg-white text-black font-bold"
+          className="px-4 py-2 rounded bg-white text-black font-semibold"
           onClick={() => load()}
+          disabled={busy}
         >
           更新
         </button>
@@ -107,44 +122,39 @@ export default function AdminPage() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
-
           <input
             className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
             placeholder="動画URL（mp4 / m3u8）"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />
-
           <input
             className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
             placeholder="ポスターURL（任意）"
             value={poster}
             onChange={(e) => setPoster(e.target.value)}
           />
-
           <input
             className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
             placeholder="アフィURL（任意）"
-            value={affiliateUrl}
-            onChange={(e) => setAffiliateUrl(e.target.value)}
+            value={affUrl}
+            onChange={(e) => setAffUrl(e.target.value)}
           />
-
           <input
             className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
-            placeholder="アフィ文言（任意：例『続きはこちら』）"
-            value={affiliateLabel}
-            onChange={(e) => setAffiliateLabel(e.target.value)}
+            placeholder="アフィ文言（任意：例「商品を見る」）"
+            value={affLabel}
+            onChange={(e) => setAffLabel(e.target.value)}
           />
 
           <button
-            disabled={loading}
-            className="px-4 py-3 rounded bg-white text-black font-bold disabled:opacity-60"
-            type="submit"
+            className="w-full px-4 py-3 rounded bg-white text-black font-bold"
+            disabled={busy}
           >
-            {loading ? "..." : "追加"}
+            追加
           </button>
 
-          {err ? <p className="text-red-400 text-sm">{err}</p> : null}
+          {err && <p className="text-red-400 text-sm">{err}</p>}
         </form>
       </section>
 
@@ -155,24 +165,25 @@ export default function AdminPage() {
           {items.map((v) => (
             <div
               key={v.id}
-              className="rounded-xl bg-neutral-800 p-3 flex items-start justify-between gap-3"
+              className="rounded-2xl bg-neutral-950 border border-neutral-800 p-4 flex items-start justify-between gap-4"
             >
               <div className="min-w-0">
-                <div className="font-bold break-words">{v.title}</div>
-                <div className="text-xs text-neutral-300 break-words">{v.url}</div>
-
-                {v.affiliateUrl ? (
-                  <div className="mt-2 text-xs text-green-300 break-words">
-                    AFF: {v.affiliateLabel ?? "（labelなし）"} / {v.affiliateUrl}
+                <div className="font-bold">{v.title}</div>
+                <div className="text-xs text-neutral-300 break-all">{v.url}</div>
+                <div className="text-xs text-neutral-500 mt-1 break-all">
+                  id: {v.id}
+                </div>
+                {v.affUrl && (
+                  <div className="text-xs text-green-400 mt-1 break-all">
+                    AFF: {(v.affLabel ?? "labelなし")} / {v.affUrl}
                   </div>
-                ) : (
-                  <div className="mt-2 text-xs text-neutral-400">AFF: なし</div>
                 )}
               </div>
 
               <button
-                className="shrink-0 px-3 py-2 rounded bg-red-500 text-white font-bold"
+                className="shrink-0 px-4 py-2 rounded bg-red-600 font-bold"
                 onClick={() => onDelete(v.id)}
+                disabled={busy}
               >
                 削除
               </button>
