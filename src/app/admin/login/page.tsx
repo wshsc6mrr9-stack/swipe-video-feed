@@ -1,6 +1,7 @@
+// src/app/admin/login/page.tsx
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 
 export default function AdminLoginPage() {
@@ -30,7 +31,6 @@ export default function AdminLoginPage() {
         return;
       }
 
-      // ✅ Cookie付いた前提で /admin へ
       router.replace("/admin");
       router.refresh();
     } catch (e: any) {

@@ -1,15 +1,12 @@
 // src/app/api/admin/login/route.ts
 import { NextResponse } from "next/server";
 
-const COOKIE_NAME = "admin_auth";
-
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const password = typeof body?.password === "string" ? body.password : "";
 
   const adminPassword = process.env.ADMIN_PASSWORD;
-
-  if (!adminPassword || !adminPassword.trim()) {
+  if (!adminPassword) {
     return NextResponse.json(
       { ok: false, error: "ADMIN_PASSWORD is not set on server" },
       { status: 500 }
@@ -22,19 +19,15 @@ export async function POST(req: Request) {
 
   const res = NextResponse.json({ ok: true });
 
-  // ✅ ローカル(http)では secure=false / 本番(https)では secure=true
-  const secure = process.env.NODE_ENV === "production";
-
   res.cookies.set({
-    name: COOKIE_NAME,
+    name: "admin_auth",
     value: "1",
     httpOnly: true,
     sameSite: "lax",
-    secure,
+    secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 60 * 60 * 24 * 7, // 7日
   });
 
-  res.headers.set("Cache-Control", "no-store");
   return res;
 }
