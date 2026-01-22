@@ -1,21 +1,19 @@
-import "./globals.css";
 import type { Metadata } from "next";
+import "./globals.css";
 
-const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL?.trim() || "http://localhost:3000";
+const siteUrl = "https://swipe-video-feed.vercel.app";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
-  title: {
-    default: "Swipe Video Feed",
-    template: "%s | Swipe Video Feed",
-  },
+  title: "Swipe Video Feed",
   description: "縦スワイプでショート動画を連続視聴できるフィード。",
+  metadataBase: new URL(siteUrl),
+
   openGraph: {
-    type: "website",
-    url: siteUrl,
     title: "Swipe Video Feed",
     description: "縦スワイプでショート動画を連続視聴できるフィード。",
+    url: siteUrl,
+    siteName: "Swipe Video Feed",
+    type: "website",
     images: [
       {
         url: "/opengraph-image",
@@ -25,15 +23,12 @@ export const metadata: Metadata = {
       },
     ],
   },
+
   twitter: {
     card: "summary_large_image",
     title: "Swipe Video Feed",
     description: "縦スワイプでショート動画を連続視聴できるフィード。",
     images: ["/twitter-image"],
-  },
-  robots: {
-    index: true,
-    follow: true,
   },
 };
 
@@ -44,7 +39,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja">
-      <body className="min-h-[100svh] bg-black text-white">{children}</body>
+      <body>{children}</body>
     </html>
   );
 }

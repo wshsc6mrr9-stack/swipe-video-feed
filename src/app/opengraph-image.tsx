@@ -5,18 +5,7 @@ export const alt = "Swipe Video Feed";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL || "https://swipe-video-feed.vercel.app";
-
-const HOST = (() => {
-  try {
-    return new URL(SITE_URL).host;
-  } catch {
-    return "swipe-video-feed.vercel.app";
-  }
-})();
-
-export default function Image() {
+export default function OGImage() {
   return new ImageResponse(
     (
       <div
@@ -24,83 +13,67 @@ export default function Image() {
           width: "100%",
           height: "100%",
           display: "flex",
+          flexDirection: "column",
           justifyContent: "center",
-          alignItems: "center",
-          background: "linear-gradient(135deg, #0b1220 0%, #000000 65%)",
-          color: "#fff",
-          fontFamily:
-            'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial',
-          position: "relative",
           padding: 72,
+          background:
+            "radial-gradient(900px 600px at 20% 25%, rgba(56,189,248,0.20), rgba(0,0,0,0)), radial-gradient(900px 600px at 80% 10%, rgba(34,197,94,0.18), rgba(0,0,0,0)), linear-gradient(180deg, #0b1220 0%, #0a1020 100%)",
+          color: "#e5e7eb",
+          boxSizing: "border-box",
+          position: "relative",
+          overflow: "hidden",
         }}
       >
-        {/* 左のアクセント */}
+        {/* accent bar */}
         <div
           style={{
             position: "absolute",
-            left: 56,
-            top: 56,
-            bottom: 56,
-            width: 8,
+            left: 40,
+            top: 90,
+            width: 10,
+            height: 220,
             borderRadius: 999,
-            background: "linear-gradient(180deg, #60a5fa 0%, #34d399 100%)",
-            opacity: 0.95,
+            background: "linear-gradient(180deg, #22c55e 0%, #38bdf8 100%)",
+            boxShadow: "0 0 30px rgba(56,189,248,0.25)",
           }}
         />
 
-        <div style={{ width: "100%", maxWidth: 980 }}>
-          <div
-            style={{
-              fontSize: 76,
-              fontWeight: 800,
-              letterSpacing: -1,
-              lineHeight: 1.05,
-            }}
-          >
-            Swipe Video Feed
-          </div>
+        <div style={{ fontSize: 74, fontWeight: 800, letterSpacing: -1 }}>
+          Swipe Video Feed
+        </div>
 
-          <div style={{ marginTop: 22, fontSize: 30, opacity: 0.9 }}>
-            縦スワイプでショート動画を連続視聴
-          </div>
+        <div style={{ marginTop: 18, fontSize: 30, opacity: 0.9 }}>
+          縦スワイプでショート動画を連続視聴
+        </div>
 
-          <div
-            style={{
-              marginTop: 34,
-              display: "flex",
-              gap: 12,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            {["Next.js", "TikTok風UI", "Swipe"].map((t) => (
-              <div
-                key={t}
-                style={{
-                  padding: "10px 14px",
-                  borderRadius: 999,
-                  border: "1px solid rgba(255,255,255,0.22)",
-                  background: "rgba(255,255,255,0.06)",
-                  fontSize: 20,
-                  opacity: 0.92,
-                }}
-              >
-                {t}
-              </div>
-            ))}
-          </div>
+        <div style={{ marginTop: 28, display: "flex", gap: 12 }}>
+          {["Next.js", "TikTok風UI", "Swipe"].map((t) => (
+            <div
+              key={t}
+              style={{
+                fontSize: 20,
+                padding: "10px 14px",
+                borderRadius: 999,
+                background: "rgba(255,255,255,0.10)",
+                border: "1px solid rgba(255,255,255,0.14)",
+                color: "#e5e7eb",
+              }}
+            >
+              {t}
+            </div>
+          ))}
         </div>
 
         <div
           style={{
             position: "absolute",
-            right: 48,
-            bottom: 40,
+            right: 44,
+            bottom: 34,
             fontSize: 18,
-            opacity: 0.6,
+            opacity: 0.55,
           }}
         >
-          {HOST}
+          swipe-video-feed.vercel.app
         </div>
       </div>
     ),
