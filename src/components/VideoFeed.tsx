@@ -249,27 +249,7 @@ export default function VideoFeed() {
         touchAction: "none",
       }}
     >
-      {/* ✅ 反映チェック：ど真ん中 */}
-      <div
-        style={{
-          position: "absolute",
-          left: "50%",
-          top: "50%",
-          transform: "translate(-50%, -50%)",
-          zIndex: 9999,
-          padding: "10px 14px",
-          borderRadius: 14,
-          background: "rgba(255,255,255,0.20)",
-          color: "#fff",
-          fontWeight: 900,
-          fontSize: 18,
-          letterSpacing: 1,
-          pointerEvents: "none", // 操作を邪魔しない
-          backdropFilter: "blur(6px)",
-        }}
-      >
-        {BUILD}
-      </div>
+   
 
       {loading && (
         <div

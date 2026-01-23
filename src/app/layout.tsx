@@ -37,25 +37,7 @@ export default function RootLayout({
     <html lang="ja">
       {/* iPhoneで“ページごと指に付いてくる”のを止める */}
       <body className="overflow-hidden overscroll-none">
-        {/* 反映確認用：左上に BUILD_0124 が出る */}
-        <div
-          style={{
-            position: "fixed",
-            top: 10,
-            left: 10,
-            zIndex: 999999,
-            padding: "6px 10px",
-            borderRadius: 10,
-            fontSize: 12,
-            background: "rgba(0,0,0,0.55)",
-            color: "#fff",
-            backdropFilter: "blur(6px)",
-            WebkitBackdropFilter: "blur(6px)",
-            pointerEvents: "none",
-          }}
-        >
-          BUILD_{BUILD}
-        </div>
+      
 
         {children}
       </body>
