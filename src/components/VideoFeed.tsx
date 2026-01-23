@@ -12,6 +12,7 @@ type ApiVideoItem = {
   srcType?: "mp4" | "hls";
   createdAt?: number;
 
+  // 互換（どっちでも来る可能性）
   affUrl?: string;
   affLabel?: string;
   affiliateUrl?: string;
@@ -76,19 +77,22 @@ export default function VideoFeed() {
   const [dragY, setDragY] = useState(0);
   const draggingRef = useRef(false);
 
-  // swipeを“掴んで離す”を確実にするため PointerCapture を使う
-  const pointer = useRef({
-    id: -1,
+  const touch = useRef({
     startY: 0,
     startX: 0,
     lastY: 0,
     startTime: 0,
     active: false,
     blocked: false,
-    lockedAxis: "" as "" | "y" | "x",
   });
 
-  // indexRef 同期
+  // ✅ 左上「ジャンル」用（見た目復活）
+  const [genreOpen, setGenreOpen] = useState(false);
+  const [selectedGenre, setSelectedGenre] = useState<string>("ランダム");
+
+  // ✅ 右上「…」用（見た目復活）
+  const [moreOpen, setMoreOpen] = useState(false);
+
   useEffect(() => {
     indexRef.current = index;
   }, [index]);
@@ -118,7 +122,7 @@ export default function VideoFeed() {
     fetchVideos();
   }, [fetchVideos]);
 
-  // bodyスクロール完全停止（iOS対策：位置も固定してrubberbandを消す）
+  // bodyスクロール完全停止（iOS対策）
   useEffect(() => {
     const html = document.documentElement;
     const body = document.body;
@@ -129,13 +133,11 @@ export default function VideoFeed() {
     const prevBodyWidth = body.style.width;
     const prevBodyTop = body.style.top;
 
-    const scrollY = window.scrollY || 0;
-
     html.style.overflow = "hidden";
     body.style.overflow = "hidden";
     body.style.position = "fixed";
     body.style.width = "100%";
-    body.style.top = `-${scrollY}px`;
+    body.style.top = "0";
 
     const updateVh = () => setVh(window.innerHeight);
     window.addEventListener("resize", updateVh);
@@ -150,14 +152,12 @@ export default function VideoFeed() {
       body.style.position = prevBodyPosition;
       body.style.width = prevBodyWidth;
       body.style.top = prevBodyTop;
-
-      window.scrollTo(0, scrollY);
     };
   }, []);
 
   const go = useCallback(
     (nextIndex: number) => {
-      setIndex((prev) => {
+      setIndex(() => {
         const max = items.length - 1;
         const clamped = Math.max(0, Math.min(max, nextIndex));
         indexRef.current = clamped;
@@ -182,7 +182,7 @@ export default function VideoFeed() {
       lock = true;
       if (e.deltaY > 0) next();
       else prev();
-      setTimeout(() => (lock = false), 300);
+      setTimeout(() => (lock = false), 350);
     };
 
     el.addEventListener("wheel", onWheel, { passive: true });
@@ -199,91 +199,62 @@ export default function VideoFeed() {
     return () => window.removeEventListener("keydown", onKey);
   }, [next, prev]);
 
-  // ✅ iPhone/Android：Pointer Eventsで“確実に”スワイプ判定
+  // タッチ（iPhone）：軽いスワイプでも確実に反応
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    const onPointerDown = (e: PointerEvent) => {
-      // 右クリック等は無視
-      if (typeof (e as any).button === "number" && (e as any).button !== 0) return;
+    const onTouchStart = (e: TouchEvent) => {
+      // メニュー開いてる間はスワイプ開始しない
+      if (genreOpen || moreOpen) {
+        touch.current.blocked = true;
+        return;
+      }
 
       if (isInteractiveTarget(e.target)) {
-        pointer.current.blocked = true;
+        touch.current.blocked = true;
         return;
       }
-      pointer.current.blocked = false;
+      touch.current.blocked = false;
 
-      pointer.current.id = e.pointerId;
-      pointer.current.startY = e.clientY;
-      pointer.current.startX = e.clientX;
-      pointer.current.lastY = e.clientY;
-      pointer.current.startTime = performance.now();
-      pointer.current.active = true;
-      pointer.current.lockedAxis = "";
+      const t = e.touches[0];
+      touch.current.startY = t.clientY;
+      touch.current.startX = t.clientX;
+      touch.current.lastY = t.clientY;
+      touch.current.startTime = performance.now();
+      touch.current.active = true;
       draggingRef.current = false;
       setDragY(0);
-
-      // ここが肝：指が外に行ってもイベントを取り続ける
-      try {
-        (e.target as Element | null)?.setPointerCapture?.(e.pointerId);
-      } catch {}
     };
 
-    const onPointerMove = (e: PointerEvent) => {
-      if (!pointer.current.active) return;
-      if (pointer.current.blocked) return;
-      if (e.pointerId !== pointer.current.id) return;
+    const onTouchMove = (e: TouchEvent) => {
+      if (!touch.current.active) return;
+      if (touch.current.blocked) return;
 
-      const dy = e.clientY - pointer.current.startY;
-      const dx = e.clientX - pointer.current.startX;
+      const t = e.touches[0];
+      const dy = t.clientY - touch.current.startY;
+      const dx = t.clientX - touch.current.startX;
 
-      // 早めに方向ロック（少し動いたら決め打ち）
-      if (!pointer.current.lockedAxis) {
-        if (Math.abs(dy) + Math.abs(dx) < 6) return;
-        pointer.current.lockedAxis = Math.abs(dy) >= Math.abs(dx) ? "y" : "x";
-      }
-
-      // 縦ロックなら、ブラウザスクロールを完全に殺してドラッグ追従
-      if (pointer.current.lockedAxis === "y") {
-        // iOSでスクロールに奪われるのを防ぐ
-        e.preventDefault?.();
+      if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 6) {
         draggingRef.current = true;
-
-        // 抵抗（少し軽くする：指に付いてくる感は残しつつ）
-        const resistance = 0.92;
-        setDragY(dy * resistance);
+        e.preventDefault(); // iPhoneの「ページが指に付く」を止める
+        setDragY(dy);
       }
 
-      pointer.current.lastY = e.clientY;
+      touch.current.lastY = t.clientY;
     };
 
-    const finish = (e?: PointerEvent) => {
-      if (!pointer.current.active) return;
-      if (pointer.current.blocked) {
-        pointer.current.active = false;
-        pointer.current.blocked = false;
-        pointer.current.lockedAxis = "";
-        return;
-      }
-
-      const dy = pointer.current.lastY - pointer.current.startY;
-      const dt = Math.max(1, performance.now() - pointer.current.startTime);
+    const onTouchEnd = () => {
+      if (!touch.current.active) return;
+      const dy = touch.current.lastY - touch.current.startY;
+      const dt = Math.max(1, performance.now() - touch.current.startTime);
       const velocity = Math.abs(dy) / dt; // px/ms
 
-      const absDy = Math.abs(dy);
+      touch.current.active = false;
 
-      // ✅ ここを“かなり軽く”する（勢い不要に寄せる）
-      // 距離：画面の 12% 以上 or 48px
-      // 速度：0.18px/ms 以上なら距離が短くてもOK
-      const DIST = Math.max(48, vh * 0.12);
-      const FAST = 0.18;
-
-      const shouldMove =
-        pointer.current.lockedAxis === "y" &&
-        (absDy > DIST || velocity > FAST);
-
-      pointer.current.active = false;
+      const DIST = 45;
+      const FAST = 0.28;
+      const shouldMove = Math.abs(dy) > DIST || velocity > FAST;
 
       if (draggingRef.current && shouldMove) {
         if (dy < 0) next();
@@ -291,33 +262,46 @@ export default function VideoFeed() {
       }
 
       draggingRef.current = false;
-      pointer.current.lockedAxis = "";
       setDragY(0);
-
-      if (e && typeof e.pointerId === "number") {
-        try {
-          (e.target as Element | null)?.releasePointerCapture?.(e.pointerId);
-        } catch {}
-      }
     };
 
-    el.addEventListener("pointerdown", onPointerDown, { passive: true });
-    // move/up は preventDefault するので passive:false
-    el.addEventListener("pointermove", onPointerMove, { passive: false });
-    el.addEventListener("pointerup", finish as any, { passive: true });
-    el.addEventListener("pointercancel", finish as any, { passive: true });
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false }); // preventDefault有効化
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
 
     return () => {
-      el.removeEventListener("pointerdown", onPointerDown as any);
-      el.removeEventListener("pointermove", onPointerMove as any);
-      el.removeEventListener("pointerup", finish as any);
-      el.removeEventListener("pointercancel", finish as any);
+      el.removeEventListener("touchstart", onTouchStart as any);
+      el.removeEventListener("touchmove", onTouchMove as any);
+      el.removeEventListener("touchend", onTouchEnd as any);
+      el.removeEventListener("touchcancel", onTouchEnd as any);
     };
-  }, [next, prev, vh]);
+  }, [next, prev, genreOpen, moreOpen]);
 
   const translateY = useMemo(() => {
     return -index * vh + dragY;
   }, [index, vh, dragY]);
+
+  // ✅ ジャンル一覧（itemsから自動生成）
+  const genres = useMemo(() => {
+    const set = new Set<string>();
+    for (const v of items) {
+      if (typeof v.genre === "string" && v.genre.trim()) set.add(v.genre.trim());
+    }
+    return ["ランダム", ...Array.from(set)];
+  }, [items]);
+
+  // ✅ ジャンルフィルタ（ランダムなら全件）
+  const visibleItems = useMemo(() => {
+    if (selectedGenre === "ランダム") return items;
+    return items.filter((v) => (v.genre || "").trim() === selectedGenre);
+  }, [items, selectedGenre]);
+
+  // フィルタで件数変わったら index を安全に戻す
+  useEffect(() => {
+    setIndex((prev) => Math.min(prev, Math.max(0, visibleItems.length - 1)));
+    indexRef.current = Math.min(indexRef.current, Math.max(0, visibleItems.length - 1));
+  }, [visibleItems.length]);
 
   return (
     <div
@@ -329,14 +313,150 @@ export default function VideoFeed() {
         width: "100vw",
         overflow: "hidden",
         background: "black",
-
-        // ✅ iOS Safari 対策セット
-        touchAction: "none", // pointer events を自前に
-        overscrollBehavior: "none",
-        WebkitUserSelect: "none",
-        WebkitTouchCallout: "none",
+        touchAction: "none",
+      }}
+      onClick={() => {
+        // 背景タップでメニュー閉じる
+        if (genreOpen) setGenreOpen(false);
+        if (moreOpen) setMoreOpen(false);
       }}
     >
+      {/* ✅ 左上：ジャンル（見た目復活） */}
+      <div
+        data-no-swipe="1"
+        style={{ position: "absolute", top: 12, left: 12, zIndex: 80 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          data-no-swipe="1"
+          onClick={() => {
+            setMoreOpen(false);
+            setGenreOpen((v) => !v);
+          }}
+          style={{
+            padding: "8px 12px",
+            borderRadius: 999,
+            background: "rgba(255,255,255,0.12)",
+            color: "#fff",
+            border: "1px solid rgba(255,255,255,0.15)",
+            fontWeight: 800,
+          }}
+        >
+          {selectedGenre}
+        </button>
+
+        {genreOpen && (
+          <div
+            data-no-swipe="1"
+            style={{
+              marginTop: 8,
+              width: 180,
+              borderRadius: 14,
+              overflow: "hidden",
+              background: "rgba(20,20,20,0.92)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+            }}
+          >
+            {genres.map((g) => (
+              <button
+                key={g}
+                data-no-swipe="1"
+                onClick={() => {
+                  setSelectedGenre(g);
+                  setGenreOpen(false);
+                  setIndex(0);
+                  indexRef.current = 0;
+                }}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "10px 12px",
+                  background: g === selectedGenre ? "rgba(255,255,255,0.12)" : "transparent",
+                  color: "#fff",
+                  border: "none",
+                }}
+              >
+                {g}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ✅ 右上：…（見た目復活） */}
+      <div
+        data-no-swipe="1"
+        style={{ position: "absolute", top: 12, right: 12, zIndex: 80 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          data-no-swipe="1"
+          onClick={() => {
+            setGenreOpen(false);
+            setMoreOpen((v) => !v);
+          }}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 999,
+            background: "rgba(255,255,255,0.12)",
+            color: "#fff",
+            border: "1px solid rgba(255,255,255,0.15)",
+            fontWeight: 900,
+            fontSize: 18,
+            lineHeight: "40px",
+          }}
+          aria-label="more"
+        >
+          …
+        </button>
+
+        {moreOpen && (
+          <div
+            data-no-swipe="1"
+            style={{
+              marginTop: 8,
+              width: 200,
+              borderRadius: 14,
+              overflow: "hidden",
+              background: "rgba(20,20,20,0.92)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+              transform: "translateX(-160px)",
+            }}
+          >
+            <button
+              data-no-swipe="1"
+              onClick={() => {
+                setMoreOpen(false);
+                fetchVideos();
+              }}
+              style={menuBtn}
+            >
+              再読み込み
+            </button>
+            <a
+              data-no-swipe="1"
+              href="/admin"
+              style={{ ...menuBtn, display: "block", textDecoration: "none" } as any}
+              onClick={() => setMoreOpen(false)}
+            >
+              管理画面へ
+            </a>
+            <button
+              data-no-swipe="1"
+              onClick={() => {
+                setMoreOpen(false);
+              }}
+              style={menuBtn}
+            >
+              閉じる
+            </button>
+          </div>
+        )}
+      </div>
+
       {loading && (
         <div
           style={{
@@ -380,16 +500,16 @@ export default function VideoFeed() {
         </div>
       )}
 
-      {/* TikTok風：縦に積んで translateY */}
+      {/* 本体：縦に積んで translateY で移動 */}
       <div
         style={{
-          height: vh * Math.max(1, items.length),
+          height: vh * Math.max(1, visibleItems.length),
           transform: `translate3d(0, ${translateY}px, 0)`,
-          transition: draggingRef.current ? "none" : "transform 220ms ease-out",
+          transition: draggingRef.current ? "none" : "transform 240ms ease-out",
           willChange: "transform",
         }}
       >
-        {items.map((v, i) => {
+        {visibleItems.map((v, i) => {
           const isActive = i === index;
           return (
             <div key={v.id} style={{ height: vh, width: "100vw" }}>
@@ -401,3 +521,12 @@ export default function VideoFeed() {
     </div>
   );
 }
+
+const menuBtn: React.CSSProperties = {
+  width: "100%",
+  textAlign: "left",
+  padding: "10px 12px",
+  background: "transparent",
+  color: "#fff",
+  border: "none",
+};

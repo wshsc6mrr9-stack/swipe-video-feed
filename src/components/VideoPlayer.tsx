@@ -2,32 +2,19 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Hls from "hls.js";
-
-type VideoMeta = {
-  id: string;
-  title: string;
-
-  url?: string;
-  src?: string;
-  poster?: string;
-
-  affUrl?: string;
-  affLabel?: string;
-  affiliateUrl?: string;
-  affiliateLabel?: string;
-};
+import type { VideoMeta } from "@/lib/types";
 
 type Props = {
   video: VideoMeta;
   isActive?: boolean;
 };
 
-function getUrl(video: VideoMeta) {
-  return video.url ?? video.src ?? "";
+function isHlsUrl(url?: string) {
+  return !!url && url.includes(".m3u8");
 }
 
-function isHls(url: string) {
-  return /\.m3u8(\?|#|$)/i.test(url);
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
 }
 
 function formatTime(t: number) {
@@ -38,20 +25,20 @@ function formatTime(t: number) {
 }
 
 export default function VideoPlayer({ video, isActive = false }: Props) {
-  const url = useMemo(() => getUrl(video), [video]);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
+
+  const src = (video.url ?? (video as any).src ?? "") as string;
 
   const [ready, setReady] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
-  const [volume, setVolume] = useState(0.8);
 
-  const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [current, setCurrent] = useState(0);
 
-  const affUrl = (video as any).affUrl ?? (video as any).affiliateUrl;
-  const affLabel = (video as any).affLabel ?? (video as any).affiliateLabel;
+  const affUrl = (video as any).affUrl as string | undefined;
+  const affLabel = ((video as any).affLabel as string | undefined) || "商品を見る";
 
   // HLS attach
   useEffect(() => {
@@ -60,85 +47,73 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
     setReady(false);
 
-    // cleanup old
-    if (hlsRef.current) {
-      try {
-        hlsRef.current.destroy();
-      } catch {}
+    // reset
+    try {
+      hlsRef.current?.destroy();
       hlsRef.current = null;
-    }
+    } catch {}
 
-    // iOS Safari は native HLS が多い
-    if (isHls(url) && Hls.isSupported()) {
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-      });
-      hlsRef.current = hls;
-      hls.loadSource(url);
-      hls.attachMedia(el);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => setReady(true));
-      hls.on(Hls.Events.ERROR, () => {
-        // 失敗しても video src fallback
-        try {
-          el.src = url;
-        } catch {}
+    if (isHlsUrl(src)) {
+      if (Hls.isSupported()) {
+        const hls = new Hls({ lowLatencyMode: true });
+        hlsRef.current = hls;
+        hls.loadSource(src);
+        hls.attachMedia(el);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => setReady(true));
+      } else {
+        // Safari native HLS
+        el.src = src;
         setReady(true);
-      });
+      }
     } else {
-      el.src = url;
+      el.src = src;
       setReady(true);
     }
 
     return () => {
-      if (hlsRef.current) {
-        try {
-          hlsRef.current.destroy();
-        } catch {}
+      try {
+        hlsRef.current?.destroy();
         hlsRef.current = null;
-      }
+      } catch {}
     };
-  }, [url]);
+  }, [src]);
 
-  // active切り替え
+  // active video autoplay
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
 
-    if (isActive) {
-      // iPhone対策：playsInline + muted で自動再生通しやすい
-      el.muted = muted;
-      el.volume = volume;
+    el.muted = muted;
 
-      const p = el.play();
-      if (p && typeof (p as any).catch === "function") {
-        (p as any).catch(() => {
-          // 自動再生失敗は一旦止める（タップ待ち）
-          setPlaying(false);
-        });
-      }
-      setPlaying(true);
-    } else {
-      try {
-        el.pause();
-      } catch {}
+    if (!isActive) {
+      el.pause();
       setPlaying(false);
-      setCurrent(0);
+      return;
     }
-  }, [isActive, muted, volume]);
 
-  // time update
+    // iOSで確実に
+    const play = async () => {
+      try {
+        await el.play();
+        setPlaying(true);
+      } catch {
+        setPlaying(false);
+      }
+    };
+
+    play();
+  }, [isActive, muted]);
+
+  // events
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
 
     const onLoaded = () => {
-      setDuration(el.duration || 0);
+      setDuration(Number.isFinite(el.duration) ? el.duration : 0);
+      setReady(true);
     };
-    const onTime = () => {
-      setCurrent(el.currentTime || 0);
-      setDuration(el.duration || 0);
-    };
+    const onTime = () => setCurrent(el.currentTime || 0);
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
 
@@ -155,13 +130,17 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     };
   }, []);
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     const el = videoRef.current;
     if (!el) return;
     if (el.paused) {
-      el.play().catch(() => {});
+      try {
+        await el.play();
+        setPlaying(true);
+      } catch {}
     } else {
       el.pause();
+      setPlaying(false);
     }
   };
 
@@ -171,159 +150,145 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     const next = !muted;
     setMuted(next);
     el.muted = next;
-    if (!next) el.volume = volume;
   };
 
   const seekTo = (t: number) => {
     const el = videoRef.current;
     if (!el) return;
-    const d = el.duration || 0;
-    const next = Math.max(0, Math.min(d || 0, t));
-    el.currentTime = next;
-    setCurrent(next);
+    el.currentTime = clamp(t, 0, duration || 0);
   };
 
-  const jump = (delta: number) => {
-    const el = videoRef.current;
-    if (!el) return;
-    seekTo((el.currentTime || 0) + delta);
+  const skip = (sec: number) => {
+    seekTo(current + sec);
   };
+
+  const titleText = useMemo(() => {
+    // 「タイトルがURLになってる」ケースがあるので、そのまま表示
+    return video.title || src || "";
+  }, [video.title, src]);
 
   return (
-    <div className="relative h-full w-full bg-black">
+    <div style={{ position: "relative", width: "100%", height: "100%", background: "black" }}>
       {/* video */}
       <video
         ref={videoRef}
-        className="absolute inset-0 h-full w-full object-contain bg-black"
         playsInline
-        // @ts-ignore
-        webkit-playsinline="true"
         muted={muted}
         preload="auto"
+        style={{
+          width: "100%",
+          height: "100%",
+          objectFit: "contain",
+          background: "black",
+        }}
         onClick={togglePlay}
       />
 
-      {/* タイトル（上） */}
-      <div className="absolute top-3 left-3 right-3 z-20 text-white text-sm drop-shadow">
-        {video?.title ?? ""}
-      </div>
+      {/* loading */}
+      {!ready && (
+        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#fff" }}>
+          Loading...
+        </div>
+      )}
 
-      {/* 下UI */}
-      <div className="absolute left-0 right-0 bottom-0 z-30 p-3 pb-5">
-        {/* 上段：±秒ボタン + アフィ */}
-        <div className="flex items-center gap-2 mb-2">
-          <button
-            className="rounded-lg bg-white/20 text-white px-3 py-2 text-sm"
-            onClick={() => jump(-10)}
-          >
-            -10
-          </button>
-          <button
-            className="rounded-lg bg-white/20 text-white px-3 py-2 text-sm"
-            onClick={() => jump(-5)}
-          >
-            -5
-          </button>
-          <button
-            className="rounded-lg bg-white/20 text-white px-3 py-2 text-sm"
-            onClick={() => jump(5)}
-          >
-            +5
-          </button>
-          <button
-            className="rounded-lg bg-white/20 text-white px-3 py-2 text-sm"
-            onClick={() => jump(10)}
-          >
-            +10
-          </button>
+      {/* controls */}
+      <div
+        data-no-swipe="1"
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          padding: 12,
+          display: "grid",
+          gap: 10,
+          background: "linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0))",
+        }}
+      >
+        {/* 上段：スキップ＋アフィ */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => skip(-10)} style={btnSmall}>-10</button>
+            <button onClick={() => skip(-5)} style={btnSmall}>-5</button>
+            <button onClick={() => skip(5)} style={btnSmall}>+5</button>
+            <button onClick={() => skip(10)} style={btnSmall}>+10</button>
+          </div>
 
-          <div className="flex-1" />
-
-          {typeof affUrl === "string" && affUrl.trim() ? (
+          {affUrl ? (
             <a
               href={affUrl}
               target="_blank"
               rel="noreferrer"
-              className="rounded-xl bg-white text-black px-4 py-2 text-sm font-semibold"
+              style={{
+                padding: "10px 14px",
+                borderRadius: 999,
+                background: "#fff",
+                color: "#000",
+                textDecoration: "none",
+                fontWeight: 700,
+                whiteSpace: "nowrap",
+              }}
             >
-              {typeof affLabel === "string" && affLabel.trim() ? affLabel : "商品を見る"}
+              {affLabel}
             </a>
           ) : null}
         </div>
 
-        {/* シークバー */}
-        <div className="flex items-center gap-2 mb-2">
-          <div className="text-white/80 text-xs w-12 text-right">
-            {formatTime(current)}
-          </div>
-
+        {/* シーク */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ color: "#fff", fontSize: 12, minWidth: 42 }}>{formatTime(current)}</span>
           <input
-            className="flex-1"
+            data-no-swipe="1"
             type="range"
             min={0}
             max={Math.max(0, duration || 0)}
-            step={0.1}
+            step={0.01}
             value={Math.min(current, duration || 0)}
             onChange={(e) => seekTo(Number(e.target.value))}
+            style={{ width: "100%" }}
           />
-
-          <div className="text-white/80 text-xs w-12">
+          <span style={{ color: "#fff", fontSize: 12, minWidth: 42, textAlign: "right" }}>
             {formatTime(duration)}
-          </div>
+          </span>
         </div>
 
-        {/* 再生/ミュート + 音量 */}
-        <div className="flex items-center gap-2">
-          <button
-            className="rounded-xl bg-white/90 text-black px-4 py-2 text-sm font-semibold"
-            onClick={togglePlay}
-          >
-            {playing ? "停止" : "再生"}
-          </button>
-
-          <button
-            className="rounded-xl bg-white/20 text-white px-4 py-2 text-sm"
-            onClick={toggleMute}
-          >
-            {muted ? "ミュート" : "音あり"}
-          </button>
-
-          <div className="flex-1" />
-
-          <div className="flex items-center gap-2 w-48">
-            <div className="text-white/70 text-xs">音量</div>
-            <input
-              className="flex-1"
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={volume}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setVolume(v);
-                const el = videoRef.current;
-                if (el) {
-                  el.volume = v;
-                  if (!muted) el.muted = false;
-                }
-              }}
-            />
+        {/* 下段：再生/ミュート + ✅タイトルを元の下に戻す */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={togglePlay} style={btnBig}>
+              {playing ? "停止" : "再生"}
+            </button>
+            <button onClick={toggleMute} style={btnBig}>
+              {muted ? "ミュート" : "音ON"}
+            </button>
           </div>
-        </div>
 
-        {/* URL 表示（必要なければ消してOK） */}
-        <div className="mt-2 text-white/60 text-[11px] break-all">
-          {url}
+          <div style={{ color: "rgba(255,255,255,0.85)", fontSize: 12, textAlign: "right", maxWidth: "58vw" }}>
+            <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {titleText}
+            </div>
+          </div>
         </div>
       </div>
-
-      {/* 読み込み状態 */}
-      {!ready ? (
-        <div className="absolute inset-0 z-10 flex items-center justify-center text-white/70 text-sm">
-          Loading...
-        </div>
-      ) : null}
     </div>
   );
 }
+
+const btnSmall: React.CSSProperties = {
+  padding: "8px 12px",
+  borderRadius: 10,
+  background: "rgba(255,255,255,0.15)",
+  color: "#fff",
+  border: "none",
+  fontWeight: 700,
+};
+
+const btnBig: React.CSSProperties = {
+  padding: "12px 14px",
+  borderRadius: 12,
+  background: "rgba(255,255,255,0.15)",
+  color: "#fff",
+  border: "none",
+  fontWeight: 800,
+  minWidth: 72,
+};
