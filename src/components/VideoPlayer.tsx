@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import type { VideoItem } from "@/lib/types";
+import MoreMenu from "@/components/MoreMenu";
 
 type Props = {
   video: VideoItem;
@@ -116,7 +116,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       return;
     }
 
-    // activeになったら、まず muted を反映して複数回キック
     el.muted = muted;
     (el as any).playsInline = true;
 
@@ -136,7 +135,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           return;
         } catch {
           setPlaying(false);
-          // 次のトライへ
         }
       }
     };
@@ -169,7 +167,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     setMuted(nextMuted);
     if (el) el.muted = nextMuted;
 
-    // ミュート解除はブロックされ得る（iOS仕様）ので、再生維持だけ試す
     if (isActive && el && !nextMuted) {
       el.play().then(() => setPlaying(true)).catch(() => {});
     }
@@ -212,14 +209,8 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   return (
     <div className="relative h-[100svh] w-full bg-black overflow-hidden select-none">
-      {/* ✅ 右上：… ボタン → /info */}
-      <Link
-        href="/info"
-        aria-label="メニュー"
-        className="absolute top-3 right-3 z-50 grid h-10 w-10 place-items-center rounded-full bg-black/55 text-white border border-white/15 backdrop-blur hover:bg-black/70 active:scale-95 pointer-events-auto"
-      >
-        …
-      </Link>
+      {/* ✅ 右上の … メニュー */}
+      <MoreMenu />
 
       <video
         ref={videoRef}
@@ -259,30 +250,10 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       <div className="absolute left-3 right-3 bottom-4 z-40 pointer-events-auto">
         <div className="mb-2">
           <div className="inline-flex items-center gap-2">
-            <button
-              className="rounded-lg bg-white/10 text-white px-3 py-2 text-sm"
-              onClick={() => jump(-10)}
-            >
-              -10
-            </button>
-            <button
-              className="rounded-lg bg-white/10 text-white px-3 py-2 text-sm"
-              onClick={() => jump(-5)}
-            >
-              -5
-            </button>
-            <button
-              className="rounded-lg bg-white/10 text-white px-3 py-2 text-sm"
-              onClick={() => jump(+5)}
-            >
-              +5
-            </button>
-            <button
-              className="rounded-lg bg-white/10 text-white px-3 py-2 text-sm"
-              onClick={() => jump(+10)}
-            >
-              +10
-            </button>
+            <button className="rounded-lg bg-white/10 text-white px-3 py-2 text-sm" onClick={() => jump(-10)}>-10</button>
+            <button className="rounded-lg bg-white/10 text-white px-3 py-2 text-sm" onClick={() => jump(-5)}>-5</button>
+            <button className="rounded-lg bg-white/10 text-white px-3 py-2 text-sm" onClick={() => jump(+5)}>+5</button>
+            <button className="rounded-lg bg-white/10 text-white px-3 py-2 text-sm" onClick={() => jump(+10)}>+10</button>
           </div>
         </div>
 
@@ -311,17 +282,11 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            className="rounded-xl bg-white text-black px-4 py-2 text-sm font-semibold"
-            onClick={togglePlay}
-          >
+          <button className="rounded-xl bg-white text-black px-4 py-2 text-sm font-semibold" onClick={togglePlay}>
             {playing ? "停止" : "再生"}
           </button>
 
-          <button
-            className="rounded-xl bg-white/10 text-white px-4 py-2 text-sm font-semibold"
-            onClick={toggleMute}
-          >
+          <button className="rounded-xl bg-white/10 text-white px-4 py-2 text-sm font-semibold" onClick={toggleMute}>
             {muted ? "ミュート" : "音ON"}
           </button>
         </div>
