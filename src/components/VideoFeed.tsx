@@ -50,6 +50,8 @@ function normalizeVideo(v: ApiVideoItem): VideoMeta {
 }
 
 export default function VideoFeed() {
+  const BUILD = "BUILD_0126";
+
   const [items, setItems] = useState<VideoMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -247,6 +249,8 @@ export default function VideoFeed() {
         touchAction: "none",
       }}
     >
+   
+
       {loading && (
         <div
           style={{
@@ -310,7 +314,7 @@ export default function VideoFeed() {
                 <VideoPlayer video={v as any} isActive={isActive} />
               </div>
 
-              {/* ✅ スワイプ専用の透明レイヤー（controlsより下にしたいので zIndex=5） */}
+              {/* ✅ スワイプ専用の透明レイヤー */}
               <div
                 style={{
                   position: "absolute",
@@ -323,11 +327,6 @@ export default function VideoFeed() {
                 onPointerUp={onPointerUp}
                 onPointerCancel={onPointerUp}
               />
-
-              {/* 注意：
-                 ボタンが押せなくなったら、VideoPlayer側のコントロール領域に
-                 style={{position:'relative', zIndex: 20}} を付けて前面に出す。
-              */}
             </div>
           );
         })}
