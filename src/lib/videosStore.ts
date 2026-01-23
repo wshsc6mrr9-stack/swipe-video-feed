@@ -9,24 +9,39 @@ export type VideoItem = {
   affUrl?: string;
   affLabel?: string;
   createdAt: number;
+
+  // ✅ 新：複数ジャンル
+  genres?: string[];
+
+  // ✅ 旧互換：残してもOK（過去データ/念のため）
+  genre?: string;
 };
 
 const redis = Redis.fromEnv();
 const KEY = "videos:all";
 
-function safeJsonParse<T>(s: string | null, fallback: T): T {
-  if (!s) return fallback;
-  try {
-    return JSON.parse(s) as T;
-  } catch {
-    return fallback;
-  }
-}
-
 function normalizeText(v: any): string | undefined {
   if (typeof v !== "string") return undefined;
   const t = v.trim();
   return t ? t : undefined;
+}
+
+function normalizeGenres(input: any): string[] | undefined {
+  // 新：genres: string[]
+  if (Array.isArray(input?.genres)) {
+    const cleaned = input.genres
+      .map((x: any) => (typeof x === "string" ? x.trim() : ""))
+      .filter(Boolean)
+      .filter((x: string) => x !== "ALL")
+      .slice(0, 20); // 念のため上限
+    if (cleaned.length) return Array.from(new Set(cleaned));
+  }
+
+  // 旧：genre: string
+  const g = normalizeText(input?.genre);
+  if (g && g !== "ALL") return [g];
+
+  return undefined;
 }
 
 function normalizeInput(input: any) {
@@ -38,12 +53,12 @@ function normalizeInput(input: any) {
   const affUrl = normalizeText(input?.affUrl ?? input?.affiliateUrl);
   const affLabel = normalizeText(input?.affLabel ?? input?.affiliateLabel);
 
-  return { title, url, poster, affUrl, affLabel };
+  const genres = normalizeGenres(input);
+
+  return { title, url, poster, affUrl, affLabel, genres };
 }
 
 function newId() {
-  // Node/Vercel なら crypto.randomUUID がある
-  // 古い環境対策
   // @ts-ignore
   if (typeof crypto !== "undefined" && crypto?.randomUUID) {
     // @ts-ignore
@@ -53,7 +68,6 @@ function newId() {
 }
 
 async function readAll(): Promise<VideoItem[]> {
-  // Upstash は JSON をそのまま保存できる（文字列にしなくてOK）
   const data = await redis.get<VideoItem[]>(KEY);
   return Array.isArray(data) ? data : [];
 }
@@ -64,16 +78,17 @@ async function writeAll(items: VideoItem[]) {
 
 export async function listVideos(): Promise<VideoItem[]> {
   const items = await readAll();
-  // 新しい順
   return items.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
 
 export async function addVideo(input: any): Promise<VideoItem> {
-  const { title, url, poster, affUrl, affLabel } = normalizeInput(input);
+  const { title, url, poster, affUrl, affLabel, genres } = normalizeInput(input);
 
   if (!title || !url) {
     throw new Error("title と url は必須");
   }
+
+  const finalGenres = (genres && genres.length ? genres : ["other"]);
 
   const item: VideoItem = {
     id: newId(),
@@ -82,6 +97,11 @@ export async function addVideo(input: any): Promise<VideoItem> {
     poster,
     affUrl,
     affLabel,
+    genres: finalGenres,
+
+    // ✅ 旧互換（任意）：先頭を genre にも入れておくと、古い箇所が残ってても破綻しにくい
+    genre: finalGenres[0],
+
     createdAt: Date.now(),
   };
 

@@ -1,7 +1,9 @@
 // src/app/admin/page.tsx
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { GENRE_GROUPS, type GenreKey } from "@/lib/genres";
 
 type VideoItem = {
   id: string;
@@ -11,7 +13,13 @@ type VideoItem = {
   affUrl?: string;
   affLabel?: string;
   createdAt: number;
+  genres?: string[];
+  genre?: string;
 };
+
+function uniq(arr: string[]) {
+  return Array.from(new Set(arr));
+}
 
 export default function AdminPage() {
   const [items, setItems] = useState<VideoItem[]>([]);
@@ -21,8 +29,45 @@ export default function AdminPage() {
   const [affUrl, setAffUrl] = useState("");
   const [affLabel, setAffLabel] = useState("");
 
+  const [genres, setGenres] = useState<GenreKey[]>(["other"]);
+  const [genreQuery, setGenreQuery] = useState("");
+
+  const [genreOpen, setGenreOpen] = useState(false);
+  const [genrePin, setGenrePin] = useState(false);
+
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const normalizedSelected = useMemo(() => {
+    const cleaned = (genres ?? [])
+      .map((g) => String(g))
+      .filter(Boolean)
+      .filter((g) => g !== "ALL");
+    return uniq(cleaned) as GenreKey[];
+  }, [genres]);
+
+  function clearGenres() {
+    setGenres(["other"]);
+  }
+
+  function toggleGenre(key: GenreKey) {
+    setGenres((prev) => {
+      const cur = Array.isArray(prev) ? prev : [];
+      const exists = cur.includes(key);
+
+      let next = exists ? cur.filter((x) => x !== key) : [...cur, key];
+
+      if (next.length === 0) next = ["other"];
+
+      if (next.length >= 2 && next.includes("other")) {
+        next = next.filter((x) => x !== "other");
+      }
+
+      return uniq(next) as GenreKey[];
+    });
+
+    if (!genrePin) setGenreOpen(false);
+  }
 
   async function load() {
     setErr(null);
@@ -44,6 +89,10 @@ export default function AdminPage() {
     setErr(null);
     setBusy(true);
     try {
+      const payloadGenres = (
+        normalizedSelected.length ? normalizedSelected : (["other"] as GenreKey[])
+      ).filter((g) => g !== ("ALL" as any));
+
       const r = await fetch("/api/videos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -53,6 +102,7 @@ export default function AdminPage() {
           poster: poster || undefined,
           affUrl: affUrl || undefined,
           affLabel: affLabel || undefined,
+          genres: payloadGenres,
         }),
       });
 
@@ -67,49 +117,50 @@ export default function AdminPage() {
       setPoster("");
       setAffUrl("");
       setAffLabel("");
+      setGenres(["other"]);
+      setGenreQuery("");
+      setGenreOpen(false);
+      setGenrePin(false);
       await load();
     } finally {
       setBusy(false);
     }
   }
 
-  async function onDelete(id: string) {
-    if (!id) {
-      setErr("idが必要");
-      return;
-    }
+  const query = genreQuery.trim().toLowerCase();
+  const filteredGroups = useMemo(() => {
+    if (!query) return GENRE_GROUPS;
 
-    setErr(null);
-    setBusy(true);
-    try {
-      // ✅ bodyじゃなく query で送る（これで “idが必要” が消える）
-      const r = await fetch(`/api/videos?id=${encodeURIComponent(id)}`, {
-        method: "DELETE",
+    return GENRE_GROUPS.map((g) => {
+      const items = g.items.filter((it) => {
+        const t = `${it.key} ${it.label}`.toLowerCase();
+        return t.includes(query);
       });
-
-      const j = await r.json().catch(() => null);
-      if (!r.ok || !j?.ok) {
-        setErr(j?.error ?? `delete failed (${r.status})`);
-        return;
-      }
-
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  }
+      return { ...g, items };
+    }).filter((g) => g.items.length > 0);
+  }, [query]);
 
   return (
     <main className="min-h-screen bg-black text-white p-6 space-y-6">
-      <header className="flex items-center justify-between">
+      <header className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Admin</h1>
-        <button
-          className="px-4 py-2 rounded bg-white text-black font-semibold"
-          onClick={() => load()}
-          disabled={busy}
-        >
-          更新
-        </button>
+
+        <div className="flex items-center gap-2">
+          <Link
+            href="/admin/manage"
+            className="px-4 py-2 rounded bg-white/10 text-white font-semibold"
+          >
+            登録済み（管理）
+          </Link>
+
+          <button
+            className="px-4 py-2 rounded bg-white text-black font-semibold"
+            onClick={() => load()}
+            disabled={busy}
+          >
+            更新
+          </button>
+        </div>
       </header>
 
       <section className="rounded-2xl bg-neutral-900 p-4">
@@ -122,24 +173,119 @@ export default function AdminPage() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
+
           <input
             className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
             placeholder="動画URL（mp4 / m3u8）"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />
+
+          {/* ✅ ジャンル：開閉式 */}
+          <div className="rounded-2xl bg-neutral-800 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-semibold">ジャンル（複数選択）</div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
+                  onClick={clearGenres}
+                >
+                  リセット
+                </button>
+
+                <button
+                  type="button"
+                  className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
+                  onClick={() => setGenreOpen((v) => !v)}
+                >
+                  {genreOpen ? "閉じる" : "開く"}
+                </button>
+              </div>
+            </div>
+
+            {/* 選択中タグ */}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {normalizedSelected.map((g) => (
+                <span key={g} className="text-xs rounded-full bg-white/10 text-white px-3 py-1">
+                  {g}
+                </span>
+              ))}
+            </div>
+
+            {genreOpen ? (
+              <div className="mt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <input
+                    className="w-full px-3 py-2 rounded bg-neutral-900 outline-none"
+                    placeholder="検索（例：オタク / office / 旅行）"
+                    value={genreQuery}
+                    onChange={(e) => setGenreQuery(e.target.value)}
+                  />
+
+                  <label className="ml-3 flex items-center gap-2 text-xs text-white/80 select-none">
+                    <input
+                      type="checkbox"
+                      checked={genrePin}
+                      onChange={(e) => setGenrePin(e.target.checked)}
+                    />
+                    固定（閉じない）
+                  </label>
+                </div>
+
+                <div className="space-y-4">
+                  {filteredGroups.map((g) => (
+                    <div key={g.title} className="space-y-2">
+                      <div className="text-xs font-semibold text-white/80">{g.title}</div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                        {g.items.map((it) => {
+                          const key = it.key as GenreKey;
+                          const selected = normalizedSelected.includes(key);
+
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => toggleGenre(key)}
+                              className={[
+                                "text-left rounded-xl px-3 py-2 text-sm border transition",
+                                selected
+                                  ? "bg-white text-black border-white"
+                                  : "bg-black/20 text-white border-white/10 hover:border-white/30",
+                              ].join(" ")}
+                            >
+                              {it.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+
+                  {filteredGroups.length === 0 ? (
+                    <div className="text-xs text-white/60">該当なし</div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
           <input
             className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
             placeholder="ポスターURL（任意）"
             value={poster}
             onChange={(e) => setPoster(e.target.value)}
           />
+
           <input
             className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
             placeholder="アフィURL（任意）"
             value={affUrl}
             onChange={(e) => setAffUrl(e.target.value)}
           />
+
           <input
             className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
             placeholder="アフィ文言（任意：例「商品を見る」）"
@@ -147,10 +293,7 @@ export default function AdminPage() {
             onChange={(e) => setAffLabel(e.target.value)}
           />
 
-          <button
-            className="w-full px-4 py-3 rounded bg-white text-black font-bold"
-            disabled={busy}
-          >
+          <button className="w-full px-4 py-3 rounded bg-white text-black font-bold" disabled={busy}>
             追加
           </button>
 
@@ -158,37 +301,16 @@ export default function AdminPage() {
         </form>
       </section>
 
+      {/* ここでは “登録済み一覧” は見せない（別ページへ） */}
       <section className="rounded-2xl bg-neutral-900 p-4">
-        <h2 className="font-bold mb-3">登録済み（{items.length}）</h2>
-
-        <div className="space-y-3">
-          {items.map((v) => (
-            <div
-              key={v.id}
-              className="rounded-2xl bg-neutral-950 border border-neutral-800 p-4 flex items-start justify-between gap-4"
-            >
-              <div className="min-w-0">
-                <div className="font-bold">{v.title}</div>
-                <div className="text-xs text-neutral-300 break-all">{v.url}</div>
-                <div className="text-xs text-neutral-500 mt-1 break-all">
-                  id: {v.id}
-                </div>
-                {v.affUrl && (
-                  <div className="text-xs text-green-400 mt-1 break-all">
-                    AFF: {(v.affLabel ?? "labelなし")} / {v.affUrl}
-                  </div>
-                )}
-              </div>
-
-              <button
-                className="shrink-0 px-4 py-2 rounded bg-red-600 font-bold"
-                onClick={() => onDelete(v.id)}
-                disabled={busy}
-              >
-                削除
-              </button>
-            </div>
-          ))}
+        <div className="flex items-center justify-between">
+          <div className="font-bold">登録済みは別ページで管理</div>
+          <Link href="/admin/manage" className="px-4 py-2 rounded bg-white text-black font-bold">
+            管理ページへ
+          </Link>
+        </div>
+        <div className="text-sm text-white/60 mt-2">
+          現在: {items.length} 件（更新で反映）
         </div>
       </section>
     </main>

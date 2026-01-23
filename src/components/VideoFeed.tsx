@@ -1,7 +1,10 @@
+// src/components/VideoFeed.tsx
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import VideoCard from "./VideoCard";
+import GenreMenu from "@/components/GenreMenu";
+import { GENRE_ALL, type GenreKey } from "@/lib/genres";
 
 type AnyVideo = any;
 
@@ -21,36 +24,72 @@ function isNoSwipeTarget(t: EventTarget | null) {
   );
 }
 
+function shuffle<T>(arr: T[]) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function hasGenre(v: AnyVideo, g: string) {
+  // ✅ 新：genres 配列
+  if (Array.isArray(v?.genres)) {
+    return v.genres.map((x: any) => String(x)).includes(g);
+  }
+  // ✅ 旧：genre 文字列
+  return String(v?.genre ?? "other") === g;
+}
+
 export default function VideoFeed() {
   const [items, setItems] = useState<AnyVideo[]>([]);
   const [active, setActive] = useState(0);
 
-  // ドラッグ中の見た目（上下に少し追従）
+  const [genre, setGenre] = useState<GenreKey>(GENRE_ALL);
+
   const [dragY, setDragY] = useState(0);
   const draggingRef = useRef(false);
   const startYRef = useRef<number | null>(null);
   const lastYRef = useRef<number | null>(null);
   const wheelLockRef = useRef(false);
 
-  const canPrev = active > 0;
-  const canNext = active < items.length - 1;
-
   const fetchVideos = useCallback(async () => {
     const res = await fetch("/api/videos", { cache: "no-store" });
     const json = await res.json().catch(() => null);
     const list = Array.isArray(json?.items) ? json.items : [];
     setItems(list);
-
-    // active が範囲外になったら戻す
-    setActive((a) => {
-      if (list.length === 0) return 0;
-      return Math.max(0, Math.min(a, list.length - 1));
-    });
   }, []);
 
   useEffect(() => {
     fetchVideos();
   }, [fetchVideos]);
+
+  const playItems = useMemo(() => {
+    const base = Array.isArray(items) ? items : [];
+    if (genre === GENRE_ALL) return shuffle(base);
+
+    const filtered = base.filter((v) => hasGenre(v, String(genre)));
+    return filtered;
+  }, [items, genre]);
+
+  useEffect(() => {
+    setActive(0);
+    setDragY(0);
+    draggingRef.current = false;
+    startYRef.current = null;
+    lastYRef.current = null;
+  }, [genre]);
+
+  useEffect(() => {
+    setActive((a) => {
+      if (playItems.length === 0) return 0;
+      return Math.max(0, Math.min(a, playItems.length - 1));
+    });
+  }, [playItems.length]);
+
+  const canPrev = active > 0;
+  const canNext = active < playItems.length - 1;
 
   const goPrev = useCallback(() => {
     setActive((a) => Math.max(0, a - 1));
@@ -60,7 +99,6 @@ export default function VideoFeed() {
     setActive((a) => a + 1);
   }, []);
 
-  // wheel（PC）
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
       if (isNoSwipeTarget(e.target)) return;
@@ -83,7 +121,6 @@ export default function VideoFeed() {
     return () => window.removeEventListener("wheel", onWheel);
   }, [canNext, canPrev, goNext, goPrev]);
 
-  // key（PC）
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowDown" || e.key === "PageDown") {
@@ -97,12 +134,10 @@ export default function VideoFeed() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [canNext, canPrev, goNext, goPrev]);
 
-  const threshold = 70; // これ以上動いたらスワイプ確定
+  const threshold = 70;
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isNoSwipeTarget(e.target)) return;
-
-    // 左クリック/タップだけ
     if (e.pointerType === "mouse" && e.button !== 0) return;
 
     draggingRef.current = true;
@@ -119,7 +154,6 @@ export default function VideoFeed() {
     const dy = y - startYRef.current;
     lastYRef.current = y;
 
-    // 追従はちょい減衰（気持ちよさ）
     setDragY(dy * 0.6);
   };
 
@@ -130,7 +164,6 @@ export default function VideoFeed() {
 
     const dy = dragY;
 
-    // リセット
     setDragY(0);
     startYRef.current = null;
     lastYRef.current = null;
@@ -149,15 +182,14 @@ export default function VideoFeed() {
   const onPointerCancel = () => endDrag();
   const onPointerLeave = () => endDrag();
 
-  // 表示は active の前後だけ（軽くする）
   const visible = useMemo(() => {
-    if (items.length === 0) return [];
+    if (playItems.length === 0) return [];
     const start = Math.max(0, active - 1);
-    const end = Math.min(items.length - 1, active + 1);
+    const end = Math.min(playItems.length - 1, active + 1);
     const out: { index: number; item: AnyVideo }[] = [];
-    for (let i = start; i <= end; i++) out.push({ index: i, item: items[i] });
+    for (let i = start; i <= end; i++) out.push({ index: i, item: playItems[i] });
     return out;
-  }, [items, active]);
+  }, [playItems, active]);
 
   return (
     <div
@@ -167,16 +199,20 @@ export default function VideoFeed() {
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
       onPointerLeave={onPointerLeave}
-      // 重要：タップ（リンク）を殺しにくい設定
       style={{ touchAction: "manipulation" }}
     >
-      {items.length === 0 ? (
+      <GenreMenu value={genre} onChange={setGenre} />
+
+      {playItems.length === 0 ? (
         <div className="absolute inset-0 grid place-items-center text-white/70">
-          <div className="text-sm">動画がありません（/admin で追加してね）</div>
+          <div className="text-sm">
+            {items.length === 0
+              ? "動画がありません（/admin で追加してね）"
+              : "このジャンルの動画がありません（All に戻してね）"}
+          </div>
         </div>
       ) : null}
 
-      {/* 3枚だけ積む */}
       {visible.map(({ index, item }) => {
         const offset = (index - active) * 100;
         const translate = `translate3d(0, calc(${offset}svh + ${dragY}px), 0)`;
