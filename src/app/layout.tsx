@@ -3,6 +3,9 @@ import "./globals.css";
 
 const siteUrl = "https://swipe-video-feed.vercel.app";
 
+// ここだけ毎回変える（例: 0124 → 0125）
+const BUILD = "0124";
+
 export const metadata: Metadata = {
   title: "Swipe Video Feed",
   description: "縦スワイプでショート動画を連続視聴できるフィード。",
@@ -25,11 +28,37 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="ja">
-      {/* iPhoneの“ページごと指に付いてくる”を殺す */}
-      <body className="app-body">{children}</body>
+      {/* iPhoneで“ページごと指に付いてくる”のを止める */}
+      <body className="overflow-hidden overscroll-none">
+        {/* 反映確認用：左上に BUILD_0124 が出る */}
+        <div
+          style={{
+            position: "fixed",
+            top: 10,
+            left: 10,
+            zIndex: 999999,
+            padding: "6px 10px",
+            borderRadius: 10,
+            fontSize: 12,
+            background: "rgba(0,0,0,0.55)",
+            color: "#fff",
+            backdropFilter: "blur(6px)",
+            WebkitBackdropFilter: "blur(6px)",
+            pointerEvents: "none",
+          }}
+        >
+          BUILD_{BUILD}
+        </div>
+
+        {children}
+      </body>
     </html>
   );
 }
