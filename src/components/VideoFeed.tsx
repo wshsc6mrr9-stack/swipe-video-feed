@@ -2,186 +2,253 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import VideoPlayer from "@/components/VideoPlayer";
-import type { VideoMeta } from "@/lib/types";
 
-type ApiRes =
-  | { ok: true; items: any[] }
-  | { ok: false; error?: string };
+type VideoMeta = {
+  id: string;
+  title: string;
+  url?: string;
+  src?: string;
+  poster?: string;
+  affUrl?: string;
+  affLabel?: string;
+  affiliateUrl?: string;
+  affiliateLabel?: string;
+};
 
 function normalizeVideo(v: any): VideoMeta {
   return {
-    id: String(v.id),
-    title: String(v.title ?? ""),
-    // 互換：url / src どっちでもOK
-    url: v.url ?? v.src,
-    src: v.src ?? v.url,
-    poster: v.poster,
-    affiliateUrl: v.affUrl ?? v.affiliateUrl,
-    affiliateLabel: v.affLabel ?? v.affiliateLabel,
-    // 他のフィールドがあってもOK
-  } as any;
+    id: String(v?.id ?? crypto.randomUUID()),
+    title: String(v?.title ?? ""),
+    url: v?.url ?? v?.src,
+    src: v?.src ?? v?.url,
+    poster: v?.poster,
+    affUrl: v?.affUrl ?? v?.affiliateUrl,
+    affLabel: v?.affLabel ?? v?.affiliateLabel,
+    affiliateUrl: v?.affiliateUrl ?? v?.affUrl,
+    affiliateLabel: v?.affiliateLabel ?? v?.affLabel,
+  };
 }
 
 export default function VideoFeed() {
   const [items, setItems] = useState<VideoMeta[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [active, setActive] = useState(0);
 
-  const scrollerRef = useRef<HTMLDivElement | null>(null);
-  const sectionRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [vh, setVh] = useState(0);
+  const [dragY, setDragY] = useState(0);
+  const [dragging, setDragging] = useState(false);
 
-  // 取得
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  const stateRef = useRef({
+    touching: false,
+    startY: 0,
+    lastY: 0,
+    startT: 0,
+    lastT: 0,
+    active: 0,
+    maxIndex: 0,
+    vh: 0,
+  });
+
+  // fetch
   useEffect(() => {
-    let alive = true;
-
+    let cancelled = false;
     (async () => {
-      try {
-        setLoading(true);
-        setErr(null);
-
-        const r = await fetch("/api/videos", { cache: "no-store" });
-        const data = (await r.json()) as ApiRes;
-
-        if (!alive) return;
-
-        if (!("ok" in data) || data.ok !== true) {
-          setErr((data as any)?.error ?? "API error");
-          setItems([]);
-          setActiveId(null);
-          return;
-        }
-
-        const normalized = (data.items ?? []).map(normalizeVideo);
-        setItems(normalized);
-        setActiveId(normalized[0]?.id ?? null);
-      } catch (e: any) {
-        if (!alive) return;
-        setErr(e?.message ?? "fetch failed");
-        setItems([]);
-        setActiveId(null);
-      } finally {
-        if (alive) setLoading(false);
-      }
+      const res = await fetch("/api/videos", { cache: "no-store" });
+      const data = await res.json().catch(() => null);
+      const list = (data?.items ?? data?.videos ?? []) as any[];
+      if (!cancelled) setItems(list.map(normalizeVideo));
     })();
-
     return () => {
-      alive = false;
+      cancelled = true;
     };
   }, []);
 
-  // Scroll Snap + IntersectionObserver で「今見えてる動画」を判定（iPhone最強）
+  // height
   useEffect(() => {
-    const root = scrollerRef.current;
-    if (!root) return;
-    if (!items.length) return;
+    const update = () => setVh(window.innerHeight || 0);
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, []);
 
-    const io = new IntersectionObserver(
-      (entries) => {
-        // 一番見えてるやつを active に
-        let best: { id: string; ratio: number } | null = null;
+  const maxIndex = Math.max(0, items.length - 1);
+  const clampIndex = (n: number) => Math.min(maxIndex, Math.max(0, n));
 
-        for (const ent of entries) {
-          if (!ent.isIntersecting) continue;
-          const id = (ent.target as HTMLElement).dataset["id"];
-          if (!id) continue;
-          const ratio = ent.intersectionRatio;
+  // 判定（軽いフリックでも行く）
+  const thresholds = useMemo(() => {
+    const h = vh || 800;
+    return {
+      dist: Math.min(70, Math.max(35, h * 0.08)),
+      vel: 0.35, // px/ms
+    };
+  }, [vh]);
 
-          if (!best || ratio > best.ratio) best = { id, ratio };
-        }
-
-        if (best?.id) setActiveId(best.id);
-      },
-      {
-        root,
-        threshold: [0.55, 0.7, 0.85], // だいたい画面の半分以上見えたら切り替え
-      }
-    );
-
-    sectionRefs.current.forEach((el) => el && io.observe(el));
-    return () => io.disconnect();
-  }, [items]);
-
-  const activeIndex = useMemo(() => {
-    if (!activeId) return 0;
-    const i = items.findIndex((x) => x.id === activeId);
-    return i >= 0 ? i : 0;
-  }, [items, activeId]);
-
-  const scrollToIndex = (idx: number) => {
-    const root = scrollerRef.current;
-    const el = sectionRefs.current[idx];
-    if (!root || !el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  const rubberBand = (dy: number, a: number) => {
+    if ((a === 0 && dy > 0) || (a === maxIndex && dy < 0)) return dy * 0.35;
+    return dy;
   };
 
-  // PC用：矢印キーでも移動できる（iPhoneには影響なし）
+  const shouldIgnoreStart = (target: EventTarget | null) => {
+    const el = target as HTMLElement | null;
+    return !!el?.closest("button,a,input,textarea,select,label");
+  };
+
+  // ✅ ここが本命：iOSのページスクロールを確実に殺す
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!items.length) return;
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        scrollToIndex(Math.min(items.length - 1, activeIndex + 1));
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        scrollToIndex(Math.max(0, activeIndex - 1));
-      }
+    const html = document.documentElement;
+    const body = document.body;
+
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+      bodyPosition: body.style.position,
+      bodyWidth: body.style.width,
+      bodyHeight: body.style.height,
+      bodyTouchAction: (body.style as any).touchAction,
+      htmlOverscroll: (html.style as any).overscrollBehavior,
+      bodyOverscroll: (body.style as any).overscrollBehavior,
     };
-    window.addEventListener("keydown", onKey, { passive: false });
-    return () => window.removeEventListener("keydown", onKey as any);
-  }, [items.length, activeIndex]);
+
+    html.style.overflow = "hidden";
+    (html.style as any).overscrollBehavior = "none";
+    body.style.overflow = "hidden";
+    body.style.position = "fixed"; // ← iOSで効く
+    body.style.width = "100%";
+    body.style.height = "100%";
+    (body.style as any).touchAction = "none";
+    (body.style as any).overscrollBehavior = "none";
+
+    return () => {
+      html.style.overflow = prev.htmlOverflow;
+      body.style.overflow = prev.bodyOverflow;
+      body.style.position = prev.bodyPosition;
+      body.style.width = prev.bodyWidth;
+      body.style.height = prev.bodyHeight;
+      (body.style as any).touchAction = prev.bodyTouchAction;
+      (html.style as any).overscrollBehavior = prev.htmlOverscroll;
+      (body.style as any).overscrollBehavior = prev.bodyOverscroll;
+    };
+  }, []);
+
+  // ✅ ネイティブ touch listener（passive:false で preventDefault を確実に効かせる）
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length > 1) return;
+      if (shouldIgnoreStart(e.target)) return;
+
+      const t = e.touches[0];
+      stateRef.current.touching = true;
+      stateRef.current.startY = t.clientY;
+      stateRef.current.lastY = t.clientY;
+      const now = performance.now();
+      stateRef.current.startT = now;
+      stateRef.current.lastT = now;
+
+      setDragging(true);
+      setDragY(0);
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!stateRef.current.touching) return;
+      if (e.touches.length > 1) return;
+
+      // これが効くのが重要（passive:false）
+      e.preventDefault();
+
+      const t = e.touches[0];
+      const dy = t.clientY - stateRef.current.startY;
+      stateRef.current.lastY = t.clientY;
+      stateRef.current.lastT = performance.now();
+
+      const a = stateRef.current.active;
+      setDragY(rubberBand(dy, a));
+    };
+
+    const onTouchEnd = () => {
+      if (!stateRef.current.touching) return;
+      stateRef.current.touching = false;
+
+      setDragging(false);
+
+      const dy = stateRef.current.lastY - stateRef.current.startY;
+      const dt = Math.max(1, stateRef.current.lastT - stateRef.current.startT);
+      const v = dy / dt;
+
+      const goNext = dy < -thresholds.dist || v < -thresholds.vel;
+      const goPrev = dy > thresholds.dist || v > thresholds.vel;
+
+      setActive((cur) => {
+        const next = goNext ? clampIndex(cur + 1) : goPrev ? clampIndex(cur - 1) : cur;
+        // stateRefにも反映（rubberBand用）
+        stateRef.current.active = next;
+        return next;
+      });
+
+      setDragY(0);
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
+
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart as any);
+      el.removeEventListener("touchmove", onTouchMove as any);
+      el.removeEventListener("touchend", onTouchEnd as any);
+      el.removeEventListener("touchcancel", onTouchEnd as any);
+    };
+  }, [thresholds.dist, thresholds.vel, maxIndex]);
+
+  // stateRef 更新（active/maxIndex/vh）
+  useEffect(() => {
+    stateRef.current.active = active;
+    stateRef.current.maxIndex = maxIndex;
+    stateRef.current.vh = vh;
+  }, [active, maxIndex, vh]);
+
+  const translateY = useMemo(() => {
+    const h = vh || 0;
+    return -(active * h) + dragY;
+  }, [active, vh, dragY]);
+
+  if (!items.length) {
+    return (
+      <div className="h-[100svh] w-full bg-black text-white flex items-center justify-center">
+        Loading...
+      </div>
+    );
+  }
 
   return (
-    <div className="w-full h-[100svh] overflow-hidden bg-black">
-      {/* これが「ページじゃなく、この箱だけが縦にスクロール」する本体 */}
+    <div
+      ref={wrapRef}
+      className="relative w-full h-[100svh] overflow-hidden bg-black select-none"
+      style={{
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none",
+      }}
+    >
       <div
-        ref={scrollerRef}
-        className="
-          h-[100svh]
-          w-full
-          overflow-y-scroll
-          snap-y snap-mandatory
-          overscroll-none
-          [-webkit-overflow-scrolling:touch]
-        "
+        className="absolute inset-0 will-change-transform"
+        style={{
+          transform: `translate3d(0, ${translateY}px, 0)`,
+          transition: dragging ? "none" : "transform 240ms ease",
+        }}
       >
-        {loading ? (
-          <div className="h-[100svh] snap-start flex items-center justify-center text-white/80">
-            Loading...
+        {items.map((video, i) => (
+          <div key={video.id} className="w-full h-[100svh]">
+            <VideoPlayer video={video as any} isActive={i === active} />
           </div>
-        ) : err ? (
-          <div className="h-[100svh] snap-start flex flex-col items-center justify-center gap-3 text-white/80">
-            <div>読み込みエラー</div>
-            <div className="text-xs text-white/50">{err}</div>
-            <button
-              className="px-4 py-2 rounded bg-white text-black"
-              onClick={() => location.reload()}
-            >
-              リロード
-            </button>
-          </div>
-        ) : items.length === 0 ? (
-          <div className="h-[100svh] snap-start flex items-center justify-center text-white/80">
-            動画がありません（/admin で追加してね）
-          </div>
-        ) : (
-          items.map((v, i) => (
-            <div
-              key={v.id}
-              data-id={v.id}
-              ref={(el) => {
-                sectionRefs.current[i] = el;
-              }}
-              className="h-[100svh] w-full snap-start"
-            >
-              {/* 1画面にピッタリ固定 */}
-              <div className="h-[100svh] w-full">
-                <VideoPlayer video={v} isActive={v.id === activeId} />
-              </div>
-            </div>
-          ))
-        )}
+        ))}
       </div>
     </div>
   );
