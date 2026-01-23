@@ -91,7 +91,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       return;
     }
 
-    // iOSで確実に
     const play = async () => {
       try {
         await el.play();
@@ -163,7 +162,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   };
 
   const titleText = useMemo(() => {
-    // 「タイトルがURLになってる」ケースがあるので、そのまま表示
     return video.title || src || "";
   }, [video.title, src]);
 
@@ -252,22 +250,38 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           </span>
         </div>
 
-        {/* 下段：再生/ミュート + ✅タイトルを元の下に戻す */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={togglePlay} style={btnBig}>
-              {playing ? "停止" : "再生"}
-            </button>
-            <button onClick={toggleMute} style={btnBig}>
-              {muted ? "ミュート" : "音ON"}
-            </button>
+        {/* ✅ タイトル：シークバーの右下（元位置） */}
+        <div
+          data-no-swipe="1"
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            marginTop: -4,
+          }}
+        >
+          <div
+            style={{
+              color: "rgba(255,255,255,0.85)",
+              fontSize: 12,
+              textAlign: "right",
+              maxWidth: "86vw",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {titleText}
           </div>
+        </div>
 
-          <div style={{ color: "rgba(255,255,255,0.85)", fontSize: 12, textAlign: "right", maxWidth: "58vw" }}>
-            <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {titleText}
-            </div>
-          </div>
+        {/* 下段：再生/ミュート（※音量バーは作らない＝完全に無し） */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 10 }}>
+          <button onClick={togglePlay} style={btnBig}>
+            {playing ? "停止" : "再生"}
+          </button>
+          <button onClick={toggleMute} style={btnBig}>
+            {muted ? "ミュート" : "音ON"}
+          </button>
         </div>
       </div>
     </div>
