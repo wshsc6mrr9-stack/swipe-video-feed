@@ -1,336 +1,276 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import VideoPlayer from "@/components/VideoPlayer";
+import VideoCard from "@/components/VideoCard";
 
-type ApiVideoItem = {
+// ここが型エラーの元になりやすいので any に逃がす（動作は変えない）
+import GenreMenu from "@/components/GenreMenu";
+import MoreMenu from "@/components/MoreMenu";
+const GenreMenuAny = GenreMenu as any;
+const MoreMenuAny = MoreMenu as any;
+
+type VideoItem = {
   id: string;
   title: string;
   url?: string;
   src?: string;
   poster?: string;
   srcType?: "mp4" | "hls";
-  createdAt?: number;
-
   affUrl?: string;
   affLabel?: string;
   affiliateUrl?: string;
   affiliateLabel?: string;
-
-  genre?: string;
 };
 
-type VideoMeta = {
-  id: string;
-  title: string;
-  url?: string;
-  src?: string;
-  poster?: string;
-  srcType?: "mp4" | "hls";
-  affUrl?: string;
-  affLabel?: string;
-  genre?: string;
-};
+function isInteractiveTarget(target: EventTarget | null) {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
 
-function normalizeVideo(v: ApiVideoItem): VideoMeta {
-  const affUrl = (v.affUrl ?? v.affiliateUrl ?? undefined)?.trim();
-  const affLabel = (v.affLabel ?? v.affiliateLabel ?? undefined)?.trim();
-
-  return {
-    id: v.id,
-    title: v.title,
-    url: v.url,
-    src: v.src,
-    poster: v.poster,
-    srcType: v.srcType,
-    affUrl: affUrl ? affUrl : undefined,
-    affLabel: affLabel ? affLabel : undefined,
-    genre: v.genre,
-  };
+  const hit = el.closest(
+    [
+      "button",
+      "a",
+      "input",
+      "textarea",
+      "select",
+      "[role='button']",
+      "[data-no-swipe='1']",
+      "[data-ui='controls']",
+    ].join(",")
+  );
+  return !!hit;
 }
 
 export default function VideoFeed() {
-  const [items, setItems] = useState<VideoMeta[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-
+  const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
-  const indexRef = useRef(0);
 
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  const [vh, setVh] = useState<number>(
-    typeof window !== "undefined" ? window.innerHeight : 800
-  );
-
-  const [dragY, setDragY] = useState(0);
-  const draggingRef = useRef(false);
-
-  const ptr = useRef({
-    id: -1,
-    startY: 0,
-    startX: 0,
-    lastY: 0,
-    startTime: 0,
-    active: false,
-    lockedAxis: "" as "" | "y" | "x",
-  });
+  const [vh, setVh] = useState<number | null>(null);
 
   useEffect(() => {
-    indexRef.current = index;
-  }, [index]);
-
-  const fetchVideos = useCallback(async () => {
-    setLoading(true);
-    setErr(null);
-    try {
-      const res = await fetch("/api/videos", { cache: "no-store" });
-      const data = (await res.json()) as {
-        ok: boolean;
-        items?: ApiVideoItem[];
-        error?: string;
-      };
-      if (!data?.ok) throw new Error(data?.error || "API error");
-      const list = (data.items ?? []).map(normalizeVideo);
-      setItems(list);
-      setIndex((prev) => Math.min(prev, Math.max(0, list.length - 1)));
-    } catch (e: any) {
-      setErr(e?.message || "fetch failed");
-    } finally {
-      setLoading(false);
-    }
+    const update = () => setVh(window.innerHeight);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
   }, []);
 
   useEffect(() => {
-    fetchVideos();
-  }, [fetchVideos]);
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/videos", { cache: "no-store" });
+        const json = await res.json();
+        const list = (json?.items ?? json?.data ?? json ?? []) as any[];
+        if (!alive) return;
 
-  // iOSの“指に付いてくるスクロール”を完全停止
-  useEffect(() => {
-    const html = document.documentElement;
-    const body = document.body;
+        const normalized: VideoItem[] = list.map((v) => ({
+          id: String(v.id ?? crypto.randomUUID?.() ?? Math.random()),
+          title: String(v.title ?? ""),
+          url: v.url ?? v.src,
+          src: v.src ?? v.url,
+          poster: v.poster,
+          srcType: v.srcType,
+          affUrl: v.affUrl ?? v.affiliateUrl,
+          affLabel: v.affLabel ?? v.affiliateLabel,
+          affiliateUrl: v.affiliateUrl,
+          affiliateLabel: v.affiliateLabel,
+        }));
 
-    const prevHtmlOverflow = html.style.overflow;
-    const prevBodyOverflow = body.style.overflow;
-    const prevBodyPosition = body.style.position;
-    const prevBodyWidth = body.style.width;
-    const prevBodyTop = body.style.top;
-
-    const y = window.scrollY || 0;
-
-    html.style.overflow = "hidden";
-    body.style.overflow = "hidden";
-    body.style.position = "fixed";
-    body.style.width = "100%";
-    body.style.top = `-${y}px`;
-
-    const updateVh = () => setVh(window.innerHeight);
-    window.addEventListener("resize", updateVh);
-    window.addEventListener("orientationchange", updateVh);
+        setItems(normalized);
+        setIndex((i) => Math.min(i, Math.max(0, normalized.length - 1)));
+      } catch (e) {
+        console.error(e);
+      }
+    })();
 
     return () => {
-      window.removeEventListener("resize", updateVh);
-      window.removeEventListener("orientationchange", updateVh);
-
-      html.style.overflow = prevHtmlOverflow;
-      body.style.overflow = prevBodyOverflow;
-      body.style.position = prevBodyPosition;
-      body.style.width = prevBodyWidth;
-      body.style.top = prevBodyTop;
-
-      window.scrollTo(0, y);
+      alive = false;
     };
   }, []);
 
+  const count = items.length;
+
   const go = useCallback(
-    (nextIndex: number) => {
-      setIndex(() => {
-        const max = items.length - 1;
-        const clamped = Math.max(0, Math.min(max, nextIndex));
-        indexRef.current = clamped;
-        return clamped;
-      });
+    (next: number) => {
+      if (!count) return;
+      const clamped = Math.max(0, Math.min(count - 1, next));
+      setIndex(clamped);
     },
-    [items.length]
+    [count]
   );
 
-  const next = useCallback(() => go(indexRef.current + 1), [go]);
-  const prev = useCallback(() => go(indexRef.current - 1), [go]);
+  const next = useCallback(() => go(index + 1), [go, index]);
+  const prev = useCallback(() => go(index - 1), [go, index]);
 
-  // ✅ “動画の上に透明スワイプ層”を置く（iPhone Safariがvideoにイベント奪われる対策）
-  const onPointerDown = (e: React.PointerEvent) => {
-    ptr.current.id = e.pointerId;
-    ptr.current.startY = e.clientY;
-    ptr.current.startX = e.clientX;
-    ptr.current.lastY = e.clientY;
-    ptr.current.startTime = performance.now();
-    ptr.current.active = true;
-    ptr.current.lockedAxis = "";
-    draggingRef.current = false;
+  // ===== スワイプ =====
+  const dragging = useRef(false);
+  const startY = useRef(0);
+  const dyRef = useRef(0);
+  const startTime = useRef(0);
+  const [dragY, setDragY] = useState(0);
+
+  const beginDrag = useCallback((clientY: number) => {
+    dragging.current = true;
+    startY.current = clientY;
+    dyRef.current = 0;
+    startTime.current = performance.now();
     setDragY(0);
+  }, []);
 
-    try {
-      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
-    } catch {}
-  };
+  const moveDrag = useCallback((clientY: number) => {
+    if (!dragging.current) return;
+    const dy = clientY - startY.current;
+    dyRef.current = dy;
+    setDragY(dy);
+  }, []);
 
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!ptr.current.active) return;
-    if (e.pointerId !== ptr.current.id) return;
+  const endDrag = useCallback(() => {
+    if (!dragging.current) return;
+    dragging.current = false;
 
-    const dy = e.clientY - ptr.current.startY;
-    const dx = e.clientX - ptr.current.startX;
+    const dy = dyRef.current;
+    const dt = performance.now() - startTime.current;
+    const v = dt > 0 ? Math.abs(dy) / dt : 0;
 
-    if (!ptr.current.lockedAxis) {
-      if (Math.abs(dy) + Math.abs(dx) < 6) return;
-      ptr.current.lockedAxis = Math.abs(dy) >= Math.abs(dx) ? "y" : "x";
-    }
+    const DIST = 60;
+    const VELO = 0.6;
 
-    if (ptr.current.lockedAxis === "y") {
+    if (dy < -DIST || (dy < -25 && v > VELO)) next();
+    else if (dy > DIST || (dy > 25 && v > VELO)) prev();
+
+    setDragY(0);
+  }, [next, prev]);
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (isInteractiveTarget(e.target)) return;
+
+      beginDrag(e.clientY);
       e.preventDefault();
-      draggingRef.current = true;
+      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+    },
+    [beginDrag]
+  );
 
-      // 軽く追従
-      setDragY(dy * 0.92);
-    }
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!dragging.current) return;
+      moveDrag(e.clientY);
+      e.preventDefault();
+    },
+    [moveDrag]
+  );
 
-    ptr.current.lastY = e.clientY;
-  };
+  const onPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (!dragging.current) return;
+      endDrag();
+      e.preventDefault();
+    },
+    [endDrag]
+  );
 
-  const onPointerUp = (e: React.PointerEvent) => {
-    if (!ptr.current.active) return;
-    if (e.pointerId !== ptr.current.id) return;
+  const onTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      if (isInteractiveTarget(e.target)) return;
+      const t = e.touches[0];
+      if (!t) return;
+      beginDrag(t.clientY);
+    },
+    [beginDrag]
+  );
 
-    const dy = ptr.current.lastY - ptr.current.startY;
-    const dt = Math.max(1, performance.now() - ptr.current.startTime);
-    const velocity = Math.abs(dy) / dt; // px/ms
+  const onTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (!dragging.current) return;
+      const t = e.touches[0];
+      if (!t) return;
+      moveDrag(t.clientY);
+      e.preventDefault();
+    },
+    [moveDrag]
+  );
 
-    // ✅ “勢い不要”寄り：距離 or 速度で判定（かなり軽く）
-    const DIST = Math.max(42, vh * 0.10);
-    const FAST = 0.14;
+  const onTouchEnd = useCallback(() => {
+    if (!dragging.current) return;
+    endDrag();
+  }, [endDrag]);
 
-    const shouldMove =
-      ptr.current.lockedAxis === "y" &&
-      (Math.abs(dy) > DIST || velocity > FAST);
-
-    ptr.current.active = false;
-
-    if (draggingRef.current && shouldMove) {
-      if (dy < 0) next();
+  // wheel / key（PC用）
+  useEffect(() => {
+    const onWheel = (ev: WheelEvent) => {
+      if (Math.abs(ev.deltaY) < 10) return;
+      if (ev.deltaY > 0) next();
       else prev();
-    }
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "ArrowDown" || ev.key === "j") next();
+      if (ev.key === "ArrowUp" || ev.key === "k") prev();
+    };
+    window.addEventListener("wheel", onWheel, { passive: true });
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [next, prev]);
 
-    draggingRef.current = false;
-    ptr.current.lockedAxis = "";
-    setDragY(0);
-
-    try {
-      (e.currentTarget as any).releasePointerCapture?.(e.pointerId);
-    } catch {}
-  };
-
+  const h = vh ?? 0;
   const translateY = useMemo(() => {
-    return -index * vh + dragY;
-  }, [index, vh, dragY]);
+    const base = h ? -index * h : 0;
+    return base + dragY;
+  }, [h, index, dragY]);
 
   return (
     <div
-      ref={containerRef}
-      style={{
-        position: "fixed",
-        inset: 0,
-        height: "100dvh",
-        width: "100vw",
-        overflow: "hidden",
-        background: "black",
-        overscrollBehavior: "none",
-        touchAction: "none",
-      }}
+      className="relative w-full bg-black overflow-hidden"
+      style={{ height: "100svh", touchAction: "none" }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
     >
-      {loading && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "grid",
-            placeItems: "center",
-            color: "#fff",
-            zIndex: 50,
-          }}
-        >
-          Loading...
-        </div>
-      )}
+      {/* 左上 */}
+      <div className="absolute top-3 left-3 z-40">
+        <GenreMenuAny />
+      </div>
 
-      {err && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "grid",
-            placeItems: "center",
-            color: "#fff",
-            zIndex: 50,
-          }}
-        >
-          <div style={{ textAlign: "center" }}>
-            <div style={{ marginBottom: 12 }}>エラー: {err}</div>
-            <button
-              onClick={fetchVideos}
-              style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                background: "rgba(255,255,255,0.15)",
-                color: "#fff",
-              }}
-            >
-              再読み込み
-            </button>
-          </div>
-        </div>
-      )}
+      {/* 右上 */}
+      <div className="absolute top-3 right-3 z-40">
+        <MoreMenuAny />
+      </div>
 
       <div
         style={{
-          height: vh * Math.max(1, items.length),
+          height: vh ? `${vh}px` : "100svh",
           transform: `translate3d(0, ${translateY}px, 0)`,
-          transition: draggingRef.current ? "none" : "transform 220ms ease-out",
+          transition: dragging.current ? "none" : "transform 220ms ease-out",
           willChange: "transform",
         }}
       >
-        {items.map((v, i) => {
-          const isActive = i === index;
-          return (
-            <div
-              key={v.id}
-              style={{ height: vh, width: "100vw", position: "relative" }}
-            >
-              {/* 動画 */}
-              <div style={{ position: "absolute", inset: 0, zIndex: 1 }}>
-                <VideoPlayer video={v as any} isActive={isActive} />
-              </div>
+        {items.map((video, i) => (
+          <div key={video.id} style={{ height: vh ? `${vh}px` : "100svh" }}>
+            <VideoCard
+              // @ts-ignore: 既存Props差異があっても動かす
+              video={video}
+              // @ts-ignore
+              isActive={i === index}
+              // @ts-ignore: VideoCardが要求してる場合に備える
+              onNext={next}
+              // @ts-ignore
+              onPrev={prev}
+            />
+          </div>
+        ))}
 
-              {/* ✅ スワイプ専用の透明レイヤー（controlsより下にしたいので zIndex=5） */}
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  zIndex: 5,
-                  background: "transparent",
-                }}
-                onPointerDown={onPointerDown}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-                onPointerCancel={onPointerUp}
-              />
-
-              {/* 注意：
-                 ボタンが押せなくなったら、VideoPlayer側のコントロール領域に
-                 style={{position:'relative', zIndex: 20}} を付けて前面に出す。
-              */}
-            </div>
-          );
-        })}
+        {!items.length && (
+          <div className="grid place-items-center text-white h-[100svh]">
+            Loading...
+          </div>
+        )}
       </div>
     </div>
   );

@@ -47,7 +47,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
     setReady(false);
 
-    // reset
     try {
       hlsRef.current?.destroy();
       hlsRef.current = null;
@@ -91,7 +90,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       return;
     }
 
-    // iOSで確実に
     const play = async () => {
       try {
         await el.play();
@@ -130,6 +128,13 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     };
   }, []);
 
+  // ✅ クリックが video に吸われてる時があるので、ボタン側で必ず止める
+  const stop = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+    // @ts-ignore
+    e.nativeEvent?.stopImmediatePropagation?.();
+  };
+
   const togglePlay = async () => {
     const el = videoRef.current;
     if (!el) return;
@@ -155,20 +160,31 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const seekTo = (t: number) => {
     const el = videoRef.current;
     if (!el) return;
-    el.currentTime = clamp(t, 0, duration || 0);
+    const d = Number.isFinite(el.duration) ? el.duration : duration || 0;
+    el.currentTime = clamp(t, 0, d || 0);
   };
 
+  // ✅ skip は state(current) じゃなく “今の video.currentTime” を使う（ズレ防止）
   const skip = (sec: number) => {
-    seekTo(current + sec);
+    const el = videoRef.current;
+    if (!el) return;
+    const base = Number.isFinite(el.currentTime) ? el.currentTime : current;
+    seekTo(base + sec);
   };
 
   const titleText = useMemo(() => {
-    // 「タイトルがURLになってる」ケースがあるので、そのまま表示
     return video.title || src || "";
   }, [video.title, src]);
 
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%", background: "black" }}>
+    <div
+      style={{
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        background: "black",
+      }}
+    >
       {/* video */}
       <video
         ref={videoRef}
@@ -180,13 +196,25 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           height: "100%",
           objectFit: "contain",
           background: "black",
+          position: "absolute",
+          inset: 0,
+          zIndex: 0, // ✅ controls より下
         }}
         onClick={togglePlay}
       />
 
       {/* loading */}
       {!ready && (
-        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#fff" }}>
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "grid",
+            placeItems: "center",
+            color: "#fff",
+            zIndex: 10,
+          }}
+        >
           Loading...
         </div>
       )}
@@ -203,19 +231,27 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           display: "grid",
           gap: 10,
           background: "linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0))",
+          zIndex: 20, // ✅ 絶対に上
+          pointerEvents: "auto",
         }}
+        // ✅ controls 全体でも “親クリック” を止める（Safari保険）
+        onPointerDown={stop}
+        onClick={stop}
       >
         {/* 上段：スキップ＋アフィ */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => skip(-10)} style={btnSmall}>-10</button>
-            <button onClick={() => skip(-5)} style={btnSmall}>-5</button>
-            <button onClick={() => skip(5)} style={btnSmall}>+5</button>
-            <button onClick={() => skip(10)} style={btnSmall}>+10</button>
+            <button data-no-swipe="1" onPointerDown={stop} onClick={(e) => { stop(e); skip(-10); }} style={btnSmall}>-10</button>
+            <button data-no-swipe="1" onPointerDown={stop} onClick={(e) => { stop(e); skip(-5); }} style={btnSmall}>-5</button>
+            <button data-no-swipe="1" onPointerDown={stop} onClick={(e) => { stop(e); skip(5); }} style={btnSmall}>+5</button>
+            <button data-no-swipe="1" onPointerDown={stop} onClick={(e) => { stop(e); skip(10); }} style={btnSmall}>+10</button>
           </div>
 
           {affUrl ? (
             <a
+              data-no-swipe="1"
+              onPointerDown={stop}
+              onClick={stop}
               href={affUrl}
               target="_blank"
               rel="noreferrer"
@@ -244,6 +280,8 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
             max={Math.max(0, duration || 0)}
             step={0.01}
             value={Math.min(current, duration || 0)}
+            onPointerDown={stop}
+            onClick={stop}
             onChange={(e) => seekTo(Number(e.target.value))}
             style={{ width: "100%" }}
           />
@@ -252,13 +290,29 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           </span>
         </div>
 
-        {/* 下段：再生/ミュート + ✅タイトルを元の下に戻す */}
+        {/* 下段：再生/ミュート + タイトル */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={togglePlay} style={btnBig}>
+            <button
+              data-no-swipe="1"
+              onPointerDown={stop}
+              onClick={(e) => {
+                stop(e);
+                togglePlay();
+              }}
+              style={btnBig}
+            >
               {playing ? "停止" : "再生"}
             </button>
-            <button onClick={toggleMute} style={btnBig}>
+            <button
+              data-no-swipe="1"
+              onPointerDown={stop}
+              onClick={(e) => {
+                stop(e);
+                toggleMute();
+              }}
+              style={btnBig}
+            >
               {muted ? "ミュート" : "音ON"}
             </button>
           </div>

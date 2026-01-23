@@ -1,6 +1,5 @@
-// src/app/page.tsx
-import VideoFeed from "@/components/VideoFeed";
+import VideoFeedNoSSR from "./VideoFeedNoSSR";
 
 export default function HomePage() {
-  return <VideoFeed />;
+  return <VideoFeedNoSSR />;
 }
