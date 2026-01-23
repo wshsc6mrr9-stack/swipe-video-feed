@@ -52,13 +52,13 @@ export default function VideoFeed() {
 
   const maxIndex = Math.max(0, items.length - 1);
 
-  // iPhoneで一番安定する：scrollTopからindexを算出（軽くスワイプでもOK）
+  // scrollTop から index を算出（scroll-snap方式）
   const onScroll = () => {
-    if (!scrollerRef.current) return;
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    const el = scrollerRef.current;
+    if (!el) return;
 
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(() => {
-      const el = scrollerRef.current!;
       const h = el.clientHeight || window.innerHeight || 1;
       const idx = Math.round(el.scrollTop / h);
       const next = Math.min(maxIndex, Math.max(0, idx));
@@ -66,13 +66,12 @@ export default function VideoFeed() {
     });
   };
 
-  // activeが変わったらそのページへ（ボタン等で使う用）
+  // active変更時に該当位置へ（ズレがある時だけ）
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
     const h = el.clientHeight || window.innerHeight || 1;
     const top = active * h;
-    // ユーザー操作のスクロールを邪魔しないため、差があるときだけ
     if (Math.abs(el.scrollTop - top) > 2) {
       el.scrollTo({ top, behavior: "smooth" });
     }
@@ -88,15 +87,18 @@ export default function VideoFeed() {
 
   return (
     <div className="fixed inset-0 bg-black">
+      {/* ✅ 目印：これが本番iPhoneに出なければ「反映できてない」が確定 */}
+      <div className="absolute left-2 top-2 z-[9999] rounded bg-white/80 px-2 py-1 text-xs text-black">
+        SNAP_BUILD_0123
+      </div>
+
       <div
         ref={scrollerRef}
         onScroll={onScroll}
         className="h-[100svh] w-full overflow-y-scroll overflow-x-hidden"
         style={{
-          // ✅ iPhoneで超重要
           WebkitOverflowScrolling: "touch",
           scrollSnapType: "y mandatory",
-          // “ページ全体が動く” を防ぐ：ここだけスクロールさせる
           overscrollBehavior: "none",
           touchAction: "pan-y",
         }}
