@@ -12,7 +12,6 @@ type ApiVideoItem = {
   srcType?: "mp4" | "hls";
   createdAt?: number;
 
-  // 互換（どっちでも来る可能性）
   affUrl?: string;
   affLabel?: string;
   affiliateUrl?: string;
@@ -68,12 +67,10 @@ export default function VideoFeed() {
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // iPhoneの実高さに追従
   const [vh, setVh] = useState<number>(
     typeof window !== "undefined" ? window.innerHeight : 800
   );
 
-  // ドラッグ中のオフセット（px）
   const [dragY, setDragY] = useState(0);
   const draggingRef = useRef(false);
 
@@ -84,13 +81,12 @@ export default function VideoFeed() {
     startTime: 0,
     active: false,
     blocked: false,
+    lockedAxis: "" as "" | "y" | "x",
   });
 
-  // ✅ 左上「ジャンル」用（見た目復活）
+  // 左上ジャンル / 右上 …
   const [genreOpen, setGenreOpen] = useState(false);
   const [selectedGenre, setSelectedGenre] = useState<string>("ランダム");
-
-  // ✅ 右上「…」用（見た目復活）
   const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
@@ -122,22 +118,29 @@ export default function VideoFeed() {
     fetchVideos();
   }, [fetchVideos]);
 
-  // bodyスクロール完全停止（iOS対策）
+  // ✅ iOSの“指に付いてくる”を根絶（body固定 + overscroll抑制）
   useEffect(() => {
     const html = document.documentElement;
     const body = document.body;
 
-    const prevHtmlOverflow = html.style.overflow;
-    const prevBodyOverflow = body.style.overflow;
-    const prevBodyPosition = body.style.position;
-    const prevBodyWidth = body.style.width;
-    const prevBodyTop = body.style.top;
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      htmlOverscroll: (html.style as any).overscrollBehaviorY,
+      bodyOverflow: body.style.overflow,
+      bodyPosition: body.style.position,
+      bodyWidth: body.style.width,
+      bodyTop: body.style.top,
+      bodyTouchAction: (body.style as any).touchAction,
+    };
 
     html.style.overflow = "hidden";
+    (html.style as any).overscrollBehaviorY = "none";
+
     body.style.overflow = "hidden";
     body.style.position = "fixed";
     body.style.width = "100%";
     body.style.top = "0";
+    (body.style as any).touchAction = "none";
 
     const updateVh = () => setVh(window.innerHeight);
     window.addEventListener("resize", updateVh);
@@ -147,30 +150,34 @@ export default function VideoFeed() {
       window.removeEventListener("resize", updateVh);
       window.removeEventListener("orientationchange", updateVh);
 
-      html.style.overflow = prevHtmlOverflow;
-      body.style.overflow = prevBodyOverflow;
-      body.style.position = prevBodyPosition;
-      body.style.width = prevBodyWidth;
-      body.style.top = prevBodyTop;
+      html.style.overflow = prev.htmlOverflow;
+      (html.style as any).overscrollBehaviorY = prev.htmlOverscroll;
+
+      body.style.overflow = prev.bodyOverflow;
+      body.style.position = prev.bodyPosition;
+      body.style.width = prev.bodyWidth;
+      body.style.top = prev.bodyTop;
+      (body.style as any).touchAction = prev.bodyTouchAction;
     };
   }, []);
 
   const go = useCallback(
     (nextIndex: number) => {
       setIndex(() => {
-        const max = items.length - 1;
+        const max = visibleItemsRef.current.length - 1;
         const clamped = Math.max(0, Math.min(max, nextIndex));
         indexRef.current = clamped;
         return clamped;
       });
     },
-    [items.length]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
   );
 
   const next = useCallback(() => go(indexRef.current + 1), [go]);
   const prev = useCallback(() => go(indexRef.current - 1), [go]);
 
-  // マウスホイール（PC）
+  // PC wheel
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -189,7 +196,7 @@ export default function VideoFeed() {
     return () => el.removeEventListener("wheel", onWheel as any);
   }, [next, prev]);
 
-  // キーボード（PC）
+  // PC keyboard
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "ArrowDown") next();
@@ -199,18 +206,38 @@ export default function VideoFeed() {
     return () => window.removeEventListener("keydown", onKey);
   }, [next, prev]);
 
-  // タッチ（iPhone）：軽いスワイプでも確実に反応
+  const genres = useMemo(() => {
+    const set = new Set<string>();
+    for (const v of items) {
+      if (typeof v.genre === "string" && v.genre.trim()) set.add(v.genre.trim());
+    }
+    return ["ランダム", ...Array.from(set)];
+  }, [items]);
+
+  const visibleItems = useMemo(() => {
+    if (selectedGenre === "ランダム") return items;
+    return items.filter((v) => (v.genre || "").trim() === selectedGenre);
+  }, [items, selectedGenre]);
+
+  // go() から items.length を参照できるようにRef化
+  const visibleItemsRef = useRef<VideoMeta[]>(visibleItems);
+  useEffect(() => {
+    visibleItemsRef.current = visibleItems;
+    const max = Math.max(0, visibleItems.length - 1);
+    setIndex((prevIdx) => Math.min(prevIdx, max));
+    indexRef.current = Math.min(indexRef.current, max);
+  }, [visibleItems]);
+
+  // ✅ iPhone swipe（確実版）
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     const onTouchStart = (e: TouchEvent) => {
-      // メニュー開いてる間はスワイプ開始しない
       if (genreOpen || moreOpen) {
         touch.current.blocked = true;
         return;
       }
-
       if (isInteractiveTarget(e.target)) {
         touch.current.blocked = true;
         return;
@@ -223,8 +250,12 @@ export default function VideoFeed() {
       touch.current.lastY = t.clientY;
       touch.current.startTime = performance.now();
       touch.current.active = true;
+      touch.current.lockedAxis = "";
       draggingRef.current = false;
       setDragY(0);
+
+      // ✅ ここで passive:false にした上で“開始直後に”止めれる準備
+      // （この時点ではまだ止めない。縦判定した瞬間だけ止める）
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -235,9 +266,16 @@ export default function VideoFeed() {
       const dy = t.clientY - touch.current.startY;
       const dx = t.clientX - touch.current.startX;
 
-      if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 6) {
+      // 軸ロック（最初に優勢になった方へ固定）
+      if (!touch.current.lockedAxis) {
+        if (Math.abs(dy) > 6 || Math.abs(dx) > 6) {
+          touch.current.lockedAxis = Math.abs(dy) >= Math.abs(dx) ? "y" : "x";
+        }
+      }
+
+      if (touch.current.lockedAxis === "y") {
         draggingRef.current = true;
-        e.preventDefault(); // iPhoneの「ページが指に付く」を止める
+        e.preventDefault(); // ✅ ここが効かないと“指に付く”に戻る
         setDragY(dy);
       }
 
@@ -246,12 +284,14 @@ export default function VideoFeed() {
 
     const onTouchEnd = () => {
       if (!touch.current.active) return;
+
       const dy = touch.current.lastY - touch.current.startY;
       const dt = Math.max(1, performance.now() - touch.current.startTime);
-      const velocity = Math.abs(dy) / dt; // px/ms
+      const velocity = Math.abs(dy) / dt;
 
       touch.current.active = false;
 
+      // ✅ 軽いスワイプでも行く（でも誤爆しすぎない）
       const DIST = 45;
       const FAST = 0.28;
       const shouldMove = Math.abs(dy) > DIST || velocity > FAST;
@@ -262,11 +302,13 @@ export default function VideoFeed() {
       }
 
       draggingRef.current = false;
+      touch.current.lockedAxis = "";
       setDragY(0);
     };
 
-    el.addEventListener("touchstart", onTouchStart, { passive: true });
-    el.addEventListener("touchmove", onTouchMove, { passive: false }); // preventDefault有効化
+    // ✅ touchstart も passive:false にする（端末差の保険）
+    el.addEventListener("touchstart", onTouchStart, { passive: false });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
     el.addEventListener("touchend", onTouchEnd, { passive: true });
     el.addEventListener("touchcancel", onTouchEnd, { passive: true });
 
@@ -282,27 +324,6 @@ export default function VideoFeed() {
     return -index * vh + dragY;
   }, [index, vh, dragY]);
 
-  // ✅ ジャンル一覧（itemsから自動生成）
-  const genres = useMemo(() => {
-    const set = new Set<string>();
-    for (const v of items) {
-      if (typeof v.genre === "string" && v.genre.trim()) set.add(v.genre.trim());
-    }
-    return ["ランダム", ...Array.from(set)];
-  }, [items]);
-
-  // ✅ ジャンルフィルタ（ランダムなら全件）
-  const visibleItems = useMemo(() => {
-    if (selectedGenre === "ランダム") return items;
-    return items.filter((v) => (v.genre || "").trim() === selectedGenre);
-  }, [items, selectedGenre]);
-
-  // フィルタで件数変わったら index を安全に戻す
-  useEffect(() => {
-    setIndex((prev) => Math.min(prev, Math.max(0, visibleItems.length - 1)));
-    indexRef.current = Math.min(indexRef.current, Math.max(0, visibleItems.length - 1));
-  }, [visibleItems.length]);
-
   return (
     <div
       ref={containerRef}
@@ -314,14 +335,14 @@ export default function VideoFeed() {
         overflow: "hidden",
         background: "black",
         touchAction: "none",
+        overscrollBehavior: "none",
       }}
       onClick={() => {
-        // 背景タップでメニュー閉じる
         if (genreOpen) setGenreOpen(false);
         if (moreOpen) setMoreOpen(false);
       }}
     >
-      {/* ✅ 左上：ジャンル（見た目復活） */}
+      {/* 左上：ジャンル */}
       <div
         data-no-swipe="1"
         style={{ position: "absolute", top: 12, left: 12, zIndex: 80 }}
@@ -384,7 +405,7 @@ export default function VideoFeed() {
         )}
       </div>
 
-      {/* ✅ 右上：…（見た目復活） */}
+      {/* 右上：… */}
       <div
         data-no-swipe="1"
         style={{ position: "absolute", top: 12, right: 12, zIndex: 80 }}
@@ -444,13 +465,7 @@ export default function VideoFeed() {
             >
               管理画面へ
             </a>
-            <button
-              data-no-swipe="1"
-              onClick={() => {
-                setMoreOpen(false);
-              }}
-              style={menuBtn}
-            >
+            <button data-no-swipe="1" onClick={() => setMoreOpen(false)} style={menuBtn}>
               閉じる
             </button>
           </div>
@@ -500,7 +515,6 @@ export default function VideoFeed() {
         </div>
       )}
 
-      {/* 本体：縦に積んで translateY で移動 */}
       <div
         style={{
           height: vh * Math.max(1, visibleItems.length),
