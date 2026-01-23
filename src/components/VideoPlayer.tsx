@@ -1,296 +1,329 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { VideoItem } from "@/lib/types";
-import MoreMenu from "@/components/MoreMenu";
+import Hls from "hls.js";
+
+type VideoMeta = {
+  id: string;
+  title: string;
+
+  url?: string;
+  src?: string;
+  poster?: string;
+
+  affUrl?: string;
+  affLabel?: string;
+  affiliateUrl?: string;
+  affiliateLabel?: string;
+};
 
 type Props = {
-  video: VideoItem;
+  video: VideoMeta;
   isActive?: boolean;
 };
 
-function clamp(n: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, n));
+function getUrl(video: VideoMeta) {
+  return video.url ?? video.src ?? "";
+}
+
+function isHls(url: string) {
+  return /\.m3u8(\?|#|$)/i.test(url);
+}
+
+function formatTime(t: number) {
+  if (!Number.isFinite(t) || t < 0) return "0:00";
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 export default function VideoPlayer({ video, isActive = false }: Props) {
+  const url = useMemo(() => getUrl(video), [video]);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-
-  // ✅ リロード直後のタップ要求を消すため、初期は必ずミュート
-  const [muted, setMuted] = useState(true);
-  const [playing, setPlaying] = useState(false);
-
-  const [duration, setDuration] = useState(0);
-  const [current, setCurrent] = useState(0);
-  const [seeking, setSeeking] = useState(false);
-  const seekDraftRef = useRef(0);
+  const hlsRef = useRef<Hls | null>(null);
 
   const [ready, setReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(true);
+  const [volume, setVolume] = useState(0.8);
 
-  const src = useMemo(
-    () => String((video as any).url ?? (video as any).src ?? "").trim(),
-    [video]
-  );
-  const poster = useMemo(
-    () => String((video as any).poster ?? "").trim() || undefined,
-    [video]
-  );
+  const [current, setCurrent] = useState(0);
+  const [duration, setDuration] = useState(0);
 
-  const affUrl = useMemo(() => {
-    const u = String(((video as any).affUrl ?? (video as any).affiliateUrl ?? "")).trim();
-    return u ? u : undefined;
-  }, [video]);
+  const affUrl = (video as any).affUrl ?? (video as any).affiliateUrl;
+  const affLabel = (video as any).affLabel ?? (video as any).affiliateLabel;
 
-  const affLabel = useMemo(() => {
-    const t = String(((video as any).affLabel ?? (video as any).affiliateLabel ?? "")).trim();
-    return t ? t : undefined;
-  }, [video]);
-
-  const title = useMemo(() => String((video as any).title ?? "").trim(), [video]);
-
-  // src変更時リセット
+  // HLS attach
   useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+
     setReady(false);
-    setError(null);
-    setDuration(0);
-    setCurrent(0);
 
-    const el = videoRef.current;
-    if (!el) return;
-
-    // iOS向け：属性も念のためセット
-    el.setAttribute("playsinline", "");
-    el.setAttribute("webkit-playsinline", "");
-    el.muted = true; // 初期は強制
-    (el as any).playsInline = true;
-
-    try {
-      el.load();
-    } catch {}
-  }, [src]);
-
-  // メタ更新
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el) return;
-
-    const onCan = () => setReady(true);
-    const onErr = () => setError("video error");
-    const onMeta = () => setDuration(Number.isFinite(el.duration) ? el.duration : 0);
-    const onTime = () => {
-      if (seeking) return;
-      setCurrent(el.currentTime || 0);
-    };
-
-    el.addEventListener("canplay", onCan);
-    el.addEventListener("loadeddata", onCan);
-    el.addEventListener("error", onErr);
-    el.addEventListener("loadedmetadata", onMeta);
-    el.addEventListener("durationchange", onMeta);
-    el.addEventListener("timeupdate", onTime);
-
-    return () => {
-      el.removeEventListener("canplay", onCan);
-      el.removeEventListener("loadeddata", onCan);
-      el.removeEventListener("error", onErr);
-      el.removeEventListener("loadedmetadata", onMeta);
-      el.removeEventListener("durationchange", onMeta);
-      el.removeEventListener("timeupdate", onTime);
-    };
-  }, [seeking]);
-
-  // ✅ activeだけ再生（mutedで自動再生）
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el) return;
-
-    el.setAttribute("playsinline", "");
-    el.setAttribute("webkit-playsinline", "");
-
-    if (!isActive) {
+    // cleanup old
+    if (hlsRef.current) {
       try {
-        el.pause();
+        hlsRef.current.destroy();
       } catch {}
-      setPlaying(false);
-      return;
+      hlsRef.current = null;
     }
 
-    el.muted = muted;
-    (el as any).playsInline = true;
-
-    let cancelled = false;
-
-    const kick = async () => {
-      const tries = [0, 120, 300, 700];
-      for (const d of tries) {
-        await new Promise((r) => setTimeout(r, d));
-        if (cancelled) return;
-
+    // iOS Safari は native HLS が多い
+    if (isHls(url) && Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+      });
+      hlsRef.current = hls;
+      hls.loadSource(url);
+      hls.attachMedia(el);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => setReady(true));
+      hls.on(Hls.Events.ERROR, () => {
+        // 失敗しても video src fallback
         try {
-          const p = el.play();
-          if (p && typeof (p as any).then === "function") await p;
-          if (cancelled) return;
-          setPlaying(true);
-          return;
-        } catch {
-          setPlaying(false);
-        }
-      }
-    };
-
-    kick();
+          el.src = url;
+        } catch {}
+        setReady(true);
+      });
+    } else {
+      el.src = url;
+      setReady(true);
+    }
 
     return () => {
-      cancelled = true;
+      if (hlsRef.current) {
+        try {
+          hlsRef.current.destroy();
+        } catch {}
+        hlsRef.current = null;
+      }
     };
-  }, [isActive, muted]);
+  }, [url]);
 
-  function togglePlay() {
+  // active切り替え
+  useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
 
-    if (el.paused) {
+    if (isActive) {
+      // iPhone対策：playsInline + muted で自動再生通しやすい
       el.muted = muted;
-      el.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+      el.volume = volume;
+
+      const p = el.play();
+      if (p && typeof (p as any).catch === "function") {
+        (p as any).catch(() => {
+          // 自動再生失敗は一旦止める（タップ待ち）
+          setPlaying(false);
+        });
+      }
+      setPlaying(true);
     } else {
       try {
         el.pause();
       } catch {}
       setPlaying(false);
+      setCurrent(0);
     }
-  }
+  }, [isActive, muted, volume]);
 
-  function toggleMute() {
-    const el = videoRef.current;
-    const nextMuted = !muted;
-    setMuted(nextMuted);
-    if (el) el.muted = nextMuted;
-
-    if (isActive && el && !nextMuted) {
-      el.play().then(() => setPlaying(true)).catch(() => {});
-    }
-  }
-
-  function jump(deltaSec: number) {
+  // time update
+  useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
-    const d = Number.isFinite(el.duration) ? el.duration : duration;
-    const next = clamp((el.currentTime || 0) + deltaSec, 0, Math.max(0, d || 0));
+
+    const onLoaded = () => {
+      setDuration(el.duration || 0);
+    };
+    const onTime = () => {
+      setCurrent(el.currentTime || 0);
+      setDuration(el.duration || 0);
+    };
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+
+    el.addEventListener("loadedmetadata", onLoaded);
+    el.addEventListener("timeupdate", onTime);
+    el.addEventListener("play", onPlay);
+    el.addEventListener("pause", onPause);
+
+    return () => {
+      el.removeEventListener("loadedmetadata", onLoaded);
+      el.removeEventListener("timeupdate", onTime);
+      el.removeEventListener("play", onPlay);
+      el.removeEventListener("pause", onPause);
+    };
+  }, []);
+
+  const togglePlay = () => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.paused) {
+      el.play().catch(() => {});
+    } else {
+      el.pause();
+    }
+  };
+
+  const toggleMute = () => {
+    const el = videoRef.current;
+    if (!el) return;
+    const next = !muted;
+    setMuted(next);
+    el.muted = next;
+    if (!next) el.volume = volume;
+  };
+
+  const seekTo = (t: number) => {
+    const el = videoRef.current;
+    if (!el) return;
+    const d = el.duration || 0;
+    const next = Math.max(0, Math.min(d || 0, t));
     el.currentTime = next;
     setCurrent(next);
-  }
+  };
 
-  function onSeekCommit(nextTime: number) {
+  const jump = (delta: number) => {
     const el = videoRef.current;
     if (!el) return;
-    const d = Number.isFinite(el.duration) ? el.duration : duration;
-    el.currentTime = clamp(nextTime, 0, Math.max(0, d || 0));
-    setCurrent(el.currentTime || 0);
-  }
-
-  const seekValue = seeking ? seekDraftRef.current : current;
-  const seekMax = Math.max(0, duration || 0);
-
-  const onSeekStart = () => {
-    setSeeking(true);
-    seekDraftRef.current = seekValue || 0;
-  };
-  const onSeekChange = (v: string) => {
-    const next = Number(v);
-    if (!Number.isFinite(next)) return;
-    seekDraftRef.current = next;
-    setCurrent(next);
-  };
-  const onSeekEnd = () => {
-    setSeeking(false);
-    onSeekCommit(seekDraftRef.current);
+    seekTo((el.currentTime || 0) + delta);
   };
 
   return (
-    <div className="relative h-[100svh] w-full bg-black overflow-hidden select-none">
-      {/* ✅ 右上の … メニュー */}
-      <MoreMenu />
-
+    <div className="relative h-full w-full bg-black">
+      {/* video */}
       <video
         ref={videoRef}
         className="absolute inset-0 h-full w-full object-contain bg-black"
-        src={src || undefined}
-        poster={poster}
         playsInline
+        // @ts-ignore
+        webkit-playsinline="true"
         muted={muted}
-        autoPlay
         preload="auto"
-        controls={false}
+        onClick={togglePlay}
       />
 
-      {!ready && !error && (
-        <div className="absolute inset-0 flex items-center justify-center text-white/70 text-sm pointer-events-none">
-          Loading...
+      {/* タイトル（上） */}
+      <div className="absolute top-3 left-3 right-3 z-20 text-white text-sm drop-shadow">
+        {video?.title ?? ""}
+      </div>
+
+      {/* 下UI */}
+      <div className="absolute left-0 right-0 bottom-0 z-30 p-3 pb-5">
+        {/* 上段：±秒ボタン + アフィ */}
+        <div className="flex items-center gap-2 mb-2">
+          <button
+            className="rounded-lg bg-white/20 text-white px-3 py-2 text-sm"
+            onClick={() => jump(-10)}
+          >
+            -10
+          </button>
+          <button
+            className="rounded-lg bg-white/20 text-white px-3 py-2 text-sm"
+            onClick={() => jump(-5)}
+          >
+            -5
+          </button>
+          <button
+            className="rounded-lg bg-white/20 text-white px-3 py-2 text-sm"
+            onClick={() => jump(5)}
+          >
+            +5
+          </button>
+          <button
+            className="rounded-lg bg-white/20 text-white px-3 py-2 text-sm"
+            onClick={() => jump(10)}
+          >
+            +10
+          </button>
+
+          <div className="flex-1" />
+
+          {typeof affUrl === "string" && affUrl.trim() ? (
+            <a
+              href={affUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-xl bg-white text-black px-4 py-2 text-sm font-semibold"
+            >
+              {typeof affLabel === "string" && affLabel.trim() ? affLabel : "商品を見る"}
+            </a>
+          ) : null}
         </div>
-      )}
 
-      {error && (
-        <div className="absolute left-3 top-3 z-50 rounded-lg bg-black/60 px-3 py-2 text-xs text-red-200 pointer-events-none">
-          {error}
-        </div>
-      )}
+        {/* シークバー */}
+        <div className="flex items-center gap-2 mb-2">
+          <div className="text-white/80 text-xs w-12 text-right">
+            {formatTime(current)}
+          </div>
 
-      {affUrl && (
-        <a
-          href={affUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="absolute right-3 bottom-24 z-40 rounded-full bg-white text-black px-4 py-2 text-sm font-semibold pointer-events-auto"
-        >
-          {affLabel ?? "商品を見る"}
-        </a>
-      )}
+          <input
+            className="flex-1"
+            type="range"
+            min={0}
+            max={Math.max(0, duration || 0)}
+            step={0.1}
+            value={Math.min(current, duration || 0)}
+            onChange={(e) => seekTo(Number(e.target.value))}
+          />
 
-      <div className="absolute left-3 right-3 bottom-4 z-40 pointer-events-auto">
-        <div className="mb-2">
-          <div className="inline-flex items-center gap-2">
-            <button className="rounded-lg bg-white/10 text-white px-3 py-2 text-sm" onClick={() => jump(-10)}>-10</button>
-            <button className="rounded-lg bg-white/10 text-white px-3 py-2 text-sm" onClick={() => jump(-5)}>-5</button>
-            <button className="rounded-lg bg-white/10 text-white px-3 py-2 text-sm" onClick={() => jump(+5)}>+5</button>
-            <button className="rounded-lg bg-white/10 text-white px-3 py-2 text-sm" onClick={() => jump(+10)}>+10</button>
+          <div className="text-white/80 text-xs w-12">
+            {formatTime(duration)}
           </div>
         </div>
 
-        <div className="mb-2 text-white/90 text-sm font-medium line-clamp-1">
-          {title || " "}
-        </div>
-
-        <div className="mb-3">
-          <input
-            className="w-full"
-            type="range"
-            min={0}
-            max={seekMax || 0}
-            step={0.01}
-            value={seekMax > 0 ? clamp(seekValue, 0, seekMax) : 0}
-            onPointerDown={onSeekStart}
-            onPointerUp={onSeekEnd}
-            onPointerCancel={onSeekEnd}
-            onMouseDown={onSeekStart}
-            onMouseUp={onSeekEnd}
-            onTouchStart={onSeekStart}
-            onTouchEnd={onSeekEnd}
-            onChange={(e) => onSeekChange(e.target.value)}
-            disabled={seekMax <= 0}
-          />
-        </div>
-
+        {/* 再生/ミュート + 音量 */}
         <div className="flex items-center gap-2">
-          <button className="rounded-xl bg-white text-black px-4 py-2 text-sm font-semibold" onClick={togglePlay}>
+          <button
+            className="rounded-xl bg-white/90 text-black px-4 py-2 text-sm font-semibold"
+            onClick={togglePlay}
+          >
             {playing ? "停止" : "再生"}
           </button>
 
-          <button className="rounded-xl bg-white/10 text-white px-4 py-2 text-sm font-semibold" onClick={toggleMute}>
-            {muted ? "ミュート" : "音ON"}
+          <button
+            className="rounded-xl bg-white/20 text-white px-4 py-2 text-sm"
+            onClick={toggleMute}
+          >
+            {muted ? "ミュート" : "音あり"}
           </button>
+
+          <div className="flex-1" />
+
+          <div className="flex items-center gap-2 w-48">
+            <div className="text-white/70 text-xs">音量</div>
+            <input
+              className="flex-1"
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={volume}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setVolume(v);
+                const el = videoRef.current;
+                if (el) {
+                  el.volume = v;
+                  if (!muted) el.muted = false;
+                }
+              }}
+            />
+          </div>
+        </div>
+
+        {/* URL 表示（必要なければ消してOK） */}
+        <div className="mt-2 text-white/60 text-[11px] break-all">
+          {url}
         </div>
       </div>
+
+      {/* 読み込み状態 */}
+      {!ready ? (
+        <div className="absolute inset-0 z-10 flex items-center justify-center text-white/70 text-sm">
+          Loading...
+        </div>
+      ) : null}
     </div>
   );
 }
