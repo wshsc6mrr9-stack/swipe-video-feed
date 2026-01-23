@@ -26,3 +26,23 @@ html, body {
   overscroll-behavior: none;
   background: #000;
 }
+/* --- iPhone Safari の “ページが指に付いて動く/バウンス” を抑える --- */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* body を固定してページスクロールを完全に無効化 */
+body.app-body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
+  touch-action: none;
+  background: #000;
+}

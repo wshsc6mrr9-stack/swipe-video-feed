@@ -13,7 +13,9 @@ export const metadata: Metadata = {
     url: siteUrl,
     siteName: "Swipe Video Feed",
     type: "website",
-    images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: "Swipe Video Feed" }],
+    images: [
+      { url: "/opengraph-image", width: 1200, height: 630, alt: "Swipe Video Feed" },
+    ],
   },
   twitter: {
     card: "summary_large_image",
@@ -26,7 +28,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
-      <body className="overflow-hidden">{children}</body>
+      {/* iPhoneの“ページごと指に付いてくる”を殺す */}
+      <body className="app-body">{children}</body>
     </html>
   );
 }
