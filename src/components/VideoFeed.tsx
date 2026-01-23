@@ -49,15 +49,9 @@ function normalizeVideo(v: ApiVideoItem): VideoMeta {
   };
 }
 
-function isInteractiveTarget(target: EventTarget | null) {
-  const el = target as HTMLElement | null;
-  if (!el) return false;
-  return !!el.closest(
-    'button, a, input, textarea, select, label, [role="slider"], [data-no-swipe="1"]'
-  );
-}
-
 export default function VideoFeed() {
+  const BUILD = "BUILD_0126";
+
   const [items, setItems] = useState<VideoMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -74,13 +68,13 @@ export default function VideoFeed() {
   const [dragY, setDragY] = useState(0);
   const draggingRef = useRef(false);
 
-  const touch = useRef({
+  const ptr = useRef({
+    id: -1,
     startY: 0,
     startX: 0,
     lastY: 0,
     startTime: 0,
     active: false,
-    blocked: false,
     lockedAxis: "" as "" | "y" | "x",
   });
 
@@ -113,29 +107,24 @@ export default function VideoFeed() {
     fetchVideos();
   }, [fetchVideos]);
 
-  // ✅ iOSの“指に付いてくる”を根絶（body固定 + overscroll抑制）
+  // iOSの“指に付いてくるスクロール”を完全停止
   useEffect(() => {
     const html = document.documentElement;
     const body = document.body;
 
-    const prev = {
-      htmlOverflow: html.style.overflow,
-      htmlOverscroll: (html.style as any).overscrollBehaviorY,
-      bodyOverflow: body.style.overflow,
-      bodyPosition: body.style.position,
-      bodyWidth: body.style.width,
-      bodyTop: body.style.top,
-      bodyTouchAction: (body.style as any).touchAction,
-    };
+    const prevHtmlOverflow = html.style.overflow;
+    const prevBodyOverflow = body.style.overflow;
+    const prevBodyPosition = body.style.position;
+    const prevBodyWidth = body.style.width;
+    const prevBodyTop = body.style.top;
+
+    const y = window.scrollY || 0;
 
     html.style.overflow = "hidden";
-    (html.style as any).overscrollBehaviorY = "none";
-
     body.style.overflow = "hidden";
     body.style.position = "fixed";
     body.style.width = "100%";
-    body.style.top = "0";
-    (body.style as any).touchAction = "none";
+    body.style.top = `-${y}px`;
 
     const updateVh = () => setVh(window.innerHeight);
     window.addEventListener("resize", updateVh);
@@ -145,111 +134,102 @@ export default function VideoFeed() {
       window.removeEventListener("resize", updateVh);
       window.removeEventListener("orientationchange", updateVh);
 
-      html.style.overflow = prev.htmlOverflow;
-      (html.style as any).overscrollBehaviorY = prev.htmlOverscroll;
+      html.style.overflow = prevHtmlOverflow;
+      body.style.overflow = prevBodyOverflow;
+      body.style.position = prevBodyPosition;
+      body.style.width = prevBodyWidth;
+      body.style.top = prevBodyTop;
 
-      body.style.overflow = prev.bodyOverflow;
-      body.style.position = prev.bodyPosition;
-      body.style.width = prev.bodyWidth;
-      body.style.top = prev.bodyTop;
-      (body.style as any).touchAction = prev.bodyTouchAction;
+      window.scrollTo(0, y);
     };
   }, []);
 
-  const go = useCallback((nextIndex: number) => {
-    setIndex(() => {
-      const max = items.length - 1;
-      const clamped = Math.max(0, Math.min(max, nextIndex));
-      indexRef.current = clamped;
-      return clamped;
-    });
-  }, [items.length]);
+  const go = useCallback(
+    (nextIndex: number) => {
+      setIndex(() => {
+        const max = items.length - 1;
+        const clamped = Math.max(0, Math.min(max, nextIndex));
+        indexRef.current = clamped;
+        return clamped;
+      });
+    },
+    [items.length]
+  );
 
   const next = useCallback(() => go(indexRef.current + 1), [go]);
   const prev = useCallback(() => go(indexRef.current - 1), [go]);
 
-  // ✅ iPhone swipe（確実版：touch + passive:false）
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+  // ✅ “動画の上に透明スワイプ層”を置く（iPhone Safariがvideoにイベント奪われる対策）
+  const onPointerDown = (e: React.PointerEvent) => {
+    ptr.current.id = e.pointerId;
+    ptr.current.startY = e.clientY;
+    ptr.current.startX = e.clientX;
+    ptr.current.lastY = e.clientY;
+    ptr.current.startTime = performance.now();
+    ptr.current.active = true;
+    ptr.current.lockedAxis = "";
+    draggingRef.current = false;
+    setDragY(0);
 
-    const onTouchStart = (e: TouchEvent) => {
-      if (isInteractiveTarget(e.target)) {
-        touch.current.blocked = true;
-        return;
-      }
-      touch.current.blocked = false;
+    try {
+      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+    } catch {}
+  };
 
-      const t = e.touches[0];
-      touch.current.startY = t.clientY;
-      touch.current.startX = t.clientX;
-      touch.current.lastY = t.clientY;
-      touch.current.startTime = performance.now();
-      touch.current.active = true;
-      touch.current.lockedAxis = "";
-      draggingRef.current = false;
-      setDragY(0);
-    };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!ptr.current.active) return;
+    if (e.pointerId !== ptr.current.id) return;
 
-    const onTouchMove = (e: TouchEvent) => {
-      if (!touch.current.active) return;
-      if (touch.current.blocked) return;
+    const dy = e.clientY - ptr.current.startY;
+    const dx = e.clientX - ptr.current.startX;
 
-      const t = e.touches[0];
-      const dy = t.clientY - touch.current.startY;
-      const dx = t.clientX - touch.current.startX;
+    if (!ptr.current.lockedAxis) {
+      if (Math.abs(dy) + Math.abs(dx) < 6) return;
+      ptr.current.lockedAxis = Math.abs(dy) >= Math.abs(dx) ? "y" : "x";
+    }
 
-      // 軸ロック
-      if (!touch.current.lockedAxis) {
-        if (Math.abs(dy) > 6 || Math.abs(dx) > 6) {
-          touch.current.lockedAxis = Math.abs(dy) >= Math.abs(dx) ? "y" : "x";
-        }
-      }
+    if (ptr.current.lockedAxis === "y") {
+      e.preventDefault();
+      draggingRef.current = true;
 
-      if (touch.current.lockedAxis === "y") {
-        draggingRef.current = true;
-        e.preventDefault(); // ✅ ここが効かないと“指に付く”に戻る
-        setDragY(dy);
-      }
+      // 軽く追従
+      setDragY(dy * 0.92);
+    }
 
-      touch.current.lastY = t.clientY;
-    };
+    ptr.current.lastY = e.clientY;
+  };
 
-    const onTouchEnd = () => {
-      if (!touch.current.active) return;
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!ptr.current.active) return;
+    if (e.pointerId !== ptr.current.id) return;
 
-      const dy = touch.current.lastY - touch.current.startY;
-      const dt = Math.max(1, performance.now() - touch.current.startTime);
-      const velocity = Math.abs(dy) / dt;
+    const dy = ptr.current.lastY - ptr.current.startY;
+    const dt = Math.max(1, performance.now() - ptr.current.startTime);
+    const velocity = Math.abs(dy) / dt; // px/ms
 
-      touch.current.active = false;
+    // ✅ “勢い不要”寄り：距離 or 速度で判定（かなり軽く）
+    const DIST = Math.max(42, vh * 0.10);
+    const FAST = 0.14;
 
-      const DIST = 45;     // 軽め
-      const FAST = 0.28;   // 軽め
-      const shouldMove = Math.abs(dy) > DIST || velocity > FAST;
+    const shouldMove =
+      ptr.current.lockedAxis === "y" &&
+      (Math.abs(dy) > DIST || velocity > FAST);
 
-      if (draggingRef.current && shouldMove) {
-        if (dy < 0) next();
-        else prev();
-      }
+    ptr.current.active = false;
 
-      draggingRef.current = false;
-      touch.current.lockedAxis = "";
-      setDragY(0);
-    };
+    if (draggingRef.current && shouldMove) {
+      if (dy < 0) next();
+      else prev();
+    }
 
-    el.addEventListener("touchstart", onTouchStart, { passive: false });
-    el.addEventListener("touchmove", onTouchMove, { passive: false });
-    el.addEventListener("touchend", onTouchEnd, { passive: true });
-    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    draggingRef.current = false;
+    ptr.current.lockedAxis = "";
+    setDragY(0);
 
-    return () => {
-      el.removeEventListener("touchstart", onTouchStart as any);
-      el.removeEventListener("touchmove", onTouchMove as any);
-      el.removeEventListener("touchend", onTouchEnd as any);
-      el.removeEventListener("touchcancel", onTouchEnd as any);
-    };
-  }, [next, prev]);
+    try {
+      (e.currentTarget as any).releasePointerCapture?.(e.pointerId);
+    } catch {}
+  };
 
   const translateY = useMemo(() => {
     return -index * vh + dragY;
@@ -265,24 +245,68 @@ export default function VideoFeed() {
         width: "100vw",
         overflow: "hidden",
         background: "black",
-        touchAction: "none",
         overscrollBehavior: "none",
+        touchAction: "none",
       }}
     >
+      {/* ✅ 反映チェック：ど真ん中 */}
+      <div
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: "50%",
+          transform: "translate(-50%, -50%)",
+          zIndex: 9999,
+          padding: "10px 14px",
+          borderRadius: 14,
+          background: "rgba(255,255,255,0.20)",
+          color: "#fff",
+          fontWeight: 900,
+          fontSize: 18,
+          letterSpacing: 1,
+          pointerEvents: "none", // 操作を邪魔しない
+          backdropFilter: "blur(6px)",
+        }}
+      >
+        {BUILD}
+      </div>
+
       {loading && (
-        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#fff", zIndex: 50 }}>
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "grid",
+            placeItems: "center",
+            color: "#fff",
+            zIndex: 50,
+          }}
+        >
           Loading...
         </div>
       )}
 
       {err && (
-        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#fff", zIndex: 50 }}>
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "grid",
+            placeItems: "center",
+            color: "#fff",
+            zIndex: 50,
+          }}
+        >
           <div style={{ textAlign: "center" }}>
             <div style={{ marginBottom: 12 }}>エラー: {err}</div>
             <button
-              data-no-swipe="1"
               onClick={fetchVideos}
-              style={{ padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.15)", color: "#fff", border: "none" }}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 10,
+                background: "rgba(255,255,255,0.15)",
+                color: "#fff",
+              }}
             >
               再読み込み
             </button>
@@ -301,8 +325,28 @@ export default function VideoFeed() {
         {items.map((v, i) => {
           const isActive = i === index;
           return (
-            <div key={v.id} style={{ height: vh, width: "100vw" }}>
-              <VideoPlayer video={v as any} isActive={isActive} />
+            <div
+              key={v.id}
+              style={{ height: vh, width: "100vw", position: "relative" }}
+            >
+              {/* 動画 */}
+              <div style={{ position: "absolute", inset: 0, zIndex: 1 }}>
+                <VideoPlayer video={v as any} isActive={isActive} />
+              </div>
+
+              {/* ✅ スワイプ専用の透明レイヤー */}
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 5,
+                  background: "transparent",
+                }}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+              />
             </div>
           );
         })}
