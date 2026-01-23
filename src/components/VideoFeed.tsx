@@ -17,9 +17,7 @@ type ApiVideoItem = {
   affiliateUrl?: string;
   affiliateLabel?: string;
 
-  // 互換
   genre?: string;
-  genres?: string[];
 };
 
 type VideoMeta = {
@@ -31,8 +29,6 @@ type VideoMeta = {
   srcType?: "mp4" | "hls";
   affUrl?: string;
   affLabel?: string;
-
-  // UI用（フィルタのキーとして使う）
   genre?: string;
 };
 
@@ -40,20 +36,16 @@ function normalizeVideo(v: ApiVideoItem): VideoMeta {
   const affUrl = (v.affUrl ?? v.affiliateUrl ?? undefined)?.trim();
   const affLabel = (v.affLabel ?? v.affiliateLabel ?? undefined)?.trim();
 
-  const g =
-    (typeof v.genre === "string" && v.genre.trim() ? v.genre.trim() : "") ||
-    (Array.isArray(v.genres) && v.genres.length ? String(v.genres[0] ?? "").trim() : "");
-
   return {
-    id: String(v.id),
-    title: String(v.title ?? ""),
+    id: v.id,
+    title: v.title,
     url: v.url,
     src: v.src,
     poster: v.poster,
     srcType: v.srcType,
     affUrl: affUrl ? affUrl : undefined,
     affLabel: affLabel ? affLabel : undefined,
-    genre: g || "other",
+    genre: v.genre,
   };
 }
 
@@ -91,11 +83,6 @@ export default function VideoFeed() {
     blocked: false,
     lockedAxis: "" as "" | "y" | "x",
   });
-
-  // 左上ジャンル / 右上 …
-  const [genreOpen, setGenreOpen] = useState(false);
-  const [selectedGenre, setSelectedGenre] = useState<string>("ランダム");
-  const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
     indexRef.current = index;
@@ -169,80 +156,24 @@ export default function VideoFeed() {
     };
   }, []);
 
-  const visibleItems = useMemo(() => {
-    if (selectedGenre === "ランダム") return items;
-    return items.filter((v) => (v.genre || "").trim() === selectedGenre);
-  }, [items, selectedGenre]);
-
-  // go() から items.length を参照できるようにRef化
-  const visibleItemsRef = useRef<VideoMeta[]>(visibleItems);
-  useEffect(() => {
-    visibleItemsRef.current = visibleItems;
-    const max = Math.max(0, visibleItems.length - 1);
-    setIndex((prevIdx) => Math.min(prevIdx, max));
-    indexRef.current = Math.min(indexRef.current, max);
-  }, [visibleItems]);
-
   const go = useCallback((nextIndex: number) => {
     setIndex(() => {
-      const max = visibleItemsRef.current.length - 1;
+      const max = items.length - 1;
       const clamped = Math.max(0, Math.min(max, nextIndex));
       indexRef.current = clamped;
       return clamped;
     });
-  }, []);
+  }, [items.length]);
 
   const next = useCallback(() => go(indexRef.current + 1), [go]);
   const prev = useCallback(() => go(indexRef.current - 1), [go]);
 
-  // PC wheel
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    let lock = false;
-    const onWheel = (e: WheelEvent) => {
-      if (lock) return;
-      if (Math.abs(e.deltaY) < 10) return;
-      lock = true;
-      if (e.deltaY > 0) next();
-      else prev();
-      setTimeout(() => (lock = false), 350);
-    };
-
-    el.addEventListener("wheel", onWheel, { passive: true });
-    return () => el.removeEventListener("wheel", onWheel as any);
-  }, [next, prev]);
-
-  // PC keyboard
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowDown") next();
-      if (e.key === "ArrowUp") prev();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [next, prev]);
-
-  const genres = useMemo(() => {
-    const set = new Set<string>();
-    for (const v of items) {
-      const g = (v.genre || "").trim();
-      if (g) set.add(g);
-    }
-    return ["ランダム", ...Array.from(set)];
-  }, [items]);
-
-  // ✅ iPhone swipe（確実版）
+  // ✅ iPhone swipe（確実版：touch + passive:false）
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     const onTouchStart = (e: TouchEvent) => {
-      if (genreOpen || moreOpen) {
-        touch.current.blocked = true;
-        return;
-      }
       if (isInteractiveTarget(e.target)) {
         touch.current.blocked = true;
         return;
@@ -277,7 +208,7 @@ export default function VideoFeed() {
 
       if (touch.current.lockedAxis === "y") {
         draggingRef.current = true;
-        e.preventDefault(); // ✅ これが効かないと“指に付く”に戻る
+        e.preventDefault(); // ✅ ここが効かないと“指に付く”に戻る
         setDragY(dy);
       }
 
@@ -293,8 +224,8 @@ export default function VideoFeed() {
 
       touch.current.active = false;
 
-      const DIST = 45;
-      const FAST = 0.28;
+      const DIST = 45;     // 軽め
+      const FAST = 0.28;   // 軽め
       const shouldMove = Math.abs(dy) > DIST || velocity > FAST;
 
       if (draggingRef.current && shouldMove) {
@@ -318,21 +249,11 @@ export default function VideoFeed() {
       el.removeEventListener("touchend", onTouchEnd as any);
       el.removeEventListener("touchcancel", onTouchEnd as any);
     };
-  }, [next, prev, genreOpen, moreOpen]);
+  }, [next, prev]);
 
   const translateY = useMemo(() => {
     return -index * vh + dragY;
   }, [index, vh, dragY]);
-
-  // 軽量化：現在/前/次だけ描画（挙動には触れない）
-  const windowed = useMemo(() => {
-    const list = visibleItems;
-    const start = Math.max(0, index - 1);
-    const end = Math.min(list.length - 1, index + 1);
-    const slice: Array<{ item: VideoMeta; i: number }> = [];
-    for (let i = start; i <= end; i++) slice.push({ item: list[i], i });
-    return slice;
-  }, [visibleItems, index]);
 
   return (
     <div
@@ -347,227 +268,45 @@ export default function VideoFeed() {
         touchAction: "none",
         overscrollBehavior: "none",
       }}
-      onClick={() => {
-        if (genreOpen) setGenreOpen(false);
-        if (moreOpen) setMoreOpen(false);
-      }}
     >
-      {/* 左上：ジャンル */}
-      <div
-        data-no-swipe="1"
-        style={{ position: "absolute", top: 12, left: 12, zIndex: 80 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          data-no-swipe="1"
-          onClick={() => {
-            setMoreOpen(false);
-            setGenreOpen((v) => !v);
-          }}
-          style={pillBtn}
-        >
-          {selectedGenre}
-        </button>
+      {loading && (
+        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#fff", zIndex: 50 }}>
+          Loading...
+        </div>
+      )}
 
-        {genreOpen ? (
-          <div
-            data-no-swipe="1"
-            style={{
-              marginTop: 8,
-              background: "rgba(0,0,0,0.85)",
-              border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: 14,
-              padding: 8,
-              width: 220,
-              maxHeight: 320,
-              overflow: "auto",
-              backdropFilter: "blur(8px)",
-            }}
-          >
-            {genres.map((g) => {
-              const active = g === selectedGenre;
-              return (
-                <button
-                  key={g}
-                  data-no-swipe="1"
-                  onClick={() => {
-                    setSelectedGenre(g);
-                    setGenreOpen(false);
-                  }}
-                  style={{
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "10px 10px",
-                    borderRadius: 12,
-                    border: "none",
-                    background: active ? "rgba(255,255,255,0.16)" : "transparent",
-                    color: "#fff",
-                    fontWeight: 700,
-                  }}
-                >
-                  {g}
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-      </div>
-
-      {/* 右上：… */}
-      <div
-        data-no-swipe="1"
-        style={{ position: "absolute", top: 12, right: 12, zIndex: 80 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          data-no-swipe="1"
-          onClick={() => {
-            setGenreOpen(false);
-            setMoreOpen((v) => !v);
-          }}
-          style={pillBtn}
-        >
-          …
-        </button>
-
-        {moreOpen ? (
-          <div
-            data-no-swipe="1"
-            style={{
-              marginTop: 8,
-              background: "rgba(0,0,0,0.85)",
-              border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: 14,
-              padding: 8,
-              width: 220,
-              backdropFilter: "blur(8px)",
-            }}
-          >
+      {err && (
+        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#fff", zIndex: 50 }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ marginBottom: 12 }}>エラー: {err}</div>
             <button
               data-no-swipe="1"
-              onClick={() => {
-                setMoreOpen(false);
-                fetchVideos();
-              }}
-              style={menuBtn}
+              onClick={fetchVideos}
+              style={{ padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.15)", color: "#fff", border: "none" }}
             >
               再読み込み
             </button>
-
-            <a
-              data-no-swipe="1"
-              href="/admin"
-              style={{ ...menuBtn, display: "block", textDecoration: "none" } as any}
-              onClick={() => setMoreOpen(false)}
-            >
-              管理画面へ
-            </a>
-
-            <a
-              data-no-swipe="1"
-              href="/admin/login"
-              style={{ ...menuBtn, display: "block", textDecoration: "none" } as any}
-              onClick={() => setMoreOpen(false)}
-            >
-              ログインへ
-            </a>
-
-            <button
-              data-no-swipe="1"
-              onClick={() => setMoreOpen(false)}
-              style={menuBtn}
-            >
-              閉じる
-            </button>
           </div>
-        ) : null}
-      </div>
-
-      {/* 中身 */}
-      {loading ? (
-        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#fff" }}>
-          Loading...
-        </div>
-      ) : err ? (
-        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#fff", padding: 24 }}>
-          <div style={{ maxWidth: 420 }}>
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>読み込み失敗</div>
-            <div style={{ opacity: 0.8, marginBottom: 14 }}>{err}</div>
-            <button
-              data-no-swipe="1"
-              onClick={(e) => {
-                e.stopPropagation();
-                fetchVideos();
-              }}
-              style={{
-                padding: "12px 14px",
-                borderRadius: 12,
-                background: "rgba(255,255,255,0.15)",
-                color: "#fff",
-                border: "none",
-                fontWeight: 800,
-              }}
-            >
-              リトライ
-            </button>
-          </div>
-        </div>
-      ) : visibleItems.length === 0 ? (
-        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#fff" }}>
-          動画がありません
-        </div>
-      ) : (
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            width: "100%",
-            height: vh * visibleItems.length,
-            transform: `translate3d(0, ${translateY}px, 0)`,
-            transition: draggingRef.current ? "none" : "transform 220ms ease-out",
-            willChange: "transform",
-          }}
-        >
-          {windowed.map(({ item, i }) => {
-            const isActive = i === index;
-            return (
-              <div
-                key={item.id}
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  top: i * vh,
-                  width: "100%",
-                  height: vh,
-                }}
-              >
-                <VideoPlayer video={item as any} isActive={isActive} />
-              </div>
-            );
-          })}
         </div>
       )}
+
+      <div
+        style={{
+          height: vh * Math.max(1, items.length),
+          transform: `translate3d(0, ${translateY}px, 0)`,
+          transition: draggingRef.current ? "none" : "transform 220ms ease-out",
+          willChange: "transform",
+        }}
+      >
+        {items.map((v, i) => {
+          const isActive = i === index;
+          return (
+            <div key={v.id} style={{ height: vh, width: "100vw" }}>
+              <VideoPlayer video={v as any} isActive={isActive} />
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
-
-const pillBtn: React.CSSProperties = {
-  padding: "8px 12px",
-  borderRadius: 999,
-  background: "rgba(255,255,255,0.12)",
-  color: "#fff",
-  border: "1px solid rgba(255,255,255,0.12)",
-  fontWeight: 800,
-};
-
-const menuBtn: React.CSSProperties = {
-  width: "100%",
-  textAlign: "left",
-  padding: "10px 10px",
-  borderRadius: 12,
-  border: "none",
-  background: "transparent",
-  color: "#fff",
-  fontWeight: 800,
-};
