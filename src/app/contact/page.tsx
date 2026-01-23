@@ -1,39 +1,29 @@
 import Link from "next/link";
 
-export const metadata = {
-  title: "Contact | Swipe Video Feed",
-  description: "お問い合わせ",
-};
+export const metadata = { title: "Contact | Swipe Video Feed" };
 
 export default function ContactPage() {
-  // XのURLだけ自分のに差し替えてOK
-  const X_URL = "https://x.com/";
-
   return (
-    <main className="min-h-screen bg-black text-white px-5 py-8">
-      <div className="max-w-xl mx-auto space-y-6">
+    <main className="min-h-screen bg-black text-white">
+      <div className="mx-auto max-w-2xl px-4 py-10 space-y-4">
+        <Link href="/" className="text-sm text-white/80 hover:text-white">← 動画に戻る</Link>
         <h1 className="text-2xl font-bold">Contact</h1>
 
-        <section className="space-y-3 text-white/80 text-sm leading-relaxed">
-          <p>連絡は以下からお願いします。</p>
+        <p className="text-white/80 leading-relaxed">
+          連絡先（まずはリンクでOK。後からフォームにもできます）
+        </p>
 
-          <a
-            href={X_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-block rounded-lg border border-white/15 bg-white/5 px-4 py-2 hover:bg-white/10"
-          >
-            X（Twitter）で連絡する
-          </a>
-
-          <div className="text-white/60">
-            ※フォームが必要になったら、次に「/api/contact + メール送信（Resend等）」で作れる。
+        <div className="space-y-2 text-white/80">
+          <div>
+            X:{" "}
+            <a className="underline" href="https://x.com/" target="_blank" rel="noreferrer">
+              https://x.com/（あなたのアカウントに変える）
+            </a>
           </div>
-        </section>
+          <div>Mail: you@example.com</div>
+        </div>
 
-        <Link href="/info" className="text-sm text-white/70 underline">
-          ← サイト情報に戻る
-        </Link>
+        <Link href="/info" className="underline">まとめ（/info）を見る</Link>
       </div>
     </main>
   );
