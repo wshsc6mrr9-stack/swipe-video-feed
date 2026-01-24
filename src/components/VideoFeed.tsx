@@ -3,11 +3,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import VideoCard from "@/components/VideoCard";
 
-// ここが型エラーの元になりやすいので any に逃がす（動作は変えない）
 import GenreMenu from "@/components/GenreMenu";
 import MoreMenu from "@/components/MoreMenu";
-const GenreMenuAny = GenreMenu as any;
-const MoreMenuAny = MoreMenu as any;
+
+import { GENRE_ALL, type GenreKey } from "@/lib/genres";
 
 type VideoItem = {
   id: string;
@@ -20,6 +19,10 @@ type VideoItem = {
   affLabel?: string;
   affiliateUrl?: string;
   affiliateLabel?: string;
+
+  // ✅ ジャンル（新旧互換）
+  genres?: string[];
+  genre?: string;
 };
 
 function isInteractiveTarget(target: EventTarget | null) {
@@ -41,11 +44,32 @@ function isInteractiveTarget(target: EventTarget | null) {
   return !!hit;
 }
 
+function shuffleWithSeed<T>(arr: T[], seed: number) {
+  const a = arr.slice();
+  // 簡易seeded shuffle（見た目のランダム性が出ればOK）
+  let x = seed || 123456789;
+  const rnd = () => {
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return (x >>> 0) / 4294967296;
+  };
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export default function VideoFeed() {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
 
   const [vh, setVh] = useState<number | null>(null);
+
+  // ✅ ジャンル状態
+  const [genre, setGenre] = useState<GenreKey>(GENRE_ALL);
+  const [shuffleSeed, setShuffleSeed] = useState<number>(() => Date.now());
 
   useEffect(() => {
     const update = () => setVh(window.innerHeight);
@@ -70,10 +94,16 @@ export default function VideoFeed() {
           src: v.src ?? v.url,
           poster: v.poster,
           srcType: v.srcType,
+
+          // aff 互換
           affUrl: v.affUrl ?? v.affiliateUrl,
           affLabel: v.affLabel ?? v.affiliateLabel,
           affiliateUrl: v.affiliateUrl,
           affiliateLabel: v.affiliateLabel,
+
+          // ✅ genre 互換
+          genres: Array.isArray(v.genres) ? v.genres : undefined,
+          genre: typeof v.genre === "string" ? v.genre : undefined,
         }));
 
         setItems(normalized);
@@ -88,7 +118,26 @@ export default function VideoFeed() {
     };
   }, []);
 
-  const count = items.length;
+  // ✅ フィルタ & Allはシャッフル
+  const viewItems = useMemo(() => {
+    if (genre === GENRE_ALL) return shuffleWithSeed(items, shuffleSeed);
+
+    return items.filter((v) => {
+      const tags = Array.isArray(v.genres)
+        ? v.genres
+        : typeof v.genre === "string"
+        ? [v.genre]
+        : [];
+      return tags.includes(String(genre));
+    });
+  }, [items, genre, shuffleSeed]);
+
+  // ✅ 表示配列が変わったら index を安全化
+  useEffect(() => {
+    setIndex((i) => Math.max(0, Math.min(viewItems.length - 1, i)));
+  }, [viewItems.length]);
+
+  const count = viewItems.length;
 
   const go = useCallback(
     (next: number) => {
@@ -234,13 +283,20 @@ export default function VideoFeed() {
       onTouchEnd={onTouchEnd}
     >
       {/* 左上 */}
-      <div className="absolute top-3 left-3 z-40">
-        <GenreMenuAny />
+      <div className="absolute top-3 left-3 z-40" data-no-swipe="1">
+        <GenreMenu
+          value={genre}
+          onChange={(v) => {
+            setGenre(v);
+            setIndex(0);
+            if (v === GENRE_ALL) setShuffleSeed(Date.now()); // All押したらシャッフル更新
+          }}
+        />
       </div>
 
       {/* 右上 */}
-      <div className="absolute top-3 right-3 z-40">
-        <MoreMenuAny />
+      <div className="absolute top-3 right-3 z-40" data-no-swipe="1">
+        <MoreMenu />
       </div>
 
       <div
@@ -251,14 +307,14 @@ export default function VideoFeed() {
           willChange: "transform",
         }}
       >
-        {items.map((video, i) => (
+        {viewItems.map((video, i) => (
           <div key={video.id} style={{ height: vh ? `${vh}px` : "100svh" }}>
             <VideoCard
-              // @ts-ignore: 既存Props差異があっても動かす
+              // @ts-ignore
               video={video}
               // @ts-ignore
               isActive={i === index}
-              // @ts-ignore: VideoCardが要求してる場合に備える
+              // @ts-ignore
               onNext={next}
               // @ts-ignore
               onPrev={prev}
@@ -266,7 +322,7 @@ export default function VideoFeed() {
           </div>
         ))}
 
-        {!items.length && (
+        {!viewItems.length && (
           <div className="grid place-items-center text-white h-[100svh]">
             Loading...
           </div>
