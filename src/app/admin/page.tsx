@@ -208,7 +208,10 @@ export default function AdminPage() {
             {/* 選択中タグ */}
             <div className="mt-3 flex flex-wrap gap-2">
               {normalizedSelected.map((g) => (
-                <span key={g} className="text-xs rounded-full bg-white/10 text-white px-3 py-1">
+                <span
+                  key={g}
+                  className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
+                >
                   {g}
                 </span>
               ))}
@@ -237,7 +240,9 @@ export default function AdminPage() {
                 <div className="space-y-4">
                   {filteredGroups.map((g) => (
                     <div key={g.title} className="space-y-2">
-                      <div className="text-xs font-semibold text-white/80">{g.title}</div>
+                      <div className="text-xs font-semibold text-white/80">
+                        {g.title}
+                      </div>
 
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                         {g.items.map((it) => {
@@ -293,7 +298,10 @@ export default function AdminPage() {
             onChange={(e) => setAffLabel(e.target.value)}
           />
 
-          <button className="w-full px-4 py-3 rounded bg-white text-black font-bold" disabled={busy}>
+          <button
+            className="w-full px-4 py-3 rounded bg-white text-black font-bold"
+            disabled={busy}
+          >
             追加
           </button>
 
@@ -302,16 +310,30 @@ export default function AdminPage() {
       </section>
 
       {/* ここでは “登録済み一覧” は見せない（別ページへ） */}
-      <section className="rounded-2xl bg-neutral-900 p-4">
-        <div className="flex items-center justify-between">
-          <div className="font-bold">登録済みは別ページで管理</div>
-          <Link href="/admin/manage" className="px-4 py-2 rounded bg-white text-black font-bold">
+      <section className="rounded-2xl bg-neutral-900 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="font-bold">登録済みは別ページで管理</div>
+            <div className="text-sm text-white/60 mt-1">
+              現在: {items.length} 件（更新で反映）
+            </div>
+          </div>
+
+          <Link
+            href="/admin/manage"
+            className="px-4 py-2 rounded bg-white text-black font-bold"
+          >
             管理ページへ
           </Link>
         </div>
-        <div className="text-sm text-white/60 mt-2">
-          現在: {items.length} 件（更新で反映）
-        </div>
+
+        {/* ✅ 追加：ダッシュボードボタン */}
+        <Link
+          href="/admin/analytics"
+          className="block w-full text-center px-4 py-3 rounded-xl bg-white/10 text-white font-bold hover:bg-white/15 active:bg-white/15 border border-white/10"
+        >
+          ダッシュボード（Analytics）へ
+        </Link>
       </section>
     </main>
   );
