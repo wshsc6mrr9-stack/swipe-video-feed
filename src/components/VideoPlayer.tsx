@@ -9,6 +9,9 @@ type Props = {
   isActive?: boolean;
 };
 
+const KEY_MUTED = "audio_muted_v1";
+const EVT_MUTED = "audio_muted_changed_v1";
+
 function isHlsUrl(url?: string) {
   return !!url && url.includes(".m3u8");
 }
@@ -24,6 +27,24 @@ function formatTime(t: number) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function readMuted(): boolean {
+  try {
+    const v = localStorage.getItem(KEY_MUTED);
+    if (v === "0") return false; // 0 = unmuted
+    if (v === "1") return true;  // 1 = muted
+  } catch {}
+  return true; // デフォはミュート
+}
+
+function writeMuted(muted: boolean) {
+  try {
+    localStorage.setItem(KEY_MUTED, muted ? "1" : "0");
+  } catch {}
+  try {
+    window.dispatchEvent(new Event(EVT_MUTED));
+  } catch {}
+}
+
 export default function VideoPlayer({ video, isActive = false }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -32,13 +53,34 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   const [ready, setReady] = useState(false);
   const [playing, setPlaying] = useState(false);
-  const [muted, setMuted] = useState(true);
+
+  // 保存されてるミュート状態（全動画で共有する“設定”）
+  const [muted, setMuted] = useState<boolean>(() => readMuted());
 
   const [duration, setDuration] = useState(0);
   const [current, setCurrent] = useState(0);
 
-  const affUrl = (video as any).affUrl as string | undefined;
-  const affLabel = ((video as any).affLabel as string | undefined) || "商品を見る";
+  const affUrl =
+    (video.affiliateUrl ?? (video as any).affUrl) as string | undefined;
+  const affLabel =
+    ((video.affiliateLabel ?? (video as any).affLabel) as
+      | string
+      | undefined) || "商品を見る";
+
+  // ✅ 実際に適用するミュートは「アクティブだけ保存状態を使う」
+  //    非アクティブは常に true（強制ミュート）にして二重音を防ぐ
+  const effectiveMuted = isActive ? muted : true;
+
+  // ✅ 他のVideoPlayerとも同期（設定は同期するが、非アクティブは強制ミュートで鳴らさない）
+  useEffect(() => {
+    const on = () => setMuted(readMuted());
+    window.addEventListener(EVT_MUTED, on);
+    window.addEventListener("storage", on);
+    return () => {
+      window.removeEventListener(EVT_MUTED, on);
+      window.removeEventListener("storage", on);
+    };
+  }, []);
 
   // HLS attach
   useEffect(() => {
@@ -60,8 +102,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         hls.attachMedia(el);
         hls.on(Hls.Events.MANIFEST_PARSED, () => setReady(true));
       } else {
-        // Safari native HLS
-        el.src = src;
+        el.src = src; // Safari native HLS
         setReady(true);
       }
     } else {
@@ -77,16 +118,26 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     };
   }, [src]);
 
-  // active video autoplay
+  // ✅ active だけ再生、inactive は確実に停止
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
 
-    el.muted = muted;
+    // ミュート適用（inactive は常にミュート）
+    el.muted = effectiveMuted;
 
     if (!isActive) {
-      el.pause();
+      // 🔥 ここが重要：裏で鳴らないように“確実に止める”
+      try {
+        el.pause();
+      } catch {}
       setPlaying(false);
+
+      // 任意：戻った時に音ズレや残音っぽさが出る場合の保険
+      try {
+        el.currentTime = 0;
+      } catch {}
+
       return;
     }
 
@@ -100,7 +151,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     };
 
     play();
-  }, [isActive, muted]);
+  }, [isActive, effectiveMuted]);
 
   // events
   useEffect(() => {
@@ -128,7 +179,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     };
   }, []);
 
-  // ✅ クリックが video に吸われてる時があるので、ボタン側で必ず止める
   const stop = (e: React.SyntheticEvent) => {
     e.stopPropagation();
     // @ts-ignore
@@ -152,9 +202,15 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const toggleMute = () => {
     const el = videoRef.current;
     if (!el) return;
+
     const next = !muted;
     setMuted(next);
-    el.muted = next;
+
+    // ✅ 保存＆同期（設定）
+    writeMuted(next);
+
+    // ✅ ただし実際の適用は active の時だけ（effectiveMuted）
+    el.muted = isActive ? next : true;
   };
 
   const seekTo = (t: number) => {
@@ -164,7 +220,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     el.currentTime = clamp(t, 0, d || 0);
   };
 
-  // ✅ skip は state(current) じゃなく “今の video.currentTime” を使う（ズレ防止）
   const skip = (sec: number) => {
     const el = videoRef.current;
     if (!el) return;
@@ -185,11 +240,10 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         background: "black",
       }}
     >
-      {/* video */}
       <video
         ref={videoRef}
         playsInline
-        muted={muted}
+        muted={effectiveMuted}
         preload="auto"
         style={{
           width: "100%",
@@ -198,12 +252,11 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           background: "black",
           position: "absolute",
           inset: 0,
-          zIndex: 0, // ✅ controls より下
+          zIndex: 0,
         }}
         onClick={togglePlay}
       />
 
-      {/* loading */}
       {!ready && (
         <div
           style={{
@@ -219,7 +272,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         </div>
       )}
 
-      {/* controls */}
       <div
         data-no-swipe="1"
         style={{
@@ -230,15 +282,14 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           padding: 12,
           display: "grid",
           gap: 10,
-          background: "linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0))",
-          zIndex: 20, // ✅ 絶対に上
+          background:
+            "linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0))",
+          zIndex: 20,
           pointerEvents: "auto",
         }}
-        // ✅ controls 全体でも “親クリック” を止める（Safari保険）
         onPointerDown={stop}
         onClick={stop}
       >
-        {/* 上段：スキップ＋アフィ */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div style={{ display: "flex", gap: 8 }}>
             <button data-no-swipe="1" onPointerDown={stop} onClick={(e) => { stop(e); skip(-10); }} style={btnSmall}>-10</button>
@@ -270,7 +321,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           ) : null}
         </div>
 
-        {/* シーク */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ color: "#fff", fontSize: 12, minWidth: 42 }}>{formatTime(current)}</span>
           <input
@@ -290,7 +340,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           </span>
         </div>
 
-        {/* 下段：再生/ミュート + タイトル */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div style={{ display: "flex", gap: 10 }}>
             <button

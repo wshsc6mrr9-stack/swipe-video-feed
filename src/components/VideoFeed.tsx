@@ -5,6 +5,7 @@ import VideoCard from "@/components/VideoCard";
 
 import GenreMenu from "@/components/GenreMenu";
 import MoreMenu from "@/components/MoreMenu";
+import AgeGate from "@/components/AgeGate";
 
 import { GENRE_ALL, type GenreKey } from "@/lib/genres";
 
@@ -20,7 +21,6 @@ type VideoItem = {
   affiliateUrl?: string;
   affiliateLabel?: string;
 
-  // ✅ ジャンル（新旧互換）
   genres?: string[];
   genre?: string;
 };
@@ -46,7 +46,6 @@ function isInteractiveTarget(target: EventTarget | null) {
 
 function shuffleWithSeed<T>(arr: T[], seed: number) {
   const a = arr.slice();
-  // 簡易seeded shuffle（見た目のランダム性が出ればOK）
   let x = seed || 123456789;
   const rnd = () => {
     x ^= x << 13;
@@ -62,6 +61,9 @@ function shuffleWithSeed<T>(arr: T[], seed: number) {
 }
 
 export default function VideoFeed() {
+  // ✅ 18歳ゲート通過フラグ
+  const [ageOk, setAgeOk] = useState(false);
+
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
 
@@ -101,7 +103,7 @@ export default function VideoFeed() {
           affiliateUrl: v.affiliateUrl,
           affiliateLabel: v.affiliateLabel,
 
-          // ✅ genre 互換
+          // genre 互換
           genres: Array.isArray(v.genres) ? v.genres : undefined,
           genre: typeof v.genre === "string" ? v.genre : undefined,
         }));
@@ -132,7 +134,6 @@ export default function VideoFeed() {
     });
   }, [items, genre, shuffleSeed]);
 
-  // ✅ 表示配列が変わったら index を安全化
   useEffect(() => {
     setIndex((i) => Math.max(0, Math.min(viewItems.length - 1, i)));
   }, [viewItems.length]);
@@ -245,7 +246,6 @@ export default function VideoFeed() {
     endDrag();
   }, [endDrag]);
 
-  // wheel / key（PC用）
   useEffect(() => {
     const onWheel = (ev: WheelEvent) => {
       if (Math.abs(ev.deltaY) < 10) return;
@@ -270,6 +270,11 @@ export default function VideoFeed() {
     return base + dragY;
   }, [h, index, dragY]);
 
+  // ✅ 18歳ゲート未通過なら「ゲートだけ表示」して終わり
+  if (!ageOk) {
+    return <AgeGate onAllowed={() => setAgeOk(true)} />;
+  }
+
   return (
     <div
       className="relative w-full bg-black overflow-hidden"
@@ -282,19 +287,17 @@ export default function VideoFeed() {
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
     >
-      {/* 左上 */}
       <div className="absolute top-3 left-3 z-40" data-no-swipe="1">
         <GenreMenu
           value={genre}
           onChange={(v) => {
             setGenre(v);
             setIndex(0);
-            if (v === GENRE_ALL) setShuffleSeed(Date.now()); // All押したらシャッフル更新
+            if (v === GENRE_ALL) setShuffleSeed(Date.now());
           }}
         />
       </div>
 
-      {/* 右上 */}
       <div className="absolute top-3 right-3 z-40" data-no-swipe="1">
         <MoreMenu />
       </div>
