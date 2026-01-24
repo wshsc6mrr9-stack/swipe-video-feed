@@ -31,7 +31,7 @@ function readMuted(): boolean {
   try {
     const v = localStorage.getItem(KEY_MUTED);
     if (v === "0") return false; // 0 = unmuted
-    if (v === "1") return true;  // 1 = muted
+    if (v === "1") return true; // 1 = muted
   } catch {}
   return true; // デフォはミュート
 }
@@ -42,6 +42,17 @@ function writeMuted(muted: boolean) {
   } catch {}
   try {
     window.dispatchEvent(new Event(EVT_MUTED));
+  } catch {}
+}
+
+function track(videoId: string, event: "play" | "aff_click") {
+  try {
+    fetch("/api/track", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ videoId: String(videoId), event }),
+      keepalive: true,
+    }).catch(() => {});
   } catch {}
 }
 
@@ -70,6 +81,14 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   // ✅ 実際に適用するミュートは「アクティブだけ保存状態を使う」
   //    非アクティブは常に true（強制ミュート）にして二重音を防ぐ
   const effectiveMuted = isActive ? muted : true;
+
+  // ✅ この動画で play を送ったか（同じ動画で何回も送らない）
+  const sentPlayRef = useRef(false);
+
+  // ✅ video が切り替わったら play送信フラグをリセット
+  useEffect(() => {
+    sentPlayRef.current = false;
+  }, [video.id]);
 
   // ✅ 他のVideoPlayerとも同期（設定は同期するが、非アクティブは強制ミュートで鳴らさない）
   useEffect(() => {
@@ -145,13 +164,19 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       try {
         await el.play();
         setPlaying(true);
+
+        // ✅ 再生成功したら play を1回だけ送信
+        if (!sentPlayRef.current) {
+          sentPlayRef.current = true;
+          track(String(video.id), "play");
+        }
       } catch {
         setPlaying(false);
       }
     };
 
     play();
-  }, [isActive, effectiveMuted]);
+  }, [isActive, effectiveMuted, video.id]);
 
   // events
   useEffect(() => {
@@ -192,6 +217,12 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       try {
         await el.play();
         setPlaying(true);
+
+        // ✅ 手動再生でも play を1回だけ送信
+        if (!sentPlayRef.current) {
+          sentPlayRef.current = true;
+          track(String(video.id), "play");
+        }
       } catch {}
     } else {
       el.pause();
@@ -290,19 +321,70 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         onPointerDown={stop}
         onClick={stop}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+          }}
+        >
           <div style={{ display: "flex", gap: 8 }}>
-            <button data-no-swipe="1" onPointerDown={stop} onClick={(e) => { stop(e); skip(-10); }} style={btnSmall}>-10</button>
-            <button data-no-swipe="1" onPointerDown={stop} onClick={(e) => { stop(e); skip(-5); }} style={btnSmall}>-5</button>
-            <button data-no-swipe="1" onPointerDown={stop} onClick={(e) => { stop(e); skip(5); }} style={btnSmall}>+5</button>
-            <button data-no-swipe="1" onPointerDown={stop} onClick={(e) => { stop(e); skip(10); }} style={btnSmall}>+10</button>
+            <button
+              data-no-swipe="1"
+              onPointerDown={stop}
+              onClick={(e) => {
+                stop(e);
+                skip(-10);
+              }}
+              style={btnSmall}
+            >
+              -10
+            </button>
+            <button
+              data-no-swipe="1"
+              onPointerDown={stop}
+              onClick={(e) => {
+                stop(e);
+                skip(-5);
+              }}
+              style={btnSmall}
+            >
+              -5
+            </button>
+            <button
+              data-no-swipe="1"
+              onPointerDown={stop}
+              onClick={(e) => {
+                stop(e);
+                skip(5);
+              }}
+              style={btnSmall}
+            >
+              +5
+            </button>
+            <button
+              data-no-swipe="1"
+              onPointerDown={stop}
+              onClick={(e) => {
+                stop(e);
+                skip(10);
+              }}
+              style={btnSmall}
+            >
+              +10
+            </button>
           </div>
 
           {affUrl ? (
             <a
               data-no-swipe="1"
               onPointerDown={stop}
-              onClick={stop}
+              onClick={(e) => {
+                stop(e);
+                // ✅ クリック計測（遷移しても落ちにくい）
+                track(String(video.id), "aff_click");
+              }}
               href={affUrl}
               target="_blank"
               rel="noreferrer"
@@ -322,7 +404,9 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: "#fff", fontSize: 12, minWidth: 42 }}>{formatTime(current)}</span>
+          <span style={{ color: "#fff", fontSize: 12, minWidth: 42 }}>
+            {formatTime(current)}
+          </span>
           <input
             data-no-swipe="1"
             type="range"
@@ -335,12 +419,26 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
             onChange={(e) => seekTo(Number(e.target.value))}
             style={{ width: "100%" }}
           />
-          <span style={{ color: "#fff", fontSize: 12, minWidth: 42, textAlign: "right" }}>
+          <span
+            style={{
+              color: "#fff",
+              fontSize: 12,
+              minWidth: 42,
+              textAlign: "right",
+            }}
+          >
             {formatTime(duration)}
           </span>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+          }}
+        >
           <div style={{ display: "flex", gap: 10 }}>
             <button
               data-no-swipe="1"
@@ -366,8 +464,21 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
             </button>
           </div>
 
-          <div style={{ color: "rgba(255,255,255,0.85)", fontSize: 12, textAlign: "right", maxWidth: "58vw" }}>
-            <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div
+            style={{
+              color: "rgba(255,255,255,0.85)",
+              fontSize: 12,
+              textAlign: "right",
+              maxWidth: "58vw",
+            }}
+          >
+            <div
+              style={{
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
               {titleText}
             </div>
           </div>
