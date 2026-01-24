@@ -146,7 +146,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     el.muted = effectiveMuted;
 
     if (!isActive) {
-      // 🔥 ここが重要：裏で鳴らないように“確実に止める”
+      // 🔥 裏で鳴らないように“確実に止める”
       try {
         el.pause();
       } catch {}
@@ -262,6 +262,10 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     return video.title || src || "";
   }, [video.title, src]);
 
+  // ✅ PR表示：アフィがある動画だけ
+  // 常に出したいなら： const showPR = true;
+  const showPR = !!affUrl;
+
   return (
     <div
       style={{
@@ -271,6 +275,39 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         background: "black",
       }}
     >
+      {/* ✅ PR（上部中央に固定表示・薄め） */}
+      {showPR ? (
+        <div
+          style={{
+            position: "absolute",
+            top: 10,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 60,
+            pointerEvents: "none",
+            userSelect: "none",
+          }}
+        >
+          <span
+            style={{
+              display: "inline-block",
+              padding: "4px 10px",
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: 1.6,
+
+              color: "rgba(255,255,255,0.55)",
+              background: "rgba(0,0,0,0.18)",
+              border: "1px solid rgba(255,255,255,0.10)",
+              backdropFilter: "blur(4px)",
+            }}
+          >
+            PR
+          </span>
+        </div>
+      ) : null}
+
       <video
         ref={videoRef}
         playsInline
@@ -382,7 +419,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
               onPointerDown={stop}
               onClick={(e) => {
                 stop(e);
-                // ✅ クリック計測（遷移しても落ちにくい）
                 track(String(video.id), "aff_click");
               }}
               href={affUrl}
