@@ -17,6 +17,9 @@ type Props = {
 export default function GenreMenu({ value, onChange }: Props) {
   const [open, setOpen] = useState(false);
 
+  // ✅ 追加：検索
+  const [q, setQ] = useState("");
+
   const currentLabel = useMemo(() => genreLabel(value), [value]);
 
   // ✅ スワイプにイベントを渡さない（VideoFeedのpointer/touch対策）
@@ -24,6 +27,26 @@ export default function GenreMenu({ value, onChange }: Props) {
     e.stopPropagation();
     e.nativeEvent?.stopImmediatePropagation?.();
   };
+
+  const close = () => {
+    setOpen(false);
+    setQ("");
+  };
+
+  const query = q.trim().toLowerCase();
+
+  // ✅ 追加：検索で絞り込み
+  const filteredGroups = useMemo(() => {
+    if (!query) return GENRE_GROUPS;
+
+    return GENRE_GROUPS.map((g) => {
+      const items = g.items.filter((it) => {
+        const t = `${it.key} ${it.label}`.toLowerCase();
+        return t.includes(query);
+      });
+      return { ...g, items };
+    }).filter((g) => g.items.length > 0);
+  }, [query]);
 
   return (
     <div className="absolute left-3 top-3 z-50" data-no-swipe="1">
@@ -58,7 +81,7 @@ export default function GenreMenu({ value, onChange }: Props) {
             onPointerDown={stop}
             onClick={(e) => {
               stop(e);
-              setOpen(false);
+              close();
             }}
           />
 
@@ -78,11 +101,41 @@ export default function GenreMenu({ value, onChange }: Props) {
                 onPointerDown={stop}
                 onClick={(e) => {
                   stop(e);
-                  setOpen(false);
+                  close();
                 }}
               >
                 閉じる
               </button>
+            </div>
+
+            {/* ✅ 追加：検索欄 */}
+            <div className="mb-3" data-no-swipe="1">
+              <div className="relative" data-no-swipe="1">
+                <input
+                  data-no-swipe="1"
+                  className="w-full rounded-xl bg-white/10 text-white px-4 py-3 text-sm outline-none border border-white/10 focus:border-white/25"
+                  placeholder="検索（例：オフィス / フェチ / VR / 3P）"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  onPointerDown={stop}
+                  onClick={stop}
+                  autoFocus
+                />
+                {q ? (
+                  <button
+                    data-no-swipe="1"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-white/10 text-white px-2 py-1 text-xs"
+                    onPointerDown={stop}
+                    onClick={(e) => {
+                      stop(e);
+                      setQ("");
+                    }}
+                    aria-label="検索クリア"
+                  >
+                    ✕
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             <div className="mb-4">
@@ -98,7 +151,7 @@ export default function GenreMenu({ value, onChange }: Props) {
                 onClick={(e) => {
                   stop(e);
                   onChange(GENRE_ALL);
-                  setOpen(false);
+                  close();
                 }}
               >
                 All / ランダムに戻す
@@ -106,7 +159,7 @@ export default function GenreMenu({ value, onChange }: Props) {
             </div>
 
             <div className="space-y-5">
-              {GENRE_GROUPS.map((group) => (
+              {(filteredGroups.length ? filteredGroups : []).map((group) => (
                 <div key={group.title} data-no-swipe="1">
                   <div className="text-white/80 text-sm font-semibold mb-2">
                     {group.title}
@@ -129,7 +182,7 @@ export default function GenreMenu({ value, onChange }: Props) {
                           onClick={(e) => {
                             stop(e);
                             onChange(it.key as GenreKey);
-                            setOpen(false);
+                            close();
                           }}
                         >
                           {it.label}
@@ -139,6 +192,13 @@ export default function GenreMenu({ value, onChange }: Props) {
                   </div>
                 </div>
               ))}
+
+              {/* ✅ 追加：該当なし */}
+              {filteredGroups.length === 0 ? (
+                <div className="text-sm text-white/60 py-10 text-center">
+                  該当なし
+                </div>
+              ) : null}
             </div>
 
             <div className="mt-5 text-xs text-white/50">

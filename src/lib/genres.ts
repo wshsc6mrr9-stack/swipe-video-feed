@@ -69,6 +69,15 @@ const GENRE_MAP = {
   cheating: "浮気",
   otherSituation: "その他（シチュ）",
 
+  // ✅ 追加（シチュ/属性寄り）
+  housewife: "主婦",
+  mother: "お母さん",
+  ntr: "寝取り・寝取られ・NTR",
+  jobsVarious: "職業いろいろ",
+  refreshAdult: "リフレ（成人）",
+  femaleInvestigator: "女捜査官",
+  romance: "恋愛",
+
   // --- タイプ（体型・雰囲気など） ---
   cute: "可愛い",
   cool: "クール",
@@ -91,6 +100,18 @@ const GENRE_MAP = {
   asian: "アジア系",
   western: "欧米系",
   otherType: "その他（タイプ）",
+
+  // ✅ 追加（タイプ/フェチ寄り）
+  bigBoobsFetish: "巨乳フェチ",
+  assFetish: "尻フェチ",
+  shaved: "パイパン",
+  miniType: "ミニ系",
+  pov: "主観",
+  sweaty: "汗だく",
+
+  // ✅ 追加（今回の抜け）
+  oneesan: "お姉さん",
+  superBreasts: "超乳",
 
   // --- コスチューム ---
   cosplay: "コスプレ",
@@ -132,6 +153,11 @@ const GENRE_MAP = {
   documentary2: "ドキュメント系",
   otherGenre: "その他（ジャンル）",
 
+  // ✅ 追加（方向性）
+  amateur: "素人",
+  planned: "企画",
+  otherFetish: "その他フェチ",
+
   // --- プレイ（※強いワードは避けて“一般寄り”に） ---
   kiss: "キス",
   massagePlay: "マッサージプレイ",
@@ -146,6 +172,32 @@ const GENRE_MAP = {
   teasing: "焦らし",
   dirtyTalk: "言葉責め",
   otherPlay: "その他（プレイ）",
+
+  // ✅ 追加（プレイ）
+  fellatio: "フェラ",
+  paizuri: "パイズリ",
+  handjob: "手コキ",
+  cunnilingus: "クンニ",
+  masturbation: "オナニー",
+  sixtyNine: "シックスナイン",
+  analSex: "アナルセックス",
+  deepthroat: "イマラチオ",
+
+  creampie: "中出し",
+  facial: "顔射",
+
+  bondage: "縛り・緊縛",
+  cowgirl: "騎乗位",
+  squirting: "潮吹き",
+
+  urination: "放尿・お漏らし",
+  drinkingUrine: "飲尿",
+
+  humiliation: "羞恥",
+  miserable: "惨め",
+
+  fourP: "4P",
+  bigCock: "デカチン・巨根",
 
   // --- その他 ---
   vr: "VR",
@@ -163,6 +215,11 @@ const GENRE_MAP = {
   fourK: "4K",
   threeD: "3D",
   other: "その他",
+
+  // ✅ 置き換え（成人明記：誤解されやすい単語は安全側へ）
+  tabooAdult: "淫乱",
+  cuteAdult: "美少女",
+  schoolStyleAdult: "女子校",
 } as const;
 
 export type GenreKey = typeof GENRE_ALL | keyof typeof GENRE_MAP;
@@ -227,6 +284,20 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "consultation", label: GENRE_MAP.consultation },
       { key: "affair", label: GENRE_MAP.affair },
       { key: "cheating", label: GENRE_MAP.cheating },
+
+      // ✅ 追加（シチュ/属性）
+      { key: "housewife", label: GENRE_MAP.housewife },
+      { key: "mother", label: GENRE_MAP.mother },
+      { key: "ntr", label: GENRE_MAP.ntr },
+      { key: "jobsVarious", label: GENRE_MAP.jobsVarious },
+      { key: "refreshAdult", label: GENRE_MAP.refreshAdult },
+      { key: "femaleInvestigator", label: GENRE_MAP.femaleInvestigator },
+      { key: "romance", label: GENRE_MAP.romance },
+
+      // ✅ 置き換え（成人明記）
+      { key: "tabooAdult", label: GENRE_MAP.tabooAdult },
+      { key: "schoolStyleAdult", label: GENRE_MAP.schoolStyleAdult },
+
       { key: "otherSituation", label: GENRE_MAP.otherSituation },
     ],
   },
@@ -247,12 +318,32 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "chubby", label: GENRE_MAP.chubby },
       { key: "bigBreasts", label: GENRE_MAP.bigBreasts },
       { key: "smallBreasts", label: GENRE_MAP.smallBreasts },
+
+      // ✅ 追加（今回の抜け）
+      { key: "superBreasts", label: GENRE_MAP.superBreasts },
+
       { key: "bigButt", label: GENRE_MAP.bigButt },
       { key: "thick", label: GENRE_MAP.thick },
       { key: "mature", label: GENRE_MAP.mature },
+
+      // ✅ 追加（今回の抜け）
+      { key: "oneesan", label: GENRE_MAP.oneesan },
+
       { key: "model", label: GENRE_MAP.model },
       { key: "asian", label: GENRE_MAP.asian },
       { key: "western", label: GENRE_MAP.western },
+
+      // ✅ 追加（タイプ/フェチ）
+      { key: "bigBoobsFetish", label: GENRE_MAP.bigBoobsFetish },
+      { key: "assFetish", label: GENRE_MAP.assFetish },
+      { key: "shaved", label: GENRE_MAP.shaved },
+      { key: "miniType", label: GENRE_MAP.miniType },
+      { key: "pov", label: GENRE_MAP.pov },
+      { key: "sweaty", label: GENRE_MAP.sweaty },
+
+      // ✅ 置き換え（成人明記）
+      { key: "cuteAdult", label: GENRE_MAP.cuteAdult },
+
       { key: "otherType", label: GENRE_MAP.otherType },
     ],
   },
@@ -299,6 +390,12 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "fetish", label: GENRE_MAP.fetish },
       { key: "footFetish", label: GENRE_MAP.footFetish },
       { key: "documentary2", label: GENRE_MAP.documentary2 },
+
+      // ✅ 追加
+      { key: "amateur", label: GENRE_MAP.amateur },
+      { key: "planned", label: GENRE_MAP.planned },
+      { key: "otherFetish", label: GENRE_MAP.otherFetish },
+
       { key: "otherGenre", label: GENRE_MAP.otherGenre },
     ],
   },
@@ -317,6 +414,33 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "oil", label: GENRE_MAP.oil },
       { key: "teasing", label: GENRE_MAP.teasing },
       { key: "dirtyTalk", label: GENRE_MAP.dirtyTalk },
+
+      // ✅ 追加（プレイ）
+      { key: "fellatio", label: GENRE_MAP.fellatio },
+      { key: "paizuri", label: GENRE_MAP.paizuri },
+      { key: "handjob", label: GENRE_MAP.handjob },
+      { key: "cunnilingus", label: GENRE_MAP.cunnilingus },
+      { key: "masturbation", label: GENRE_MAP.masturbation },
+      { key: "sixtyNine", label: GENRE_MAP.sixtyNine },
+      { key: "analSex", label: GENRE_MAP.analSex },
+      { key: "deepthroat", label: GENRE_MAP.deepthroat },
+
+      { key: "creampie", label: GENRE_MAP.creampie },
+      { key: "facial", label: GENRE_MAP.facial },
+
+      { key: "bondage", label: GENRE_MAP.bondage },
+      { key: "cowgirl", label: GENRE_MAP.cowgirl },
+      { key: "squirting", label: GENRE_MAP.squirting },
+
+      { key: "urination", label: GENRE_MAP.urination },
+      { key: "drinkingUrine", label: GENRE_MAP.drinkingUrine },
+
+      { key: "humiliation", label: GENRE_MAP.humiliation },
+      { key: "miserable", label: GENRE_MAP.miserable },
+
+      { key: "fourP", label: GENRE_MAP.fourP },
+      { key: "bigCock", label: GENRE_MAP.bigCock },
+
       { key: "otherPlay", label: GENRE_MAP.otherPlay },
     ],
   },
@@ -349,5 +473,7 @@ export function genreLabel(key: GenreKey) {
 
 export function isGenreKey(v: any): v is GenreKey {
   if (v === GENRE_ALL) return true;
-  return typeof v === "string" && Object.prototype.hasOwnProperty.call(GENRE_MAP, v);
+  return (
+    typeof v === "string" && Object.prototype.hasOwnProperty.call(GENRE_MAP, v)
+  );
 }
