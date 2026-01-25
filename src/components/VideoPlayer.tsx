@@ -33,7 +33,7 @@ function readMuted(): boolean {
     if (v === "0") return false; // 0 = unmuted
     if (v === "1") return true; // 1 = muted
   } catch {}
-  return true; // デフォはミュート
+  return true; // default muted
 }
 
 function writeMuted(muted: boolean) {
@@ -65,7 +65,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const [ready, setReady] = useState(false);
   const [playing, setPlaying] = useState(false);
 
-  // 保存されてるミュート状態（全動画で共有する“設定”）
   const [muted, setMuted] = useState<boolean>(() => readMuted());
 
   const [duration, setDuration] = useState(0);
@@ -74,23 +73,18 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const affUrl =
     (video.affiliateUrl ?? (video as any).affUrl) as string | undefined;
   const affLabel =
-    ((video.affiliateLabel ?? (video as any).affLabel) as
-      | string
-      | undefined) || "商品を見る";
+    ((video.affiliateLabel ?? (video as any).affLabel) as string | undefined) ||
+    "商品を見る";
 
-  // ✅ 実際に適用するミュートは「アクティブだけ保存状態を使う」
-  //    非アクティブは常に true（強制ミュート）にして二重音を防ぐ
+  // active だけ保存状態、inactive は常にミュートで二重音防止
   const effectiveMuted = isActive ? muted : true;
 
-  // ✅ この動画で play を送ったか（同じ動画で何回も送らない）
   const sentPlayRef = useRef(false);
 
-  // ✅ video が切り替わったら play送信フラグをリセット
   useEffect(() => {
     sentPlayRef.current = false;
   }, [video.id]);
 
-  // ✅ 他のVideoPlayerとも同期（設定は同期するが、非アクティブは強制ミュートで鳴らさない）
   useEffect(() => {
     const on = () => setMuted(readMuted());
     window.addEventListener(EVT_MUTED, on);
@@ -137,26 +131,21 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     };
   }, [src]);
 
-  // ✅ active だけ再生、inactive は確実に停止
+  // active だけ再生 / inactive は確実に停止
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
 
-    // ミュート適用（inactive は常にミュート）
     el.muted = effectiveMuted;
 
     if (!isActive) {
-      // 🔥 裏で鳴らないように“確実に止める”
       try {
         el.pause();
       } catch {}
       setPlaying(false);
-
-      // 任意：戻った時に音ズレや残音っぽさが出る場合の保険
       try {
         el.currentTime = 0;
       } catch {}
-
       return;
     }
 
@@ -164,8 +153,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       try {
         await el.play();
         setPlaying(true);
-
-        // ✅ 再生成功したら play を1回だけ送信
         if (!sentPlayRef.current) {
           sentPlayRef.current = true;
           track(String(video.id), "play");
@@ -217,8 +204,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       try {
         await el.play();
         setPlaying(true);
-
-        // ✅ 手動再生でも play を1回だけ送信
         if (!sentPlayRef.current) {
           sentPlayRef.current = true;
           track(String(video.id), "play");
@@ -236,11 +221,8 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
     const next = !muted;
     setMuted(next);
-
-    // ✅ 保存＆同期（設定）
     writeMuted(next);
 
-    // ✅ ただし実際の適用は active の時だけ（effectiveMuted）
     el.muted = isActive ? next : true;
   };
 
@@ -262,9 +244,18 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     return video.title || src || "";
   }, [video.title, src]);
 
-  // ✅ PR表示：アフィがある動画だけ
-  // 常に出したいなら： const showPR = true;
   const showPR = !!affUrl;
+
+  // 音が出てる(=ミュート解除) -> ミュート画像を出す
+  // 音が出てない(=ミュート)   -> オン画像を出す
+  const iconSrc = effectiveMuted
+    ? "/icons/volume_on.png"
+    : "/icons/volume_mute.png";
+  const iconAlt = effectiveMuted ? "音を出す" : "ミュートする";
+
+  // ここだけ触ればOK
+  const BTN_SIZE = 45; // 灰色背景のサイズ（固定）
+  const ICON_SIZE =100; // 音量アイコンだけのサイズ
 
   return (
     <div
@@ -275,7 +266,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         background: "black",
       }}
     >
-      {/* ✅ PR（上部中央に固定表示・薄め） */}
       {showPR ? (
         <div
           style={{
@@ -296,7 +286,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
               fontSize: 11,
               fontWeight: 700,
               letterSpacing: 1.6,
-
               color: "rgba(255,255,255,0.55)",
               background: "rgba(0,0,0,0.18)",
               border: "1px solid rgba(255,255,255,0.10)",
@@ -487,6 +476,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
             >
               {playing ? "停止" : "再生"}
             </button>
+
             <button
               data-no-swipe="1"
               onPointerDown={stop}
@@ -494,9 +484,28 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
                 stop(e);
                 toggleMute();
               }}
-              style={btnBig}
+              aria-label={iconAlt}
+              title={iconAlt}
+              style={{ ...btnIconBase, width: BTN_SIZE, height: BTN_SIZE }}
             >
-              {muted ? "ミュート" : "音ON"}
+              <img
+                src={iconSrc}
+                alt=""
+                draggable={false}
+                style={{
+                  width: ICON_SIZE,
+                  height: ICON_SIZE,
+                  position: "absolute",
+                  left: "50%",
+                  top: "50%",
+                  transform: "translate(-50%, -50%)",
+                  display: "block",
+                  objectFit: "contain",
+                }}
+                onError={(ev) => {
+                  (ev.currentTarget as HTMLImageElement).style.display = "none";
+                }}
+              />
             </button>
           </div>
 
@@ -541,4 +550,18 @@ const btnBig: React.CSSProperties = {
   border: "none",
   fontWeight: 800,
   minWidth: 72,
+};
+
+const btnIconBase: React.CSSProperties = {
+  padding: 0,
+  borderRadius: 12,
+  background: "rgba(255,255,255,0.15)",
+  border: "none",
+  minWidth: 0,
+  position: "relative",
+  overflow: "visible",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  lineHeight: 0,
 };
