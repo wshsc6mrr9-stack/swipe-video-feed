@@ -249,9 +249,10 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   // 音が出てる(=ミュート解除) -> ミュート画像を出す
   // 音が出てない(=ミュート)   -> オン画像を出す
   const iconSrc = effectiveMuted
-    ? "/icons/volume_on.png"
-    : "/icons/volume_mute.png";
-  const iconAlt = effectiveMuted ? "音を出す" : "ミュートする";
+  ? "/icons/volume_mute.png" // 聞こえてない時（ミュート中）
+  : "/icons/volume_on.png";  // 聞こえてる時（ミュート解除）
+const iconAlt = effectiveMuted ? "ミュート解除" : "ミュート";
+
 
   // ここだけ触ればOK
   const BTN_SIZE = 45; // 灰色背景のサイズ（固定）
