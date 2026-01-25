@@ -265,12 +265,23 @@ export default function VideoFeed() {
   }, [next, prev]);
 
   const h = vh ?? 0;
-  const translateY = useMemo(() => {
-    const base = h ? -index * h : 0;
-    return base + dragY;
-  }, [h, index, dragY]);
 
-  // ✅ 18歳ゲート未通過なら「ゲートだけ表示」して終わり
+  // ✅ 前/現在/次 の3本だけ描画（Hookは必ず呼ばれる）
+  const windowItems = useMemo(() => {
+    const cur = viewItems[index];
+    const prevItem = index > 0 ? viewItems[index - 1] : undefined;
+    const nextItem = index + 1 < viewItems.length ? viewItems[index + 1] : undefined;
+
+    const out: Array<{ item: VideoItem; pos: -1 | 0 | 1 }> = [];
+    if (prevItem) out.push({ item: prevItem, pos: -1 });
+    if (cur) out.push({ item: cur, pos: 0 });
+    if (nextItem) out.push({ item: nextItem, pos: 1 });
+    return out;
+  }, [viewItems, index]);
+
+  const translateY = useMemo(() => dragY, [dragY]);
+
+  // ✅ ここで初めてゲート判定（Hookの後）
   if (!ageOk) {
     return <AgeGate onAllowed={() => setAgeOk(true)} />;
   }
@@ -304,19 +315,29 @@ export default function VideoFeed() {
 
       <div
         style={{
+          position: "relative",
           height: vh ? `${vh}px` : "100svh",
           transform: `translate3d(0, ${translateY}px, 0)`,
           transition: dragging.current ? "none" : "transform 220ms ease-out",
           willChange: "transform",
         }}
       >
-        {viewItems.map((video, i) => (
-          <div key={video.id} style={{ height: vh ? `${vh}px` : "100svh" }}>
+        {windowItems.map(({ item, pos }) => (
+          <div
+            key={item.id}
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: h ? `${pos * h}px` : 0,
+              height: vh ? `${vh}px` : "100svh",
+            }}
+          >
             <VideoCard
               // @ts-ignore
-              video={video}
+              video={item}
               // @ts-ignore
-              isActive={i === index}
+              isActive={pos === 0}
               // @ts-ignore
               onNext={next}
               // @ts-ignore
