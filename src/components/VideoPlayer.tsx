@@ -414,15 +414,15 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         width: "100%",
         height: "100%",
         background: "black",
-        overflow: "hidden", // ✅ はみ出し物理的にカット
+        overflow: "hidden",
       }}
     >
-      {/* PR を上中央 */}
+      {/* ✅ PR：safe-area top を考慮して中央 */}
       {showPR ? (
         <div
           style={{
             position: "absolute",
-            top: 10,
+            top: "calc(env(safe-area-inset-top) + 10px)",
             left: "50%",
             transform: "translateX(-50%)",
             zIndex: 60,
@@ -458,7 +458,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           height: "100%",
           maxWidth: "100%",
           maxHeight: "100%",
-          objectFit: "contain", // ✅ 枠内に収める
+          objectFit: "contain",
           objectPosition: "center",
           background: "black",
           position: "absolute",
@@ -489,9 +489,11 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         data-ui="controls"
         style={{
           position: "absolute",
-          left: 12,
-          right: 12,
-          bottom: 12,
+          // ✅ 左右を safe-area 分だけ内側へ
+          left: "calc(env(safe-area-inset-left) + 12px)",
+          right: "calc(env(safe-area-inset-right) + 12px)",
+          // ✅ 下をホームバー分だけ上げる
+          bottom: "calc(env(safe-area-inset-bottom) + 12px)",
           zIndex: 20,
           pointerEvents: "auto",
         }}
@@ -507,6 +509,9 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
             boxShadow: "0 14px 40px rgba(0,0,0,0.35)",
             display: "grid",
             gap: 10,
+            // ✅ 横が狭い端末はここで縮む（はみ出し防止）
+            maxWidth: "min(560px, 100%)",
+            margin: "0 auto",
           }}
         >
           {/* タイトル */}
@@ -545,50 +550,50 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
             </span>
           </div>
 
-          {/* 下段 */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr auto 1fr",
-              alignItems: "center",
-              gap: 10,
-              minHeight: 52,
-            }}
-          >
+          {/* 下段：スマホ幅で自動折り返し */}
+          <div style={bottomGrid}>
             {/* 左：スキップ */}
-            <div
-              style={{
-                justifySelf: "start",
-                display: "grid",
-                gridTemplateColumns: "repeat(4, auto)",
-                gap: 10,
-                alignItems: "center",
-              }}
-            >
-              <button data-no-swipe="1" data-ui="controls" onPointerDown={stop} onClick={(e) => (stop(e), skip(-10))} style={pillBtnBig}>
+            <div style={skipWrap}>
+              <button
+                data-no-swipe="1"
+                data-ui="controls"
+                onPointerDown={stop}
+                onClick={(e) => (stop(e), skip(-10))}
+                style={pillBtnBig}
+              >
                 -10
               </button>
-              <button data-no-swipe="1" data-ui="controls" onPointerDown={stop} onClick={(e) => (stop(e), skip(-5))} style={pillBtnBig}>
+              <button
+                data-no-swipe="1"
+                data-ui="controls"
+                onPointerDown={stop}
+                onClick={(e) => (stop(e), skip(-5))}
+                style={pillBtnBig}
+              >
                 -5
               </button>
-              <button data-no-swipe="1" data-ui="controls" onPointerDown={stop} onClick={(e) => (stop(e), skip(5))} style={pillBtnBig}>
+              <button
+                data-no-swipe="1"
+                data-ui="controls"
+                onPointerDown={stop}
+                onClick={(e) => (stop(e), skip(5))}
+                style={pillBtnBig}
+              >
                 +5
               </button>
-              <button data-no-swipe="1" data-ui="controls" onPointerDown={stop} onClick={(e) => (stop(e), skip(10))} style={pillBtnBig}>
+              <button
+                data-no-swipe="1"
+                data-ui="controls"
+                onPointerDown={stop}
+                onClick={(e) => (stop(e), skip(10))}
+                style={pillBtnBig}
+              >
                 +10
               </button>
             </div>
 
-            {/* 中央 */}
-            <div
-              style={{
-                justifySelf: "center",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 10,
-                whiteSpace: "nowrap",
-              }}
-            >
+            {/* 中央：本編/♡/共有 */}
+            <div style={centerRow}>
               {affUrl ? (
                 <a
                   data-no-swipe="1"
@@ -637,15 +642,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
             </div>
 
             {/* 右：再生＆ミュート */}
-            <div
-              style={{
-                justifySelf: "end",
-                display: "flex",
-                gap: 10,
-                alignItems: "center",
-                minWidth: 140,
-              }}
-            >
+            <div style={rightRow}>
               <button
                 data-no-swipe="1"
                 data-ui="controls"
@@ -670,8 +667,8 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
                   alt=""
                   draggable={false}
                   style={{
-                    width: 99,
-                    height: 66,
+                    width: 22,
+                    height: 22,
                     display: "block",
                     objectFit: "contain",
                   }}
@@ -702,6 +699,46 @@ const titleClamp: React.CSSProperties = {
   lineHeight: 1.35,
 };
 
+/** ✅ 下段：幅が狭いと自動で2段/3段に折れる */
+const bottomGrid: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 10,
+  alignItems: "center",
+  justifyContent: "space-between",
+};
+
+/** 左：スキップは折り返し可 */
+const skipWrap: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 10,
+  alignItems: "center",
+  justifyContent: "flex-start",
+  flex: "1 1 240px",
+};
+
+/** 中央：本編/♡/共有（折り返し可） */
+const centerRow: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 10,
+  alignItems: "center",
+  justifyContent: "center",
+  flex: "1 1 220px",
+  minWidth: 200,
+};
+
+/** 右：再生/ミュート（右寄せ、最低幅） */
+const rightRow: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  alignItems: "center",
+  justifyContent: "flex-end",
+  flex: "0 1 auto",
+  marginLeft: "auto",
+};
+
 /** スキップ */
 const pillBtnBig: React.CSSProperties = {
   minWidth: 54,
@@ -724,7 +761,7 @@ const primaryBtnSmallBg: React.CSSProperties = {
   minWidth: 64,
   padding: "0 12px",
   borderRadius: 999,
-  background: "rgba(255,255,255,0.12)", // 少し薄く
+  background: "rgba(255,255,255,0.12)",
   color: "rgba(255,255,255,0.98)",
   border: "1px solid rgba(255,255,255,0.16)",
   fontWeight: 900,
@@ -735,7 +772,7 @@ const primaryBtnSmallBg: React.CSSProperties = {
   WebkitBackdropFilter: "blur(6px)",
 };
 
-/** ミュート（画像） */
+/** ミュート */
 const iconBtn: React.CSSProperties = {
   width: 44,
   height: 44,
@@ -753,7 +790,7 @@ const iconBtn: React.CSSProperties = {
   WebkitBackdropFilter: "blur(6px)",
 };
 
-/** ✅ 商品：もうちょい大きく */
+/** 商品 */
 const productRoundBtn: React.CSSProperties = {
   width: 60,
   height: 60,

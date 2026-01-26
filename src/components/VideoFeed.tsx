@@ -362,6 +362,12 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
 
   const translateY = dragY;
 
+  // ✅ safe-area 対応（iPhoneノッチ/角丸対策）
+  const SAFE_PAD = 12;
+  const safeTop = `calc(env(safe-area-inset-top) + ${SAFE_PAD}px)`;
+  const safeLeft = `calc(env(safe-area-inset-left) + ${SAFE_PAD}px)`;
+  const safeRight = `calc(env(safe-area-inset-right) + ${SAFE_PAD}px)`;
+
   return (
     <div
       className="relative w-full bg-black overflow-hidden"
@@ -376,7 +382,11 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
     >
       {/* ✅ initialGenreで固定してる時はMenuを隠せる */}
       {!hideGenreMenu ? (
-        <div className="absolute top-3 left-3 z-40" data-no-swipe="1">
+        <div
+          className="absolute z-40"
+          data-no-swipe="1"
+          style={{ top: safeTop, left: safeLeft }}
+        >
           <GenreMenu
             value={genre}
             onChange={(v) => {
@@ -392,7 +402,11 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
         </div>
       ) : null}
 
-      <div className="absolute top-3 right-3 z-40" data-no-swipe="1">
+      <div
+        className="absolute z-40"
+        data-no-swipe="1"
+        style={{ top: safeTop, right: safeRight }}
+      >
         <MoreMenu />
       </div>
 

@@ -30,13 +30,24 @@ export default function VideoCard({ video, isActive }: Props) {
     (video.affLabel ?? video.affiliateLabel ?? "商品を見る")?.trim() || "商品を見る";
 
   return (
-    <div className="relative h-[100svh] w-full bg-black">
-      <VideoPlayer
-        // VideoPlayer は video.url / video.src どっちでも読むが、両方入れとくと安全
-        // @ts-ignore
-        video={{ ...video, url: src, src, affUrl, affLabel }}
-        isActive={isActive}
-      />
+    <div className="relative w-full bg-black" style={{ height: "100svh" }}>
+      {/* ✅ safe-area を VideoPlayer 側のUIレイヤーで使えるようにする */}
+      <div
+        className="absolute inset-0"
+        style={{
+          paddingTop: "env(safe-area-inset-top)",
+          paddingRight: "env(safe-area-inset-right)",
+          paddingBottom: "env(safe-area-inset-bottom)",
+          paddingLeft: "env(safe-area-inset-left)",
+        }}
+      >
+        <VideoPlayer
+          // VideoPlayer は video.url / video.src どっちでも読むが、両方入れとくと安全
+          // @ts-ignore
+          video={{ ...video, url: src, src, affUrl, affLabel }}
+          isActive={isActive}
+        />
+      </div>
     </div>
   );
 }
