@@ -1,14 +1,15 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { GenreKey } from "@/lib/genres";
 
-// VideoFeed を「クライアントでだけ」描画する（SSRしない）
-const VideoFeed = dynamic(() => import("@/components/VideoFeed"), {
-  ssr: false,
-  // ちらつき防止：真っ黒の土台だけ出す（UIは変えない）
-  loading: () => <div className="min-h-screen bg-black" />,
-});
+const VideoFeed = dynamic(() => import("@/components/VideoFeed"), { ssr: false });
 
-export default function VideoFeedNoSSR() {
-  return <VideoFeed />;
+type Props = {
+  initialGenre?: GenreKey;
+  hideGenreMenu?: boolean;
+};
+
+export default function VideoFeedNoSSR({ initialGenre, hideGenreMenu }: Props) {
+  return <VideoFeed initialGenre={initialGenre} hideGenreMenu={hideGenreMenu} />;
 }

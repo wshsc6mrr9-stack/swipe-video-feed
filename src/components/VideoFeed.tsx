@@ -5,9 +5,8 @@ import VideoCard from "@/components/VideoCard";
 
 import GenreMenu from "@/components/GenreMenu";
 import MoreMenu from "@/components/MoreMenu";
-import AgeGate from "@/components/AgeGate";
 
-import { GENRE_ALL, type GenreKey } from "@/lib/genres";
+import { GENRE_ALL, GENRE_LIKES, type GenreKey } from "@/lib/genres";
 
 type VideoItem = {
   id: string;
@@ -16,6 +15,8 @@ type VideoItem = {
   src?: string;
   poster?: string;
   srcType?: "mp4" | "hls";
+
+  // aff 互換
   affUrl?: string;
   affLabel?: string;
   affiliateUrl?: string;
@@ -23,7 +24,12 @@ type VideoItem = {
 
   genres?: string[];
   genre?: string;
+
+  // ✅ いいね数
+  likeCount?: number;
 };
+
+const EVT_LIKES = "likes_changed_v1";
 
 function isInteractiveTarget(target: EventTarget | null) {
   const el = target as HTMLElement | null;
@@ -60,19 +66,40 @@ function shuffleWithSeed<T>(arr: T[], seed: number) {
   return a;
 }
 
-export default function VideoFeed() {
-  // ✅ 18歳ゲート通過フラグ
-  const [ageOk, setAgeOk] = useState(false);
+type Props = {
+  /** ジャンルページなどで固定したい時に渡す（例: "amateur"） */
+  initialGenre?: GenreKey;
+  /**
+   * 初期ジャンル固定時に、左上のGenreMenuを隠したい場合に true
+   *（ジャンルページは固定表示の方が迷わない）
+   */
+  hideGenreMenu?: boolean;
+};
 
+export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
 
   const [vh, setVh] = useState<number | null>(null);
 
-  // ✅ ジャンル状態
-  const [genre, setGenre] = useState<GenreKey>(GENRE_ALL);
+  // ✅ ジャンル状態（初期値を受け取れる）
+  const [genre, setGenre] = useState<GenreKey>(initialGenre ?? GENRE_ALL);
   const [shuffleSeed, setShuffleSeed] = useState<number>(() => Date.now());
 
+  // ✅ ルートが変わって initialGenre が変わったら追従
+  // ⚠️ 依存配列は固定（条件で [] / [xxx] を切り替えない）
+  useEffect(() => {
+    if (initialGenre) {
+      setGenre(initialGenre);
+      setIndex(0);
+      return;
+    }
+    setGenre(GENRE_ALL);
+    setIndex(0);
+    setShuffleSeed(Date.now());
+  }, [initialGenre]);
+
+  // ✅ 画面高さ追従
   useEffect(() => {
     const update = () => setVh(window.innerHeight);
     update();
@@ -80,8 +107,10 @@ export default function VideoFeed() {
     return () => window.removeEventListener("resize", update);
   }, []);
 
+  // ✅ 初回：動画一覧ロード + いいね数を一括取得してマージ
   useEffect(() => {
     let alive = true;
+
     (async () => {
       try {
         const res = await fetch("/api/videos", { cache: "no-store" });
@@ -89,24 +118,46 @@ export default function VideoFeed() {
         const list = (json?.items ?? json?.data ?? json ?? []) as any[];
         if (!alive) return;
 
-        const normalized: VideoItem[] = list.map((v) => ({
-          id: String(v.id ?? crypto.randomUUID?.() ?? Math.random()),
-          title: String(v.title ?? ""),
-          url: v.url ?? v.src,
-          src: v.src ?? v.url,
-          poster: v.poster,
-          srcType: v.srcType,
+        const normalized: VideoItem[] = list.map((v) => {
+          // ✅ aff をどっちで来ても拾って、両方に詰める（「商品」復活の要）
+          const affUrl = (v?.affUrl ?? v?.affiliateUrl) as string | undefined;
+          const affLabel = (v?.affLabel ?? v?.affiliateLabel) as string | undefined;
 
-          // aff 互換
-          affUrl: v.affUrl ?? v.affiliateUrl,
-          affLabel: v.affLabel ?? v.affiliateLabel,
-          affiliateUrl: v.affiliateUrl,
-          affiliateLabel: v.affiliateLabel,
+          return {
+            id: String(v.id ?? crypto.randomUUID?.() ?? Math.random()),
+            title: String(v.title ?? ""),
+            url: v.url ?? v.src,
+            src: v.src ?? v.url,
+            poster: v.poster,
+            srcType: v.srcType,
 
-          // genre 互換
-          genres: Array.isArray(v.genres) ? v.genres : undefined,
-          genre: typeof v.genre === "string" ? v.genre : undefined,
-        }));
+            // ✅ 重要：両方に同じ値を入れる
+            affUrl,
+            affLabel,
+            affiliateUrl: affUrl,
+            affiliateLabel: affLabel,
+
+            // genre 互換
+            genres: Array.isArray(v.genres) ? v.genres : undefined,
+            genre: typeof v.genre === "string" ? v.genre : undefined,
+
+            likeCount: 0,
+          };
+        });
+
+        // ✅ いいね数をまとめて取得
+        try {
+          const ids = normalized.map((v) => v.id).filter(Boolean);
+          if (ids.length) {
+            const r2 = await fetch(
+              `/api/likes?ids=${encodeURIComponent(ids.join(","))}`,
+              { cache: "no-store" }
+            );
+            const j2 = await r2.json().catch(() => null);
+            const counts = (j2?.counts ?? {}) as Record<string, number>;
+            for (const v of normalized) v.likeCount = Number(counts[v.id] ?? 0);
+          }
+        } catch {}
 
         setItems(normalized);
         setIndex((i) => Math.min(i, Math.max(0, normalized.length - 1)));
@@ -120,8 +171,31 @@ export default function VideoFeed() {
     };
   }, []);
 
-  // ✅ フィルタ & Allはシャッフル
+  // ✅ VideoPlayer 側で♡が押されたら items の likeCount を更新
+  useEffect(() => {
+    const on = (ev: Event) => {
+      const e = ev as CustomEvent<{ videoId: string; count: number }>;
+      const videoId = e?.detail?.videoId;
+      const count = e?.detail?.count;
+      if (!videoId || !Number.isFinite(count)) return;
+
+      setItems((prev) =>
+        prev.map((v) => (v.id === videoId ? { ...v, likeCount: Number(count) } : v))
+      );
+    };
+
+    window.addEventListener(EVT_LIKES, on as any);
+    return () => window.removeEventListener(EVT_LIKES, on as any);
+  }, []);
+
+  // ✅ フィルタ & Allはシャッフル & ♡ランキングは likeCount desc
   const viewItems = useMemo(() => {
+    if (genre === GENRE_LIKES) {
+      return items
+        .slice()
+        .sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
+    }
+
     if (genre === GENRE_ALL) return shuffleWithSeed(items, shuffleSeed);
 
     return items.filter((v) => {
@@ -134,6 +208,7 @@ export default function VideoFeed() {
     });
   }, [items, genre, shuffleSeed]);
 
+  // ✅ viewItems が変わったら index を範囲内に
   useEffect(() => {
     setIndex((i) => Math.max(0, Math.min(viewItems.length - 1, i)));
   }, [viewItems.length]);
@@ -246,16 +321,22 @@ export default function VideoFeed() {
     endDrag();
   }, [endDrag]);
 
+  // ✅ wheel/keydown（GenreMenu上では wheel を無視する）
   useEffect(() => {
     const onWheel = (ev: WheelEvent) => {
+      const t = ev.target as HTMLElement | null;
+      if (t?.closest("[data-no-swipe='1'], [data-ui='controls']")) return;
+
       if (Math.abs(ev.deltaY) < 10) return;
       if (ev.deltaY > 0) next();
       else prev();
     };
+
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === "ArrowDown" || ev.key === "j") next();
       if (ev.key === "ArrowUp" || ev.key === "k") prev();
     };
+
     window.addEventListener("wheel", onWheel, { passive: true });
     window.addEventListener("keydown", onKey);
     return () => {
@@ -266,7 +347,7 @@ export default function VideoFeed() {
 
   const h = vh ?? 0;
 
-  // ✅ 前/現在/次 の3本だけ描画（Hookは必ず呼ばれる）
+  // ✅ 前/現在/次 の3本だけ描画
   const windowItems = useMemo(() => {
     const cur = viewItems[index];
     const prevItem = index > 0 ? viewItems[index - 1] : undefined;
@@ -279,12 +360,7 @@ export default function VideoFeed() {
     return out;
   }, [viewItems, index]);
 
-  const translateY = useMemo(() => dragY, [dragY]);
-
-  // ✅ ここで初めてゲート判定（Hookの後）
-  if (!ageOk) {
-    return <AgeGate onAllowed={() => setAgeOk(true)} />;
-  }
+  const translateY = dragY;
 
   return (
     <div
@@ -298,16 +374,23 @@ export default function VideoFeed() {
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
     >
-      <div className="absolute top-3 left-3 z-40" data-no-swipe="1">
-        <GenreMenu
-          value={genre}
-          onChange={(v) => {
-            setGenre(v);
-            setIndex(0);
-            if (v === GENRE_ALL) setShuffleSeed(Date.now());
-          }}
-        />
-      </div>
+      {/* ✅ initialGenreで固定してる時はMenuを隠せる */}
+      {!hideGenreMenu ? (
+        <div className="absolute top-3 left-3 z-40" data-no-swipe="1">
+          <GenreMenu
+            value={genre}
+            onChange={(v) => {
+              if (initialGenre) return;
+
+              setGenre(v);
+              setIndex(0);
+
+              // ✅ ALL だけシャッフル更新
+              if (v === GENRE_ALL) setShuffleSeed(Date.now());
+            }}
+          />
+        </div>
+      ) : null}
 
       <div className="absolute top-3 right-3 z-40" data-no-swipe="1">
         <MoreMenu />

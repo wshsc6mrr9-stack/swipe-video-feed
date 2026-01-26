@@ -1,220 +1,165 @@
-// src/components/GenreMenu.tsx
 "use client";
 
-import React, { useMemo, useRef, useState, useEffect } from "react";
-import { GENRE_ALL, GENRE_GROUPS, genreLabel, type GenreKey } from "@/lib/genres";
+import React, { useMemo, useState } from "react";
+import { GENRE_ALL, GENRE_LIKES, GENRE_GROUPS, type GenreKey } from "@/lib/genres";
 
 type Props = {
   value: GenreKey;
   onChange: (v: GenreKey) => void;
 };
 
-function stopEvent(e: any) {
-  e.stopPropagation();
+function stop(e: any) {
+  e.stopPropagation?.();
   e.nativeEvent?.stopImmediatePropagation?.();
 }
 
-function blurActiveElement() {
-  const el = document.activeElement as HTMLElement | null;
-  if (el && typeof el.blur === "function") el.blur();
-  // iOS Safari がズーム状態を引きずる時の保険
-  setTimeout(() => {
-    try {
-      window.scrollTo(window.scrollX, window.scrollY);
-    } catch {}
-  }, 0);
+// GENRE_GROUPS から label を引く（genreLabel が無くても動く）
+// ✅ 左上ボタン表示だけ「ジャンル検索」に変更
+function labelOf(key: GenreKey) {
+  if (key === GENRE_ALL) return "ジャンル検索";
+  if (key === GENRE_LIKES) return "♡ランキング";
+  for (const g of GENRE_GROUPS as any[]) {
+    for (const it of g.items as any[]) {
+      if (it.key === key) return String(it.label ?? key);
+    }
+  }
+  return String(key);
 }
 
 export default function GenreMenu({ value, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
 
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  const currentLabel = useMemo(() => genreLabel(value), [value]);
-
-  // 開いたら検索欄にフォーカス（任意）
-  useEffect(() => {
-    if (!open) return;
-    const t = setTimeout(() => {
-      try {
-        inputRef.current?.focus();
-      } catch {}
-    }, 50);
-    return () => clearTimeout(t);
-  }, [open]);
-
-  const close = () => {
-    blurActiveElement();
-    setOpen(false);
-    setQ("");
-  };
-
-  const query = q.trim().toLowerCase();
-
   const filteredGroups = useMemo(() => {
-    if (!query) return GENRE_GROUPS;
+    const query = q.trim().toLowerCase();
+    if (!query) return GENRE_GROUPS as any[];
 
-    return GENRE_GROUPS.map((g) => {
-      const items = g.items.filter((it) => {
-        const hay = `${String(it.key)} ${it.label}`.toLowerCase();
-        return hay.includes(query);
-      });
-      return { ...g, items };
-    }).filter((g) => g.items.length > 0);
-  }, [query]);
+    return (GENRE_GROUPS as any[])
+      .map((g) => ({
+        ...g,
+        items: (g.items as any[]).filter((it) => {
+          const k = String(it.key).toLowerCase();
+          const l = String(it.label ?? "").toLowerCase();
+          return k.includes(query) || l.includes(query);
+        }),
+      }))
+      .filter((g) => (g.items as any[]).length > 0);
+  }, [q]);
 
   return (
-    <div className="absolute left-3 top-3 z-50" data-no-swipe="1">
-      {/* 🔍ボタン */}
+    <div
+      className="relative"
+      data-no-swipe="1"
+      onPointerDown={stop}
+      onPointerMove={stop}
+      onTouchStart={stop}
+      onTouchMove={stop}
+      onWheel={stop}
+    >
+      {/* 開くボタン */}
       <button
-        data-no-swipe="1"
-        className="inline-flex items-center gap-2 rounded-full bg-white/10 text-white px-3 py-2 text-sm font-semibold backdrop-blur"
-        onPointerDown={stopEvent}
-        onClick={(e) => {
-          stopEvent(e);
-          setOpen(true);
-        }}
-        aria-label="ジャンル検索"
+        type="button"
+        className="px-3 py-2 rounded-full bg-white/10 text-white text-sm border border-white/15"
+        onClick={() => setOpen((v) => !v)}
       >
-        <span className="text-base">🔍</span>
-        <span className="max-w-[40vw] truncate">{currentLabel}</span>
+        {labelOf(value)}
       </button>
 
-      {/* オーバーレイ */}
+      {/* メニュー本体 */}
       {open && (
         <div
-          className="fixed inset-0 z-[100]"
-          data-no-swipe="1"
-          onPointerDown={stopEvent}
-          onClick={stopEvent}
-          style={{ pointerEvents: "auto" }}
+          className="absolute left-0 mt-2 w-56 rounded-2xl border border-white/15 bg-black/70 backdrop-blur p-3 shadow-xl"
+          style={{ maxHeight: "70vh", overflow: "hidden", touchAction: "pan-y" }}
         >
-          {/* 背景（ここだけはクリックで閉じる） */}
-          <div
-            className="absolute inset-0 bg-black/60"
-            data-no-swipe="1"
-            onPointerDown={stopEvent}
-            onClick={(e) => {
-              stopEvent(e);
-              close();
-            }}
+          <div className="flex items-center gap-2 mb-2">
+            <div className="text-xs text-white/70">ジャンル</div>
+            <button
+              type="button"
+              className="ml-auto text-white/70 text-xs px-2 py-1 rounded-md bg-white/10"
+              onClick={() => setOpen(false)}
+            >
+              ×
+            </button>
+          </div>
+
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="検索"
+            className="w-full mb-2 px-3 py-2 rounded-xl bg-white/10 text-white text-sm outline-none border border-white/10"
           />
 
-          {/* パネル */}
+          {/* ✅ ここがスクロール領域 */}
           <div
-            className="absolute left-3 right-3 top-16 max-h-[78svh] overflow-auto rounded-2xl bg-neutral-950/95 border border-white/10 p-4 backdrop-blur"
-            data-no-swipe="1"
-            onPointerDown={stopEvent}
-            onClick={stopEvent}
-            style={{ pointerEvents: "auto" }}
+            className="space-y-2"
+            style={{
+              maxHeight: "56vh",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+              touchAction: "pan-y",
+              paddingRight: 4,
+            }}
           >
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <div className="text-white font-bold">ジャンル</div>
-              <button
-                data-no-swipe="1"
-                className="rounded-lg bg-white/10 text-white px-3 py-2 text-sm"
-                onPointerDown={stopEvent}
-                onClick={(e) => {
-                  stopEvent(e);
-                  close();
-                }}
-              >
-                閉じる
-              </button>
-            </div>
+            {/* All */}
+            <button
+              type="button"
+              className={`w-full text-left px-3 py-2 rounded-xl border ${
+                value === GENRE_ALL
+                  ? "bg-white text-black border-white"
+                  : "bg-white/10 text-white border-white/10"
+              }`}
+              onClick={() => {
+                onChange(GENRE_ALL);
+                setOpen(false);
+              }}
+            >
+              All
+            </button>
 
-            {/* ✅ 検索（iPhoneズーム防止：必ず16px以上） */}
-            <div className="mb-3">
-              <input
-                ref={inputRef}
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="ジャンル検索（例：主観 / 超乳 / 企画）"
-                inputMode="search"
-                className="w-full rounded-xl bg-black/40 border border-white/10 px-3 py-3 text-[16px] text-white outline-none"
-                // ↑ text-[16px] が超重要（iOS自動ズーム対策）
-                onPointerDown={stopEvent}
-                onClick={stopEvent}
-              />
-              {q ? (
-                <div className="mt-2 flex justify-end">
-                  <button
-                    className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
-                    onPointerDown={stopEvent}
-                    onClick={(e) => {
-                      stopEvent(e);
-                      setQ("");
-                      // 連続操作でもズーム残りを避ける
-                      blurActiveElement();
-                      setTimeout(() => inputRef.current?.focus(), 30);
-                    }}
-                  >
-                    クリア
-                  </button>
+            {/* ✅ All の次に：♡ランキング */}
+            <button
+              type="button"
+              className={`w-full text-left px-3 py-2 rounded-xl border ${
+                value === GENRE_LIKES
+                  ? "bg-white text-black border-white"
+                  : "bg-white/10 text-white border-white/10"
+              }`}
+              onClick={() => {
+                onChange(GENRE_LIKES);
+                setOpen(false);
+              }}
+            >
+              ♡ランキング
+            </button>
+
+            {filteredGroups.map((g) => (
+              <div key={String(g.title)} className="space-y-2">
+                <div className="text-xs text-white/60 px-1">{g.title}</div>
+                <div className="space-y-2">
+                  {(g.items as any[]).map((it) => {
+                    const k = it.key as GenreKey;
+                    const active = value === k;
+                    return (
+                      <button
+                        key={String(it.key)}
+                        type="button"
+                        className={`w-full text-left px-3 py-2 rounded-xl border ${
+                          active
+                            ? "bg-white text-black border-white"
+                            : "bg-white/10 text-white border-white/10"
+                        }`}
+                        onClick={() => {
+                          onChange(k);
+                          setOpen(false);
+                        }}
+                      >
+                        {String(it.label ?? it.key)}
+                      </button>
+                    );
+                  })}
                 </div>
-              ) : null}
-            </div>
-
-            <div className="mb-4">
-              <button
-                data-no-swipe="1"
-                className={[
-                  "w-full rounded-xl px-4 py-3 text-sm font-bold",
-                  value === GENRE_ALL ? "bg-white text-black" : "bg-white/10 text-white",
-                ].join(" ")}
-                onPointerDown={stopEvent}
-                onClick={(e) => {
-                  stopEvent(e);
-                  onChange(GENRE_ALL);
-                  close();
-                }}
-              >
-                All / ランダムに戻す
-              </button>
-            </div>
-
-            <div className="space-y-5">
-              {filteredGroups.map((group) => (
-                <div key={group.title} data-no-swipe="1">
-                  <div className="text-white/80 text-sm font-semibold mb-2">
-                    {group.title}
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2" data-no-swipe="1">
-                    {group.items.map((it) => {
-                      const active = value === it.key;
-                      return (
-                        <button
-                          key={it.key}
-                          data-no-swipe="1"
-                          className={[
-                            "rounded-xl px-3 py-3 text-sm font-semibold",
-                            active ? "bg-white text-black" : "bg-white/10 text-white",
-                          ].join(" ")}
-                          onPointerDown={stopEvent}
-                          onClick={(e) => {
-                            stopEvent(e);
-                            onChange(it.key as GenreKey);
-                            close();
-                          }}
-                        >
-                          {it.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-
-              {filteredGroups.length === 0 ? (
-                <div className="text-xs text-white/60">該当なし</div>
-              ) : null}
-            </div>
-
-            <div className="mt-5 text-xs text-white/50">
-              ※ All は「全動画をシャッフル」。ジャンルは「そのジャンルだけ」を再生。
-            </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

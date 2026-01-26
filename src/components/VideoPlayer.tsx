@@ -5,12 +5,15 @@ import Hls from "hls.js";
 import type { VideoMeta } from "@/lib/types";
 
 type Props = {
-  video: VideoMeta;
+  video: VideoMeta & { likeCount?: number };
   isActive?: boolean;
 };
 
 const KEY_MUTED = "audio_muted_v1";
 const EVT_MUTED = "audio_muted_changed_v1";
+
+const KEY_LIKED = "liked_videos_v1";
+const EVT_LIKES = "likes_changed_v1";
 
 function isHlsUrl(url?: string) {
   return !!url && url.includes(".m3u8");
@@ -30,10 +33,10 @@ function formatTime(t: number) {
 function readMuted(): boolean {
   try {
     const v = localStorage.getItem(KEY_MUTED);
-    if (v === "0") return false; // 0 = unmuted
-    if (v === "1") return true; // 1 = muted
+    if (v === "0") return false;
+    if (v === "1") return true;
   } catch {}
-  return true; // default muted
+  return true;
 }
 
 function writeMuted(muted: boolean) {
@@ -42,6 +45,22 @@ function writeMuted(muted: boolean) {
   } catch {}
   try {
     window.dispatchEvent(new Event(EVT_MUTED));
+  } catch {}
+}
+
+function readLikedSet(): Set<string> {
+  try {
+    const raw = localStorage.getItem(KEY_LIKED);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) return new Set(arr.map(String));
+  } catch {}
+  return new Set();
+}
+
+function writeLikedSet(set: Set<string>) {
+  try {
+    localStorage.setItem(KEY_LIKED, JSON.stringify(Array.from(set)));
   } catch {}
 }
 
@@ -70,13 +89,29 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const [duration, setDuration] = useState(0);
   const [current, setCurrent] = useState(0);
 
-  const affUrl =
-    (video.affiliateUrl ?? (video as any).affUrl) as string | undefined;
-  const affLabel =
-    ((video.affiliateLabel ?? (video as any).affLabel) as string | undefined) ||
-    "商品を見る";
+  // ✅ like
+  const [likeCount, setLikeCount] = useState<number>(() =>
+    Number(video.likeCount ?? 0)
+  );
+  const [liked, setLiked] = useState<boolean>(() =>
+    readLikedSet().has(String(video.id))
+  );
 
-  // active だけ保存状態、inactive は常にミュートで二重音防止
+  // ✅ 省エネ参照
+  const currentRef = useRef(0);
+  const durationRef = useRef(0);
+  const lastUiRef = useRef(0);
+  const seekRef = useRef<HTMLInputElement | null>(null);
+
+  const vAny = video as unknown as {
+    affUrl?: string;
+    affLabel?: string;
+    affiliateUrl?: string;
+    affiliateLabel?: string;
+  };
+
+  const affUrl = (vAny.affUrl ?? vAny.affiliateUrl) as string | undefined;
+
   const effectiveMuted = isActive ? muted : true;
 
   const sentPlayRef = useRef(false);
@@ -84,6 +119,11 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   useEffect(() => {
     sentPlayRef.current = false;
   }, [video.id]);
+
+  useEffect(() => {
+    setLiked(readLikedSet().has(String(video.id)));
+    setLikeCount(Number(video.likeCount ?? 0));
+  }, [video.id, video.likeCount]);
 
   useEffect(() => {
     const on = () => setMuted(readMuted());
@@ -94,6 +134,33 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       window.removeEventListener("storage", on);
     };
   }, []);
+
+  // ✅ タブ非表示で止める
+  useEffect(() => {
+    const onVis = () => {
+      const el = videoRef.current;
+      if (!el) return;
+
+      if (document.visibilityState !== "visible") {
+        try {
+          el.pause();
+        } catch {}
+        setPlaying(false);
+      } else {
+        if (isActive) {
+          el.muted = effectiveMuted;
+          el.play()
+            .then(() => setPlaying(true))
+            .catch(() => setPlaying(false));
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [isActive, effectiveMuted]);
 
   // HLS attach
   useEffect(() => {
@@ -109,7 +176,12 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
     if (isHlsUrl(src)) {
       if (Hls.isSupported()) {
-        const hls = new Hls({ lowLatencyMode: true });
+        const hls = new Hls({
+          lowLatencyMode: false,
+          capLevelToPlayerSize: true,
+          backBufferLength: 10,
+          maxBufferLength: 20,
+        });
         hlsRef.current = hls;
         hls.loadSource(src);
         hls.attachMedia(el);
@@ -131,7 +203,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     };
   }, [src]);
 
-  // active だけ再生 / inactive は確実に停止
+  // active だけ再生 / inactive は停止
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
@@ -146,6 +218,10 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       try {
         el.currentTime = 0;
       } catch {}
+
+      currentRef.current = 0;
+      setCurrent(0);
+      if (seekRef.current) seekRef.current.value = "0";
       return;
     }
 
@@ -171,30 +247,50 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     if (!el) return;
 
     const onLoaded = () => {
-      setDuration(Number.isFinite(el.duration) ? el.duration : 0);
+      const d = Number.isFinite(el.duration) ? el.duration : 0;
+      durationRef.current = d;
+      setDuration(d);
       setReady(true);
+
+      if (seekRef.current) seekRef.current.max = String(Math.max(0, d || 0));
     };
-    const onTime = () => setCurrent(el.currentTime || 0);
+
+    const onTime = () => {
+      const t = el.currentTime || 0;
+      currentRef.current = t;
+
+      if (seekRef.current) seekRef.current.value = String(t);
+
+      const now = performance.now();
+      if (now - lastUiRef.current >= 250) {
+        lastUiRef.current = now;
+        setCurrent(t);
+      }
+    };
+
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
 
     el.addEventListener("loadedmetadata", onLoaded);
+    el.addEventListener("durationchange", onLoaded);
     el.addEventListener("timeupdate", onTime);
     el.addEventListener("play", onPlay);
     el.addEventListener("pause", onPause);
 
     return () => {
       el.removeEventListener("loadedmetadata", onLoaded);
+      el.removeEventListener("durationchange", onLoaded);
       el.removeEventListener("timeupdate", onTime);
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
     };
   }, []);
 
-  const stop = (e: React.SyntheticEvent) => {
-    e.stopPropagation();
-    // @ts-ignore
-    e.nativeEvent?.stopImmediatePropagation?.();
+  const stop = (e: any) => {
+    e?.stopPropagation?.();
+    try {
+      e?.nativeEvent?.stopImmediatePropagation?.();
+    } catch {}
   };
 
   const togglePlay = async () => {
@@ -229,14 +325,14 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const seekTo = (t: number) => {
     const el = videoRef.current;
     if (!el) return;
-    const d = Number.isFinite(el.duration) ? el.duration : duration || 0;
+    const d = Number.isFinite(el.duration) ? el.duration : durationRef.current || 0;
     el.currentTime = clamp(t, 0, d || 0);
   };
 
   const skip = (sec: number) => {
     const el = videoRef.current;
     if (!el) return;
-    const base = Number.isFinite(el.currentTime) ? el.currentTime : current;
+    const base = Number.isFinite(el.currentTime) ? el.currentTime : currentRef.current;
     seekTo(base + sec);
   };
 
@@ -246,17 +342,70 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   const showPR = !!affUrl;
 
-  // 音が出てる(=ミュート解除) -> ミュート画像を出す
-  // 音が出てない(=ミュート)   -> オン画像を出す
-  const iconSrc = effectiveMuted
-  ? "/icons/volume_mute.png" // 聞こえてない時（ミュート中）
-  : "/icons/volume_on.png";  // 聞こえてる時（ミュート解除）
-const iconAlt = effectiveMuted ? "ミュート解除" : "ミュート";
+  const muteIconSrc = effectiveMuted ? "/icons/volume_mute.png" : "/icons/volume_on.png";
+  const muteIconAlt = effectiveMuted ? "ミュート解除" : "ミュート";
 
+  const onToggleLike = async (e: any) => {
+    stop(e);
 
-  // ここだけ触ればOK
-  const BTN_SIZE = 45; // 灰色背景のサイズ（固定）
-  const ICON_SIZE =100; // 音量アイコンだけのサイズ
+    const id = String(video.id);
+    const set = readLikedSet();
+    const was = set.has(id);
+    const nextLiked = !was;
+
+    const nextCount = Math.max(0, (likeCount ?? 0) + (nextLiked ? 1 : -1));
+    setLikeCount(nextCount);
+    setLiked(nextLiked);
+
+    if (nextLiked) set.add(id);
+    else set.delete(id);
+    writeLikedSet(set);
+
+    try {
+      const r = await fetch("/api/likes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ videoId: id, delta: nextLiked ? 1 : -1 }),
+      });
+      const j = await r.json().catch(() => null);
+      const serverCount = Number(j?.count);
+      if (r.ok && j?.ok && Number.isFinite(serverCount)) {
+        setLikeCount(serverCount);
+        window.dispatchEvent(
+          new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: serverCount } })
+        );
+      } else {
+        window.dispatchEvent(
+          new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } })
+        );
+      }
+    } catch {
+      window.dispatchEvent(
+        new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } })
+      );
+    }
+  };
+
+  const onShare = async (e: any) => {
+    stop(e);
+
+    const shareUrl = typeof location !== "undefined" ? location.href : "";
+    const text = titleText || "Swipe Video Feed";
+
+    try {
+      if ((navigator as any)?.share) {
+        await (navigator as any).share({ title: text, text, url: shareUrl });
+        return;
+      }
+    } catch {}
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      alert("リンクをコピーした");
+    } catch {
+      prompt("このリンクをコピーして共有してな", shareUrl);
+    }
+  };
 
   return (
     <div
@@ -265,8 +414,10 @@ const iconAlt = effectiveMuted ? "ミュート解除" : "ミュート";
         width: "100%",
         height: "100%",
         background: "black",
+        overflow: "hidden", // ✅ はみ出し物理的にカット
       }}
     >
+      {/* PR を上中央 */}
       {showPR ? (
         <div
           style={{
@@ -285,12 +436,11 @@ const iconAlt = effectiveMuted ? "ミュート解除" : "ミュート";
               padding: "4px 10px",
               borderRadius: 999,
               fontSize: 11,
-              fontWeight: 700,
+              fontWeight: 800,
               letterSpacing: 1.6,
-              color: "rgba(255,255,255,0.55)",
-              background: "rgba(0,0,0,0.18)",
-              border: "1px solid rgba(255,255,255,0.10)",
-              backdropFilter: "blur(4px)",
+              color: "rgba(255,255,255,0.70)",
+              background: "rgba(0,0,0,0.25)",
+              border: "1px solid rgba(255,255,255,0.14)",
             }}
           >
             PR
@@ -302,11 +452,14 @@ const iconAlt = effectiveMuted ? "ミュート解除" : "ミュート";
         ref={videoRef}
         playsInline
         muted={effectiveMuted}
-        preload="auto"
+        preload="metadata"
         style={{
           width: "100%",
           height: "100%",
-          objectFit: "contain",
+          maxWidth: "100%",
+          maxHeight: "100%",
+          objectFit: "contain", // ✅ 枠内に収める
+          objectPosition: "center",
           background: "black",
           position: "absolute",
           inset: 0,
@@ -330,18 +483,15 @@ const iconAlt = effectiveMuted ? "ミュート解除" : "ミュート";
         </div>
       )}
 
+      {/* ===== 操作UI ===== */}
       <div
         data-no-swipe="1"
+        data-ui="controls"
         style={{
           position: "absolute",
-          left: 0,
-          right: 0,
-          bottom: 0,
-          padding: 12,
-          display: "grid",
-          gap: 10,
-          background:
-            "linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0))",
+          left: 12,
+          right: 12,
+          bottom: 12,
           zIndex: 20,
           pointerEvents: "auto",
         }}
@@ -350,182 +500,186 @@ const iconAlt = effectiveMuted ? "ミュート解除" : "ミュート";
       >
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
+            borderRadius: 18,
+            padding: 12,
+            background: "rgba(0,0,0,0.45)",
+            border: "1px solid rgba(255,255,255,0.12)",
+            boxShadow: "0 14px 40px rgba(0,0,0,0.35)",
+            display: "grid",
             gap: 10,
           }}
         >
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              data-no-swipe="1"
-              onPointerDown={stop}
-              onClick={(e) => {
-                stop(e);
-                skip(-10);
-              }}
-              style={btnSmall}
-            >
-              -10
-            </button>
-            <button
-              data-no-swipe="1"
-              onPointerDown={stop}
-              onClick={(e) => {
-                stop(e);
-                skip(-5);
-              }}
-              style={btnSmall}
-            >
-              -5
-            </button>
-            <button
-              data-no-swipe="1"
-              onPointerDown={stop}
-              onClick={(e) => {
-                stop(e);
-                skip(5);
-              }}
-              style={btnSmall}
-            >
-              +5
-            </button>
-            <button
-              data-no-swipe="1"
-              onPointerDown={stop}
-              onClick={(e) => {
-                stop(e);
-                skip(10);
-              }}
-              style={btnSmall}
-            >
-              +10
-            </button>
-          </div>
+          {/* タイトル */}
+          <div style={titleClamp}>{titleText}</div>
 
-          {affUrl ? (
-            <a
+          {/* シーク */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ color: "rgba(255,255,255,0.85)", fontSize: 12, minWidth: 42 }}>
+              {formatTime(current)}
+            </span>
+
+            <input
+              ref={seekRef}
               data-no-swipe="1"
+              data-ui="controls"
+              type="range"
+              min={0}
+              max={Math.max(0, duration || 0)}
+              step={0.01}
+              defaultValue={0}
               onPointerDown={stop}
-              onClick={(e) => {
-                stop(e);
-                track(String(video.id), "aff_click");
-              }}
-              href={affUrl}
-              target="_blank"
-              rel="noreferrer"
+              onClick={stop}
+              onChange={(e) => seekTo(Number((e.target as HTMLInputElement).value))}
+              style={{ width: "100%" }}
+            />
+
+            <span
               style={{
-                padding: "10px 14px",
-                borderRadius: 999,
-                background: "#fff",
-                color: "#000",
-                textDecoration: "none",
-                fontWeight: 700,
-                whiteSpace: "nowrap",
+                color: "rgba(255,255,255,0.85)",
+                fontSize: 12,
+                minWidth: 42,
+                textAlign: "right",
               }}
             >
-              {affLabel}
-            </a>
-          ) : null}
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: "#fff", fontSize: 12, minWidth: 42 }}>
-            {formatTime(current)}
-          </span>
-          <input
-            data-no-swipe="1"
-            type="range"
-            min={0}
-            max={Math.max(0, duration || 0)}
-            step={0.01}
-            value={Math.min(current, duration || 0)}
-            onPointerDown={stop}
-            onClick={stop}
-            onChange={(e) => seekTo(Number(e.target.value))}
-            style={{ width: "100%" }}
-          />
-          <span
-            style={{
-              color: "#fff",
-              fontSize: 12,
-              minWidth: 42,
-              textAlign: "right",
-            }}
-          >
-            {formatTime(duration)}
-          </span>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 10,
-          }}
-        >
-          <div style={{ display: "flex", gap: 10 }}>
-            <button
-              data-no-swipe="1"
-              onPointerDown={stop}
-              onClick={(e) => {
-                stop(e);
-                togglePlay();
-              }}
-              style={btnBig}
-            >
-              {playing ? "停止" : "再生"}
-            </button>
-
-            <button
-              data-no-swipe="1"
-              onPointerDown={stop}
-              onClick={(e) => {
-                stop(e);
-                toggleMute();
-              }}
-              aria-label={iconAlt}
-              title={iconAlt}
-              style={{ ...btnIconBase, width: BTN_SIZE, height: BTN_SIZE }}
-            >
-              <img
-                src={iconSrc}
-                alt=""
-                draggable={false}
-                style={{
-                  width: ICON_SIZE,
-                  height: ICON_SIZE,
-                  position: "absolute",
-                  left: "50%",
-                  top: "50%",
-                  transform: "translate(-50%, -50%)",
-                  display: "block",
-                  objectFit: "contain",
-                }}
-                onError={(ev) => {
-                  (ev.currentTarget as HTMLImageElement).style.display = "none";
-                }}
-              />
-            </button>
+              {formatTime(duration)}
+            </span>
           </div>
 
+          {/* 下段 */}
           <div
             style={{
-              color: "rgba(255,255,255,0.85)",
-              fontSize: 12,
-              textAlign: "right",
-              maxWidth: "58vw",
+              display: "grid",
+              gridTemplateColumns: "1fr auto 1fr",
+              alignItems: "center",
+              gap: 10,
+              minHeight: 52,
             }}
           >
+            {/* 左：スキップ */}
             <div
               style={{
-                overflow: "hidden",
-                textOverflow: "ellipsis",
+                justifySelf: "start",
+                display: "grid",
+                gridTemplateColumns: "repeat(4, auto)",
+                gap: 10,
+                alignItems: "center",
+              }}
+            >
+              <button data-no-swipe="1" data-ui="controls" onPointerDown={stop} onClick={(e) => (stop(e), skip(-10))} style={pillBtnBig}>
+                -10
+              </button>
+              <button data-no-swipe="1" data-ui="controls" onPointerDown={stop} onClick={(e) => (stop(e), skip(-5))} style={pillBtnBig}>
+                -5
+              </button>
+              <button data-no-swipe="1" data-ui="controls" onPointerDown={stop} onClick={(e) => (stop(e), skip(5))} style={pillBtnBig}>
+                +5
+              </button>
+              <button data-no-swipe="1" data-ui="controls" onPointerDown={stop} onClick={(e) => (stop(e), skip(10))} style={pillBtnBig}>
+                +10
+              </button>
+            </div>
+
+            {/* 中央 */}
+            <div
+              style={{
+                justifySelf: "center",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 10,
                 whiteSpace: "nowrap",
               }}
             >
-              {titleText}
+              {affUrl ? (
+                <a
+                  data-no-swipe="1"
+                  data-ui="controls"
+                  onPointerDown={stop}
+                  onClick={(e) => {
+                    stop(e);
+                    track(String(video.id), "aff_click");
+                  }}
+                  href={affUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={productRoundBtn}
+                >
+                  本編
+                </a>
+              ) : null}
+
+              <button
+                data-no-swipe="1"
+                data-ui="controls"
+                onPointerDown={stop}
+                onClick={onToggleLike}
+                style={{
+                  ...miniBtn,
+                  background: liked ? "#fff" : miniBtn.background,
+                  color: liked ? "#000" : miniBtn.color,
+                }}
+                aria-label="いいね"
+                title="いいね"
+              >
+                {liked ? "♥" : "♡"} {likeCount}
+              </button>
+
+              <button
+                data-no-swipe="1"
+                data-ui="controls"
+                onPointerDown={stop}
+                onClick={onShare}
+                style={miniBtn}
+                aria-label="共有"
+                title="共有"
+              >
+                共有
+              </button>
+            </div>
+
+            {/* 右：再生＆ミュート */}
+            <div
+              style={{
+                justifySelf: "end",
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                minWidth: 140,
+              }}
+            >
+              <button
+                data-no-swipe="1"
+                data-ui="controls"
+                onPointerDown={stop}
+                onClick={(e) => (stop(e), togglePlay())}
+                style={primaryBtnSmallBg}
+              >
+                {playing ? "停止" : "再生"}
+              </button>
+
+              <button
+                data-no-swipe="1"
+                data-ui="controls"
+                onPointerDown={stop}
+                onClick={(e) => (stop(e), toggleMute())}
+                style={iconBtn}
+                aria-label={muteIconAlt}
+                title={muteIconAlt}
+              >
+                <img
+                  src={muteIconSrc}
+                  alt=""
+                  draggable={false}
+                  style={{
+                    width: 99,
+                    height: 66,
+                    display: "block",
+                    objectFit: "contain",
+                  }}
+                  onError={(ev) => {
+                    (ev.currentTarget as HTMLImageElement).style.display = "none";
+                  }}
+                />
+              </button>
             </div>
           </div>
         </div>
@@ -534,35 +688,99 @@ const iconAlt = effectiveMuted ? "ミュート解除" : "ミュート";
   );
 }
 
-const btnSmall: React.CSSProperties = {
-  padding: "8px 12px",
-  borderRadius: 10,
-  background: "rgba(255,255,255,0.15)",
-  color: "#fff",
-  border: "none",
+/** タイトル：4行クランプ + 中央 */
+const titleClamp: React.CSSProperties = {
+  color: "rgba(255,255,255,0.92)",
+  fontSize: 12,
   fontWeight: 700,
+  whiteSpace: "normal",
+  overflow: "hidden",
+  display: "-webkit-box",
+  WebkitBoxOrient: "vertical" as any,
+  WebkitLineClamp: 4 as any,
+  textAlign: "center",
+  lineHeight: 1.35,
 };
 
-const btnBig: React.CSSProperties = {
-  padding: "12px 14px",
-  borderRadius: 12,
-  background: "rgba(255,255,255,0.15)",
-  color: "#fff",
-  border: "none",
-  fontWeight: 800,
-  minWidth: 72,
+/** スキップ */
+const pillBtnBig: React.CSSProperties = {
+  minWidth: 54,
+  height: 44,
+  padding: "0 14px",
+  borderRadius: 999,
+  background: "rgba(255,255,255,0.12)",
+  color: "rgba(255,255,255,0.95)",
+  border: "1px solid rgba(255,255,255,0.16)",
+  fontWeight: 900,
+  fontSize: 13,
+  lineHeight: 1,
+  backdropFilter: "blur(6px)",
+  WebkitBackdropFilter: "blur(6px)",
 };
 
-const btnIconBase: React.CSSProperties = {
-  padding: 0,
-  borderRadius: 12,
-  background: "rgba(255,255,255,0.15)",
-  border: "none",
-  minWidth: 0,
-  position: "relative",
-  overflow: "visible",
+/** ✅ 再生：背景小さめ */
+const primaryBtnSmallBg: React.CSSProperties = {
+  height: 44,
+  minWidth: 64,
+  padding: "0 12px",
+  borderRadius: 999,
+  background: "rgba(255,255,255,0.12)", // 少し薄く
+  color: "rgba(255,255,255,0.98)",
+  border: "1px solid rgba(255,255,255,0.16)",
+  fontWeight: 900,
+  fontSize: 13,
+  lineHeight: 1,
+  whiteSpace: "nowrap",
+  backdropFilter: "blur(6px)",
+  WebkitBackdropFilter: "blur(6px)",
+};
+
+/** ミュート（画像） */
+const iconBtn: React.CSSProperties = {
+  width: 44,
+  height: 44,
+  borderRadius: 999,
+  background: "rgba(255,255,255,0.10)",
+  color: "rgba(255,255,255,0.98)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  fontWeight: 900,
+  fontSize: 16,
+  lineHeight: 1,
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  lineHeight: 0,
+  backdropFilter: "blur(6px)",
+  WebkitBackdropFilter: "blur(6px)",
+};
+
+/** ✅ 商品：もうちょい大きく */
+const productRoundBtn: React.CSSProperties = {
+  width: 60,
+  height: 60,
+  borderRadius: 999,
+  background: "#fff",
+  color: "#000",
+  textDecoration: "none",
+  fontWeight: 900,
+  fontSize: 15,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  boxShadow: "0 10px 26px rgba(0,0,0,0.28)",
+  border: "1px solid rgba(0,0,0,0.08)",
+};
+
+/** ♡ / 共有 */
+const miniBtn: React.CSSProperties = {
+  height: 44,
+  padding: "0 14px",
+  borderRadius: 999,
+  background: "rgba(255,255,255,0.10)",
+  color: "rgba(255,255,255,0.95)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  fontWeight: 900,
+  fontSize: 13,
+  lineHeight: 1,
+  backdropFilter: "blur(6px)",
+  WebkitBackdropFilter: "blur(6px)",
 };

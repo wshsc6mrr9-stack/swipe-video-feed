@@ -1,112 +1,140 @@
 "use client";
 
-import Link from "next/link";
 import React, { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 
 export default function MoreMenu() {
   const [open, setOpen] = useState(false);
-  const boxRef = useRef<HTMLDivElement | null>(null);
-
-  // ✅ スワイプ/親のハンドラにイベントを渡さない
-  const stop = (e: any) => {
-    e.stopPropagation();
-    e.nativeEvent?.stopImmediatePropagation?.();
-  };
+  const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+    const onDown = (e: MouseEvent) => {
+      if (!open) return;
+      const el = ref.current;
+      if (!el) return;
+      if (el.contains(e.target as Node)) return;
+      setOpen(false);
     };
-    const onClick = (e: MouseEvent) => {
-      if (!boxRef.current) return;
-      if (!boxRef.current.contains(e.target as Node)) setOpen(false);
-    };
-
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("mousedown", onClick);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("mousedown", onClick);
-    };
-  }, []);
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [open]);
 
   return (
     <div
-      ref={boxRef}
-      className="absolute top-3 right-3 z-[60] pointer-events-auto"
+      ref={ref}
+      style={{ position: "absolute", top: 12, right: 12, zIndex: 80 }}
       data-no-swipe="1"
-      onPointerDown={stop}
-      onClick={stop}
     >
+      {/* トリガー（…） */}
       <button
-        type="button"
-        aria-label="メニュー"
         data-no-swipe="1"
-        onPointerDown={stop}
+        data-ui="controls"
         onClick={(e) => {
-          stop(e);
+          e.stopPropagation();
           setOpen((v) => !v);
         }}
-        className="h-10 w-10 rounded-full bg-black/50 text-white text-xl flex items-center justify-center backdrop-blur border border-white/10"
+        aria-label="メニュー"
+        title="メニュー"
+        style={triggerBtn}
       >
-        …
+        ⋯
       </button>
 
-      {open && (
+      {/* メニュー本体 */}
+      {open ? (
         <div
-          className="mt-2 w-56 rounded-2xl bg-black/80 text-white backdrop-blur border border-white/10 overflow-hidden"
           data-no-swipe="1"
-          onPointerDown={stop}
-          onClick={stop}
-          style={{ pointerEvents: "auto" }}
+          data-ui="controls"
+          style={panel}
+          onClick={(e) => e.stopPropagation()}
         >
-          <div className="px-3 py-2 text-xs text-white/70">メニュー</div>
+          <div style={panelTitle}>メニュー</div>
 
-          <NavItem href="/info" label="まとめて見る（info）" onSelect={() => setOpen(false)} />
-          <div className="h-px bg-white/10" />
+          <div style={{ display: "grid", gap: 10 }}>
+            <Link style={itemBtn} href="/info" onClick={() => setOpen(false)}>
+              サイト情報
+            </Link>
+            <Link style={itemBtn} href="/about" onClick={() => setOpen(false)}>
+              運営者情報
+            </Link>
+            <Link style={itemBtn} href="/privacy" onClick={() => setOpen(false)}>
+              プライバシー
+            </Link>
+            <Link style={itemBtn} href="/terms" onClick={() => setOpen(false)}>
+              利用規約
+            </Link>
+            <Link style={itemBtn} href="/contact" onClick={() => setOpen(false)}>
+              お問い合わせ
+            </Link>
 
-          <NavItem href="/about" label="About（サイト説明）" onSelect={() => setOpen(false)} />
-          <NavItem href="/privacy" label="Privacy（プライバシー）" onSelect={() => setOpen(false)} />
-          <NavItem href="/terms" label="Terms（利用規約）" onSelect={() => setOpen(false)} />
-          <NavItem href="/contact" label="Contact（連絡先）" onSelect={() => setOpen(false)} />
-
-          <div className="h-px bg-white/10" />
-
-          {/* ✅ これが反応しない問題を確実に潰す：クリックを止めて、遷移前に閉じる */}
-          <NavItem href="/" label="動画に戻る" onSelect={() => setOpen(false)} />
+            <button style={closeBtn} onClick={() => setOpen(false)}>
+              閉じる
+            </button>
+          </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
-function NavItem({
-  href,
-  label,
-  onSelect,
-}: {
-  href: string;
-  label: string;
-  onSelect?: () => void;
-}) {
-  const stop = (e: any) => {
-    e.stopPropagation();
-    e.nativeEvent?.stopImmediatePropagation?.();
-  };
+const triggerBtn: React.CSSProperties = {
+  width: 44,
+  height: 44,
+  borderRadius: 999,
+  background: "rgba(255,255,255,0.10)",
+  color: "rgba(255,255,255,0.95)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  fontWeight: 900,
+  fontSize: 22,
+  lineHeight: 1,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  backdropFilter: "blur(6px)",
+  WebkitBackdropFilter: "blur(6px)",
+};
 
-  return (
-    <Link
-      href={href}
-      data-no-swipe="1"
-      onPointerDown={stop}
-      onClick={(e) => {
-        stop(e);
-        onSelect?.();
-        // Linkの遷移はNextがやってくれるので preventDefault しない
-      }}
-      className="block px-3 py-3 text-sm hover:bg-white/10 active:bg-white/10"
-    >
-      {label}
-    </Link>
-  );
-}
+const panel: React.CSSProperties = {
+  marginTop: 10,
+  width: 220,
+  borderRadius: 16,
+  padding: 12,
+  background: "rgba(0,0,0,0.55)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  boxShadow: "0 14px 40px rgba(0,0,0,0.35)",
+  backdropFilter: "blur(10px)",
+  WebkitBackdropFilter: "blur(10px)",
+};
+
+const panelTitle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 900,
+  color: "rgba(255,255,255,0.85)",
+  letterSpacing: 1.2,
+  marginBottom: 10,
+};
+
+const itemBtn: React.CSSProperties = {
+  display: "block",
+  textDecoration: "none",
+  height: 40,
+  borderRadius: 12,
+  padding: "0 12px",
+  background: "rgba(255,255,255,0.10)",
+  color: "rgba(255,255,255,0.95)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  fontWeight: 800,
+  fontSize: 13,
+  lineHeight: "40px",
+};
+
+const closeBtn: React.CSSProperties = {
+  height: 40,
+  borderRadius: 12,
+  padding: "0 12px",
+  background: "rgba(255,255,255,0.16)",
+  color: "rgba(255,255,255,0.98)",
+  border: "1px solid rgba(255,255,255,0.18)",
+  fontWeight: 900,
+  fontSize: 13,
+};

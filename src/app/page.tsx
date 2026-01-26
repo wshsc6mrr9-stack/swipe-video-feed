@@ -1,5 +1,10 @@
 import VideoFeedNoSSR from "./VideoFeedNoSSR";
+import AgeGateGuard from "@/components/AgeGateGuard";
 
 export default function HomePage() {
-  return <VideoFeedNoSSR />;
+  return (
+    <AgeGateGuard>
+      <VideoFeedNoSSR />
+    </AgeGateGuard>
+  );
 }
