@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { GENRE_ALL, GENRE_LIKES, GENRE_GROUPS, type GenreKey } from "@/lib/genres";
 
 type Props = {
@@ -29,6 +29,15 @@ function labelOf(key: GenreKey) {
 export default function GenreMenu({ value, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+
+  // ✅ iPhone Safariズーム対策：閉じる時に blur する
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const close = () => {
+    try {
+      inputRef.current?.blur();
+    } catch {}
+    setOpen(false);
+  };
 
   const filteredGroups = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -76,17 +85,20 @@ export default function GenreMenu({ value, onChange }: Props) {
             <button
               type="button"
               className="ml-auto text-white/70 text-xs px-2 py-1 rounded-md bg-white/10"
-              onClick={() => setOpen(false)}
+              onClick={close}
             >
               ×
             </button>
           </div>
 
+          {/* ✅ iPhone Safariズーム対策：fontSize 16px */}
           <input
+            ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="検索"
-            className="w-full mb-2 px-3 py-2 rounded-xl bg-white/10 text-white text-sm outline-none border border-white/10"
+            className="w-full mb-2 px-3 py-2 rounded-xl bg-white/10 text-white outline-none border border-white/10"
+            style={{ fontSize: 16 }} // ←これが最重要
           />
 
           {/* ✅ ここがスクロール領域 */}
@@ -110,7 +122,7 @@ export default function GenreMenu({ value, onChange }: Props) {
               }`}
               onClick={() => {
                 onChange(GENRE_ALL);
-                setOpen(false);
+                close();
               }}
             >
               All
@@ -126,7 +138,7 @@ export default function GenreMenu({ value, onChange }: Props) {
               }`}
               onClick={() => {
                 onChange(GENRE_LIKES);
-                setOpen(false);
+                close();
               }}
             >
               ♡ランキング
@@ -150,7 +162,7 @@ export default function GenreMenu({ value, onChange }: Props) {
                         }`}
                         onClick={() => {
                           onChange(k);
-                          setOpen(false);
+                          close();
                         }}
                       >
                         {String(it.label ?? it.key)}
