@@ -1,6 +1,8 @@
 // src/lib/genres.ts
 
 export const GENRE_ALL = "all" as const;
+export const GENRE_LIKES = "__likes__" as const;
+
 export type GenreKey = string;
 
 export type GenreItem = { key: string; label: string };
@@ -46,6 +48,9 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "sweaty", label: "汗だく" },
       { key: "bishoujo", label: "美少女" },
       { key: "other-type", label: "その他（タイプ）" },
+
+      // ✅ 追加（言い換え＋元の名前）
+      { key: "beautiful-style", label: "美乳" },
     ],
   },
 
@@ -100,7 +105,18 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "classic", label: "クラシック" },
       { key: "sm", label: "SM" },
       { key: "gag-comedy", label: "ギャグ・コメディ" },
-      { key: "school-adult", label: "学園もの（成人設定）" },
+      { key: "school-adult", label: "学園もの" },
+
+      // ✅ 追加（言い換え＋元の名前）
+      { key: "story-drama", label: "ドラマ" },
+      { key: "ntr", label: "寝取り・寝取られ・NTR" },
+      { key: "group-play", label: "乱行" },
+      { key: "promiscuous", label: "淫乱" },
+      { key: "hardcore", label: "淫乱・ハード系" },
+      { key: "lesbian", label: "レズビアン" },
+      { key: "pickup", label: "ナンパ" },
+      { key: "instant", label: "即ハメ" },
+      { key: "affair", label: "不倫" },
     ],
   },
 
@@ -138,6 +154,15 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "milf", label: "熟女" },
       { key: "mom-friend", label: "ママ友" },
       { key: "sisters", label: "姉・妹" },
+
+      // ✅ 追加（言い換え＋元の名前）
+      { key: "teacher-adult", label: "女教師" },
+      { key: "office-mix", label: "OL・職業色々" },
+      { key: "college-student", label: "女子大生" },
+      { key: "mature-mother", label: "お母さん" },
+
+      // ⚠️ 未成年想起を避ける（表示はこの形で固定推奨）
+      { key: "student-adult", label: "女子校生" },
     ],
   },
 
@@ -177,6 +202,11 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "4p", label: "4P" },
       { key: "big-dick", label: "デカチン・巨根" },
       { key: "other-play", label: "その他（プレイ）" },
+
+      // ✅ 追加（言い換え＋元の名前）
+      { key: "electric-toy", label: "電マ" },
+      { key: "restraint", label: "拘束" },
+      { key: "finish", label: "ぶっかけ" },
     ],
   },
 
@@ -210,24 +240,22 @@ export const GENRE_LIST: GenreItem[] = [
 ];
 
 // ✅ SEOや /genre/[slug] で使うマップ（null禁止）
-export const GENRE_SEO_MAP: Record<
-  string,
-  { key: GenreKey; label: string; desc: string }
-> = Object.fromEntries(
-  GENRE_GROUPS.flatMap((g) =>
-    g.items.map((it) => {
-      const k = String(it.key).toLowerCase();
-      return [
-        k,
-        {
-          key: k,
-          label: it.label,
-          desc: `${it.label}の短尺動画をまとめています。スマホ向けに連続再生できます。`,
-        },
-      ] as const;
-    })
-  )
-);
+export const GENRE_SEO_MAP: Record<string, { key: GenreKey; label: string; desc: string }> =
+  Object.fromEntries(
+    GENRE_GROUPS.flatMap((g) =>
+      g.items.map((it) => {
+        const k = String(it.key).toLowerCase();
+        return [
+          k,
+          {
+            key: k,
+            label: it.label,
+            desc: `${it.label}の短尺動画をまとめています。スマホ向けに連続再生できます。`,
+          },
+        ] as const;
+      })
+    )
+  );
 
 // ✅ UI表示用（GenreMenu.tsx がこれを import してても落ちないように）
 export function genreLabel(key: string): string {
@@ -247,4 +275,3 @@ export function normalizeGenreKey(v: any): string {
   if (v == null) return "";
   return String(v).trim().toLowerCase();
 }
-export const GENRE_LIKES = "__likes__" as const;

@@ -88,6 +88,7 @@ export default function AdminPage() {
     e.preventDefault();
     setErr(null);
     setBusy(true);
+
     try {
       const payloadGenres = (
         normalizedSelected.length ? normalizedSelected : (["other"] as GenreKey[])
@@ -121,6 +122,7 @@ export default function AdminPage() {
       setGenreQuery("");
       setGenreOpen(false);
       setGenrePin(false);
+
       await load();
     } finally {
       setBusy(false);
@@ -128,6 +130,7 @@ export default function AdminPage() {
   }
 
   const query = genreQuery.trim().toLowerCase();
+
   const filteredGroups = useMemo(() => {
     if (!query) return GENRE_GROUPS;
 
@@ -239,7 +242,7 @@ export default function AdminPage() {
 
                 <div className="space-y-4">
                   {filteredGroups.map((g) => (
-                    <div key={g.title} className="space-y-2">
+                    <div key={String(g.title)} className="space-y-2">
                       <div className="text-xs font-semibold text-white/80">
                         {g.title}
                       </div>
@@ -251,7 +254,7 @@ export default function AdminPage() {
 
                           return (
                             <button
-                              key={key}
+                              key={String(key)}
                               type="button"
                               onClick={() => toggleGenre(key)}
                               className={[
@@ -327,7 +330,7 @@ export default function AdminPage() {
           </Link>
         </div>
 
-        {/* ✅ 追加：ダッシュボードボタン */}
+        {/* ✅ 追加：ダッシュボードボタン（ページが無いと 404 になるので注意） */}
         <Link
           href="/admin/analytics"
           className="block w-full text-center px-4 py-3 rounded-xl bg-white/10 text-white font-bold hover:bg-white/15 active:bg-white/15 border border-white/10"
