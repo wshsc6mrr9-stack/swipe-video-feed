@@ -89,15 +89,11 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const [duration, setDuration] = useState(0);
   const [current, setCurrent] = useState(0);
 
-  // ✅ like
-  const [likeCount, setLikeCount] = useState<number>(() =>
-    Number(video.likeCount ?? 0)
-  );
-  const [liked, setLiked] = useState<boolean>(() =>
-    readLikedSet().has(String(video.id))
-  );
+  // like
+  const [likeCount, setLikeCount] = useState<number>(() => Number(video.likeCount ?? 0));
+  const [liked, setLiked] = useState<boolean>(() => readLikedSet().has(String(video.id)));
 
-  // ✅ 省エネ参照
+  // 省エネ参照
   const currentRef = useRef(0);
   const durationRef = useRef(0);
   const lastUiRef = useRef(0);
@@ -135,7 +131,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     };
   }, []);
 
-  // ✅ タブ非表示で止める
+  // タブ非表示で止める
   useEffect(() => {
     const onVis = () => {
       const el = videoRef.current;
@@ -342,9 +338,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   const showPR = !!affUrl;
 
-  const muteIconSrc = effectiveMuted ? "/icons/volume_mute.png" : "/icons/volume_on.png";
-  const muteIconAlt = effectiveMuted ? "ミュート解除" : "ミュート";
-
   const onToggleLike = async (e: any) => {
     stop(e);
 
@@ -417,7 +410,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         overflow: "hidden",
       }}
     >
-      {/* ✅ PR：safe-area top を考慮して中央 */}
+      {/* PR：safe-area top を考慮して中央 */}
       {showPR ? (
         <div
           style={{
@@ -489,11 +482,9 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         data-ui="controls"
         style={{
           position: "absolute",
-          // ✅ 左右を safe-area 分だけ内側へ
-          left: "calc(env(safe-area-inset-left) + 12px)",
-          right: "calc(env(safe-area-inset-right) + 12px)",
-          // ✅ 下をホームバー分だけ上げる
-          bottom: "calc(env(safe-area-inset-bottom) + 12px)",
+          left: "calc(env(safe-area-inset-left) + 10px)",
+          right: "calc(env(safe-area-inset-right) + 10px)",
+          bottom: "calc(env(safe-area-inset-bottom) + 10px)",
           zIndex: 20,
           pointerEvents: "auto",
         }}
@@ -503,13 +494,12 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         <div
           style={{
             borderRadius: 18,
-            padding: 12,
+            padding: 10,
             background: "rgba(0,0,0,0.45)",
             border: "1px solid rgba(255,255,255,0.12)",
             boxShadow: "0 14px 40px rgba(0,0,0,0.35)",
             display: "grid",
-            gap: 10,
-            // ✅ 横が狭い端末はここで縮む（はみ出し防止）
+            gap: 8,
             maxWidth: "min(560px, 100%)",
             margin: "0 auto",
           }}
@@ -518,7 +508,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           <div style={titleClamp}>{titleText}</div>
 
           {/* シーク */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ color: "rgba(255,255,255,0.85)", fontSize: 12, minWidth: 42 }}>
               {formatTime(current)}
             </span>
@@ -550,54 +540,26 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
             </span>
           </div>
 
-          {/* 下段：スマホ幅で自動折り返し */}
-          <div style={bottomGrid}>
-            {/* 左：スキップ */}
-            <div style={skipWrap}>
-              <button
-                data-no-swipe="1"
-                data-ui="controls"
-                onPointerDown={stop}
-                onClick={(e) => (stop(e), skip(-10))}
-                style={pillBtnBig}
-              >
+          {/* ✅ 下段：全体を中央寄せ（overflowでも中央スタート） */}
+          <div style={oneRowWrap}>
+            <div style={oneRowInner}>
+              {/* スキップ */}
+              <button onPointerDown={stop} onClick={(e) => (stop(e), skip(-10))} style={pillBtnSmall}>
                 -10
               </button>
-              <button
-                data-no-swipe="1"
-                data-ui="controls"
-                onPointerDown={stop}
-                onClick={(e) => (stop(e), skip(-5))}
-                style={pillBtnBig}
-              >
+              <button onPointerDown={stop} onClick={(e) => (stop(e), skip(-5))} style={pillBtnSmall}>
                 -5
               </button>
-              <button
-                data-no-swipe="1"
-                data-ui="controls"
-                onPointerDown={stop}
-                onClick={(e) => (stop(e), skip(5))}
-                style={pillBtnBig}
-              >
+              <button onPointerDown={stop} onClick={(e) => (stop(e), skip(5))} style={pillBtnSmall}>
                 +5
               </button>
-              <button
-                data-no-swipe="1"
-                data-ui="controls"
-                onPointerDown={stop}
-                onClick={(e) => (stop(e), skip(10))}
-                style={pillBtnBig}
-              >
+              <button onPointerDown={stop} onClick={(e) => (stop(e), skip(10))} style={pillBtnSmall}>
                 +10
               </button>
-            </div>
 
-            {/* 中央：本編/♡/共有 */}
-            <div style={centerRow}>
+              {/* 本編 */}
               {affUrl ? (
                 <a
-                  data-no-swipe="1"
-                  data-ui="controls"
                   onPointerDown={stop}
                   onClick={(e) => {
                     stop(e);
@@ -606,15 +568,16 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
                   href={affUrl}
                   target="_blank"
                   rel="noreferrer"
-                  style={productRoundBtn}
+                  style={productMainBtn}
                 >
                   本編
                 </a>
-              ) : null}
+              ) : (
+                <div style={{ width: 56, height: 56, flex: "0 0 auto" }} />
+              )}
 
+              {/* ♡ / 共有 */}
               <button
-                data-no-swipe="1"
-                data-ui="controls"
                 onPointerDown={stop}
                 onClick={onToggleLike}
                 style={{
@@ -628,54 +591,31 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
                 {liked ? "♥" : "♡"} {likeCount}
               </button>
 
-              <button
-                data-no-swipe="1"
-                data-ui="controls"
-                onPointerDown={stop}
-                onClick={onShare}
-                style={miniBtn}
-                aria-label="共有"
-                title="共有"
-              >
+              <button onPointerDown={stop} onClick={onShare} style={miniBtn} aria-label="共有" title="共有">
                 共有
               </button>
-            </div>
 
-            {/* 右：再生＆ミュート */}
-            <div style={rightRow}>
-              <button
-                data-no-swipe="1"
-                data-ui="controls"
-                onPointerDown={stop}
-                onClick={(e) => (stop(e), togglePlay())}
-                style={primaryBtnSmallBg}
-              >
+              {/* 再生 */}
+              <button onPointerDown={stop} onClick={(e) => (stop(e), togglePlay())} style={primaryBtnSmallBg}>
                 {playing ? "停止" : "再生"}
               </button>
 
+              {/* ✅ ミュート：画像なし、見やすいON/OFFだけ */}
               <button
-                data-no-swipe="1"
-                data-ui="controls"
                 onPointerDown={stop}
                 onClick={(e) => (stop(e), toggleMute())}
-                style={iconBtn}
-                aria-label={muteIconAlt}
-                title={muteIconAlt}
+                style={{
+                  ...muteTextBtn,
+                  background: effectiveMuted ? "rgba(255,255,255,0.10)" : "#fff",
+                  color: effectiveMuted ? "rgba(255,255,255,0.95)" : "#000",
+                  border: effectiveMuted
+                    ? "1px solid rgba(255,255,255,0.14)"
+                    : "1px solid rgba(0,0,0,0.10)",
+                }}
+                aria-label={effectiveMuted ? "音OFF" : "音ON"}
+                title={effectiveMuted ? "音OFF" : "音ON"}
               >
-                <img
-                  src={muteIconSrc}
-                  alt=""
-                  draggable={false}
-                  style={{
-                    width: 22,
-                    height: 22,
-                    display: "block",
-                    objectFit: "contain",
-                  }}
-                  onError={(ev) => {
-                    (ev.currentTarget as HTMLImageElement).style.display = "none";
-                  }}
-                />
+                {effectiveMuted ? "音OFF" : "音ON"}
               </button>
             </div>
           </div>
@@ -699,125 +639,108 @@ const titleClamp: React.CSSProperties = {
   lineHeight: 1.35,
 };
 
-/** ✅ 下段：幅が狭いと自動で2段/3段に折れる */
-const bottomGrid: React.CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 10,
-  alignItems: "center",
-  justifyContent: "space-between",
+/**
+ * ✅ 下段を中央スタートにするコツ
+ * - outer: textAlign center
+ * - inner: inline-flex にする（中央基準で配置される）
+ * - overflow は維持（万一だけ横スクロール）
+ */
+const oneRowWrap: React.CSSProperties = {
+  overflowX: "auto",
+  WebkitOverflowScrolling: "touch",
+  paddingBottom: 2,
+  textAlign: "center",
 };
 
-/** 左：スキップは折り返し可 */
-const skipWrap: React.CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 10,
-  alignItems: "center",
-  justifyContent: "flex-start",
-  flex: "1 1 240px",
-};
-
-/** 中央：本編/♡/共有（折り返し可） */
-const centerRow: React.CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 10,
+const oneRowInner: React.CSSProperties = {
+  display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  flex: "1 1 220px",
-  minWidth: 200,
+  gap: 6,
+  flexWrap: "nowrap",
+  minWidth: "max-content",
 };
 
-/** 右：再生/ミュート（右寄せ、最低幅） */
-const rightRow: React.CSSProperties = {
-  display: "flex",
-  gap: 10,
-  alignItems: "center",
-  justifyContent: "flex-end",
-  flex: "0 1 auto",
-  marginLeft: "auto",
-};
-
-/** スキップ */
-const pillBtnBig: React.CSSProperties = {
-  minWidth: 54,
-  height: 44,
-  padding: "0 14px",
+/** スキップ：小さめ */
+const pillBtnSmall: React.CSSProperties = {
+  minWidth: 44,
+  height: 34,
+  padding: "0 10px",
   borderRadius: 999,
   background: "rgba(255,255,255,0.12)",
   color: "rgba(255,255,255,0.95)",
   border: "1px solid rgba(255,255,255,0.16)",
   fontWeight: 900,
-  fontSize: 13,
+  fontSize: 12,
   lineHeight: 1,
   backdropFilter: "blur(6px)",
   WebkitBackdropFilter: "blur(6px)",
+  flex: "0 0 auto",
 };
 
-/** ✅ 再生：背景小さめ */
+/** 再生：小さめ */
 const primaryBtnSmallBg: React.CSSProperties = {
-  height: 44,
-  minWidth: 64,
-  padding: "0 12px",
+  height: 40,
+  minWidth: 54,
+  padding: "0 10px",
   borderRadius: 999,
   background: "rgba(255,255,255,0.12)",
   color: "rgba(255,255,255,0.98)",
   border: "1px solid rgba(255,255,255,0.16)",
   fontWeight: 900,
-  fontSize: 13,
+  fontSize: 12,
   lineHeight: 1,
   whiteSpace: "nowrap",
   backdropFilter: "blur(6px)",
   WebkitBackdropFilter: "blur(6px)",
+  flex: "0 0 auto",
 };
 
-/** ミュート */
-const iconBtn: React.CSSProperties = {
-  width: 44,
-  height: 44,
-  borderRadius: 999,
-  background: "rgba(255,255,255,0.10)",
-  color: "rgba(255,255,255,0.98)",
-  border: "1px solid rgba(255,255,255,0.14)",
-  fontWeight: 900,
-  fontSize: 16,
-  lineHeight: 1,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  backdropFilter: "blur(6px)",
-  WebkitBackdropFilter: "blur(6px)",
-};
-
-/** 商品 */
-const productRoundBtn: React.CSSProperties = {
-  width: 60,
-  height: 60,
+/** 本編：少し小さめ */
+const productMainBtn: React.CSSProperties = {
+  width: 56,
+  height: 56,
   borderRadius: 999,
   background: "#fff",
   color: "#000",
   textDecoration: "none",
   fontWeight: 900,
-  fontSize: 15,
+  fontSize: 14,
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  boxShadow: "0 10px 26px rgba(0,0,0,0.28)",
+  boxShadow: "0 12px 28px rgba(0,0,0,0.35)",
   border: "1px solid rgba(0,0,0,0.08)",
+  flex: "0 0 auto",
 };
 
-/** ♡ / 共有 */
+/** ♡ / 共有：小さめ */
 const miniBtn: React.CSSProperties = {
-  height: 44,
-  padding: "0 14px",
+  height: 40,
+  padding: "0 10px",
   borderRadius: 999,
   background: "rgba(255,255,255,0.10)",
   color: "rgba(255,255,255,0.95)",
   border: "1px solid rgba(255,255,255,0.14)",
   fontWeight: 900,
-  fontSize: 13,
+  fontSize: 12,
   lineHeight: 1,
   backdropFilter: "blur(6px)",
   WebkitBackdropFilter: "blur(6px)",
+  flex: "0 0 auto",
+};
+
+/** ✅ ミュート：テキストだけ（見やすい） */
+const muteTextBtn: React.CSSProperties = {
+  height: 40,
+  minWidth: 56,
+  padding: "0 12px",
+  borderRadius: 999,
+  fontWeight: 900,
+  fontSize: 12,
+  lineHeight: 1,
+  whiteSpace: "nowrap",
+  backdropFilter: "blur(6px)",
+  WebkitBackdropFilter: "blur(6px)",
+  flex: "0 0 auto",
 };
