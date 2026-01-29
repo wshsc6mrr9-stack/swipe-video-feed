@@ -15,6 +15,9 @@ const EVT_MUTED = "audio_muted_changed_v1";
 const KEY_LIKED = "liked_videos_v1";
 const EVT_LIKES = "likes_changed_v1";
 
+// ✅ 全動画を常に +7秒スタート
+const START_OFFSET_SEC = 7;
+
 function isHlsUrl(url?: string) {
   return !!url && url.includes(".m3u8");
 }
@@ -75,6 +78,12 @@ function track(videoId: string, event: "play" | "aff_click") {
   } catch {}
 }
 
+function computeStart(d: number) {
+  if (!Number.isFinite(d) || d <= 0) return 0;
+  const maxStart = Math.max(0, d - 0.01);
+  return clamp(START_OFFSET_SEC, 0, maxStart);
+}
+
 export default function VideoPlayer({ video, isActive = false }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -90,8 +99,12 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const [current, setCurrent] = useState(0);
 
   // like
-  const [likeCount, setLikeCount] = useState<number>(() => Number(video.likeCount ?? 0));
-  const [liked, setLiked] = useState<boolean>(() => readLikedSet().has(String(video.id)));
+  const [likeCount, setLikeCount] = useState<number>(() =>
+    Number(video.likeCount ?? 0)
+  );
+  const [liked, setLiked] = useState<boolean>(() =>
+    readLikedSet().has(String(video.id))
+  );
 
   // 省エネ参照
   const currentRef = useRef(0);
@@ -109,9 +122,11 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const effectiveMuted = isActive ? muted : true;
 
   const sentPlayRef = useRef(false);
+  const jumpedRef = useRef(false);
 
   useEffect(() => {
     sentPlayRef.current = false;
+    jumpedRef.current = false;
   }, [video.id]);
 
   useEffect(() => {
@@ -168,6 +183,8 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       hlsRef.current = null;
     } catch {}
 
+    jumpedRef.current = false;
+
     if (isHlsUrl(src)) {
       if (Hls.isSupported()) {
         const hls = new Hls({
@@ -197,6 +214,22 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     };
   }, [src]);
 
+  const jumpToStart = (el: HTMLVideoElement) => {
+    const d = Number.isFinite(el.duration) ? el.duration : durationRef.current || 0;
+    const start = computeStart(d);
+    if (start <= 0) return;
+
+    try {
+      const cur = Number.isFinite(el.currentTime) ? el.currentTime : currentRef.current || 0;
+      if (cur >= start) return;
+
+      el.currentTime = start;
+      currentRef.current = start;
+      setCurrent(start);
+      if (seekRef.current) seekRef.current.value = String(start);
+    } catch {}
+  };
+
   // active だけ再生 / inactive は停止
   useEffect(() => {
     const el = videoRef.current;
@@ -216,7 +249,14 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       currentRef.current = 0;
       setCurrent(0);
       if (seekRef.current) seekRef.current.value = "0";
+
+      jumpedRef.current = false;
       return;
+    }
+
+    if (!jumpedRef.current) {
+      jumpToStart(el);
+      jumpedRef.current = true;
     }
 
     const play = async () => {
@@ -246,6 +286,11 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       setDuration(d);
       setReady(true);
       if (seekRef.current) seekRef.current.max = String(Math.max(0, d || 0));
+
+      if (isActive && !jumpedRef.current) {
+        jumpToStart(el);
+        jumpedRef.current = true;
+      }
     };
 
     const onTime = () => {
@@ -277,7 +322,8 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
 
   const stop = (e: any) => {
     e?.stopPropagation?.();
@@ -361,12 +407,18 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       const serverCount = Number(j?.count);
       if (r.ok && j?.ok && Number.isFinite(serverCount)) {
         setLikeCount(serverCount);
-        window.dispatchEvent(new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: serverCount } }));
+        window.dispatchEvent(
+          new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: serverCount } })
+        );
       } else {
-        window.dispatchEvent(new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } }));
+        window.dispatchEvent(
+          new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } })
+        );
       }
     } catch {
-      window.dispatchEvent(new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } }));
+      window.dispatchEvent(
+        new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } })
+      );
     }
   };
 
@@ -486,29 +538,33 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         onPointerDown={stop}
         onClick={stop}
       >
-        {/* ✅ 枠の外：タイトルの上（左=ハート、右=共有） */}
+        {/* ✅ 枠の外：タイトルの上（ミュートと再生にする） */}
         <div style={outerTopBar}>
+          {/* 左：ミュート（♡の位置） */}
           <div style={outerLeft}>
             <button
               onPointerDown={stop}
-              onClick={onToggleLike}
-              style={{
-                ...outerBtn,
-                background: liked ? "#fff" : outerBtn.background,
-                color: liked ? "#000" : outerBtn.color,
-              }}
-              aria-label="いいね"
-              title="いいね"
+              onClick={(e) => (stop(e), toggleMute())}
+              style={outerBtn}
+              aria-label={effectiveMuted ? "音OFF" : "音ON"}
+              title={effectiveMuted ? "音OFF" : "音ON"}
             >
-              {liked ? "♥" : "♡"} {likeCount}
+              {effectiveMuted ? "音OFF" : "音ON"}
             </button>
           </div>
 
           <div />
 
+          {/* 右：再生（共有の位置） */}
           <div style={outerRight}>
-            <button onPointerDown={stop} onClick={onShare} style={outerBtn} aria-label="共有" title="共有">
-              共有
+            <button
+              onPointerDown={stop}
+              onClick={(e) => (stop(e), togglePlay())}
+              style={outerBtn}
+              aria-label={playing ? "停止" : "再生"}
+              title={playing ? "停止" : "再生"}
+            >
+              {playing ? "停止" : "再生"}
             </button>
           </div>
         </div>
@@ -544,17 +600,23 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
             </span>
           </div>
 
-          {/* 下段：音OFF → -10 → -5 → 本編 → +5 → +10 → 再生 */}
+          {/* ✅ 下段：♡（ミュートと交換）/ 共有（再生と交換） */}
           <div style={oneRowWrap}>
             <div style={oneRowInner}>
+              {/* ❤️ いいね：背景余白を +10 と同じにするため minWidth は付けない */}
               <button
                 onPointerDown={stop}
-                onClick={(e) => (stop(e), toggleMute())}
-                style={{ ...pillBtnSmall, minWidth: 84 }}
-                aria-label={effectiveMuted ? "音OFF" : "音ON"}
-                title={effectiveMuted ? "音OFF" : "音ON"}
+                onClick={onToggleLike}
+                style={{
+                  ...pillBtnSmall,
+                  background: liked ? "rgba(255,255,255,0.92)" : pillBtnSmall.background,
+                  color: liked ? "#000" : pillBtnSmall.color,
+                  border: liked ? "1px solid rgba(255,255,255,0.85)" : pillBtnSmall.border,
+                }}
+                aria-label="いいね"
+                title="いいね"
               >
-                {effectiveMuted ? "音OFF" : "音ON"}
+                {liked ? "♥" : "♡"} {likeCount}
               </button>
 
               <button onPointerDown={stop} onClick={(e) => (stop(e), skip(-10))} style={pillBtnSmall}>
@@ -591,14 +653,9 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
                 +10
               </button>
 
-              <button
-                onPointerDown={stop}
-                onClick={(e) => (stop(e), togglePlay())}
-                style={{ ...pillBtnSmall, minWidth: 84 }}
-                aria-label={playing ? "停止" : "再生"}
-                title={playing ? "停止" : "再生"}
-              >
-                {playing ? "停止" : "再生"}
+              {/* 共有：背景余白を +10 と同じにするため minWidth は付けない */}
+              <button onPointerDown={stop} onClick={onShare} style={pillBtnSmall} aria-label="共有" title="共有">
+                共有
               </button>
             </div>
           </div>
@@ -635,7 +692,7 @@ const panel: React.CSSProperties = {
   margin: "0 auto",
 };
 
-/** ✅ 枠の外：タイトルの上（左=♡、右=共有） */
+/** ✅ 枠の外：タイトルの上（左/右） */
 const outerTopBar: React.CSSProperties = {
   maxWidth: "min(560px, 100%)",
   margin: "0 auto",
@@ -658,20 +715,20 @@ const outerRight: React.CSSProperties = {
   justifyContent: "flex-end",
 };
 
+/** ✅ 上のボタンも +10 と同じ余白/質感に統一 */
 const outerBtn: React.CSSProperties = {
-  height: 38,
+  height: 30,
   padding: "0 12px",
   borderRadius: 999,
-  background: "rgba(0,0,0,0.35)",
+  background: "rgba(255,255,255,0.12)",
   color: "rgba(255,255,255,0.95)",
   border: "1px solid rgba(255,255,255,0.16)",
   fontWeight: 900,
-  fontSize: 12,
+  fontSize: 10,
   lineHeight: 1,
-  backdropFilter: "blur(8px)",
-  WebkitBackdropFilter: "blur(8px)",
+  backdropFilter: "blur(6px)",
+  WebkitBackdropFilter: "blur(6px)",
   flex: "0 0 auto",
-  boxShadow: "0 10px 24px rgba(0,0,0,0.30)",
 };
 
 /** 下段を中央スタートにする */
@@ -694,14 +751,14 @@ const oneRowInner: React.CSSProperties = {
 /** スキップ/操作（共通） */
 const pillBtnSmall: React.CSSProperties = {
   minWidth: 16,
-  height: 30,
+  height: 35,
   padding: "0 12px",
   borderRadius: 999,
   background: "rgba(255,255,255,0.12)",
   color: "rgba(255,255,255,0.95)",
   border: "1px solid rgba(255,255,255,0.16)",
   fontWeight: 900,
-  fontSize: 10,
+  fontSize: 13,
   lineHeight: 1,
   backdropFilter: "blur(6px)",
   WebkitBackdropFilter: "blur(6px)",
