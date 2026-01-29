@@ -101,9 +101,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   const vAny = video as unknown as {
     affUrl?: string;
-    affLabel?: string;
     affiliateUrl?: string;
-    affiliateLabel?: string;
   };
 
   const affUrl = (vAny.affUrl ?? vAny.affiliateUrl) as string | undefined;
@@ -247,7 +245,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       durationRef.current = d;
       setDuration(d);
       setReady(true);
-
       if (seekRef.current) seekRef.current.max = String(Math.max(0, d || 0));
     };
 
@@ -364,18 +361,12 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       const serverCount = Number(j?.count);
       if (r.ok && j?.ok && Number.isFinite(serverCount)) {
         setLikeCount(serverCount);
-        window.dispatchEvent(
-          new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: serverCount } })
-        );
+        window.dispatchEvent(new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: serverCount } }));
       } else {
-        window.dispatchEvent(
-          new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } })
-        );
+        window.dispatchEvent(new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } }));
       }
     } catch {
-      window.dispatchEvent(
-        new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } })
-      );
+      window.dispatchEvent(new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } }));
     }
   };
 
@@ -399,6 +390,10 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       prompt("このリンクをコピーして共有してな", shareUrl);
     }
   };
+
+  // ✅ safe-area（下UIが端末の下スワイプ領域を避ける）
+  const SAFE_PAD = 10;
+  const safeBottom = `calc(env(safe-area-inset-bottom) + ${SAFE_PAD}px)`;
 
   return (
     <div
@@ -484,27 +479,43 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           position: "absolute",
           left: "calc(env(safe-area-inset-left) + 10px)",
           right: "calc(env(safe-area-inset-right) + 10px)",
-          bottom: "calc(env(safe-area-inset-bottom) + 10px)",
+          bottom: safeBottom,
           zIndex: 20,
           pointerEvents: "auto",
         }}
         onPointerDown={stop}
         onClick={stop}
       >
-        <div
-          style={{
-            borderRadius: 18,
-            padding: 10,
-            background: "rgba(0,0,0,0.45)",
-            border: "1px solid rgba(255,255,255,0.12)",
-            boxShadow: "0 14px 40px rgba(0,0,0,0.35)",
-            display: "grid",
-            gap: 8,
-            maxWidth: "min(560px, 100%)",
-            margin: "0 auto",
-          }}
-        >
-          {/* タイトル */}
+        {/* ✅ 枠の外：タイトルの上（左=ハート、右=共有） */}
+        <div style={outerTopBar}>
+          <div style={outerLeft}>
+            <button
+              onPointerDown={stop}
+              onClick={onToggleLike}
+              style={{
+                ...outerBtn,
+                background: liked ? "#fff" : outerBtn.background,
+                color: liked ? "#000" : outerBtn.color,
+              }}
+              aria-label="いいね"
+              title="いいね"
+            >
+              {liked ? "♥" : "♡"} {likeCount}
+            </button>
+          </div>
+
+          <div />
+
+          <div style={outerRight}>
+            <button onPointerDown={stop} onClick={onShare} style={outerBtn} aria-label="共有" title="共有">
+              共有
+            </button>
+          </div>
+        </div>
+
+        {/* ✅ 枠パネル（ここから下だけが「枠」） */}
+        <div style={panel}>
+          {/* タイトル（枠の中） */}
           <div style={titleClamp}>{titleText}</div>
 
           {/* シーク */}
@@ -528,36 +539,32 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
               style={{ width: "100%" }}
             />
 
-            <span
-              style={{
-                color: "rgba(255,255,255,0.85)",
-                fontSize: 12,
-                minWidth: 42,
-                textAlign: "right",
-              }}
-            >
+            <span style={{ color: "rgba(255,255,255,0.85)", fontSize: 12, minWidth: 42, textAlign: "right" }}>
               {formatTime(duration)}
             </span>
           </div>
 
-          {/* ✅ 下段：全体を中央寄せ（overflowでも中央スタート） */}
+          {/* 下段：音OFF → -10 → -5 → 本編 → +5 → +10 → 再生 */}
           <div style={oneRowWrap}>
             <div style={oneRowInner}>
-              {/* スキップ */}
+              <button
+                onPointerDown={stop}
+                onClick={(e) => (stop(e), toggleMute())}
+                style={{ ...pillBtnSmall, minWidth: 84 }}
+                aria-label={effectiveMuted ? "音OFF" : "音ON"}
+                title={effectiveMuted ? "音OFF" : "音ON"}
+              >
+                {effectiveMuted ? "音OFF" : "音ON"}
+              </button>
+
               <button onPointerDown={stop} onClick={(e) => (stop(e), skip(-10))} style={pillBtnSmall}>
                 -10
               </button>
+
               <button onPointerDown={stop} onClick={(e) => (stop(e), skip(-5))} style={pillBtnSmall}>
                 -5
               </button>
-              <button onPointerDown={stop} onClick={(e) => (stop(e), skip(5))} style={pillBtnSmall}>
-                +5
-              </button>
-              <button onPointerDown={stop} onClick={(e) => (stop(e), skip(10))} style={pillBtnSmall}>
-                +10
-              </button>
 
-              {/* 本編 */}
               {affUrl ? (
                 <a
                   onPointerDown={stop}
@@ -576,46 +583,22 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
                 <div style={{ width: 56, height: 56, flex: "0 0 auto" }} />
               )}
 
-              {/* ♡ / 共有 */}
+              <button onPointerDown={stop} onClick={(e) => (stop(e), skip(5))} style={pillBtnSmall}>
+                +5
+              </button>
+
+              <button onPointerDown={stop} onClick={(e) => (stop(e), skip(10))} style={pillBtnSmall}>
+                +10
+              </button>
+
               <button
                 onPointerDown={stop}
-                onClick={onToggleLike}
-                style={{
-                  ...miniBtn,
-                  background: liked ? "#fff" : miniBtn.background,
-                  color: liked ? "#000" : miniBtn.color,
-                }}
-                aria-label="いいね"
-                title="いいね"
+                onClick={(e) => (stop(e), togglePlay())}
+                style={{ ...pillBtnSmall, minWidth: 84 }}
+                aria-label={playing ? "停止" : "再生"}
+                title={playing ? "停止" : "再生"}
               >
-                {liked ? "♥" : "♡"} {likeCount}
-              </button>
-
-              <button onPointerDown={stop} onClick={onShare} style={miniBtn} aria-label="共有" title="共有">
-                共有
-              </button>
-
-              {/* 再生 */}
-              <button onPointerDown={stop} onClick={(e) => (stop(e), togglePlay())} style={primaryBtnSmallBg}>
                 {playing ? "停止" : "再生"}
-              </button>
-
-              {/* ✅ ミュート：画像なし、見やすいON/OFFだけ */}
-              <button
-                onPointerDown={stop}
-                onClick={(e) => (stop(e), toggleMute())}
-                style={{
-                  ...muteTextBtn,
-                  background: effectiveMuted ? "rgba(255,255,255,0.10)" : "#fff",
-                  color: effectiveMuted ? "rgba(255,255,255,0.95)" : "#000",
-                  border: effectiveMuted
-                    ? "1px solid rgba(255,255,255,0.14)"
-                    : "1px solid rgba(0,0,0,0.10)",
-                }}
-                aria-label={effectiveMuted ? "音OFF" : "音ON"}
-                title={effectiveMuted ? "音OFF" : "音ON"}
-              >
-                {effectiveMuted ? "音OFF" : "音ON"}
               </button>
             </div>
           </div>
@@ -639,12 +622,59 @@ const titleClamp: React.CSSProperties = {
   lineHeight: 1.35,
 };
 
-/**
- * ✅ 下段を中央スタートにするコツ
- * - outer: textAlign center
- * - inner: inline-flex にする（中央基準で配置される）
- * - overflow は維持（万一だけ横スクロール）
- */
+/** ✅ 枠（パネル） */
+const panel: React.CSSProperties = {
+  borderRadius: 18,
+  padding: 10,
+  background: "rgba(0,0,0,0.45)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  boxShadow: "0 14px 40px rgba(0,0,0,0.35)",
+  display: "grid",
+  gap: 8,
+  maxWidth: "min(560px, 100%)",
+  margin: "0 auto",
+};
+
+/** ✅ 枠の外：タイトルの上（左=♡、右=共有） */
+const outerTopBar: React.CSSProperties = {
+  maxWidth: "min(560px, 100%)",
+  margin: "0 auto",
+  marginBottom: 8,
+  display: "grid",
+  gridTemplateColumns: "auto 1fr auto",
+  alignItems: "center",
+};
+
+const outerLeft: React.CSSProperties = {
+  display: "inline-flex",
+  gap: 8,
+  alignItems: "center",
+};
+
+const outerRight: React.CSSProperties = {
+  display: "inline-flex",
+  gap: 8,
+  alignItems: "center",
+  justifyContent: "flex-end",
+};
+
+const outerBtn: React.CSSProperties = {
+  height: 38,
+  padding: "0 12px",
+  borderRadius: 999,
+  background: "rgba(0,0,0,0.35)",
+  color: "rgba(255,255,255,0.95)",
+  border: "1px solid rgba(255,255,255,0.16)",
+  fontWeight: 900,
+  fontSize: 12,
+  lineHeight: 1,
+  backdropFilter: "blur(8px)",
+  WebkitBackdropFilter: "blur(8px)",
+  flex: "0 0 auto",
+  boxShadow: "0 10px 24px rgba(0,0,0,0.30)",
+};
+
+/** 下段を中央スタートにする */
 const oneRowWrap: React.CSSProperties = {
   overflowX: "auto",
   WebkitOverflowScrolling: "touch",
@@ -656,47 +686,29 @@ const oneRowInner: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  gap: 6,
+  gap: 8,
   flexWrap: "nowrap",
   minWidth: "max-content",
 };
 
-/** スキップ：小さめ */
+/** スキップ/操作（共通） */
 const pillBtnSmall: React.CSSProperties = {
-  minWidth: 44,
-  height: 34,
-  padding: "0 10px",
+  minWidth: 55,
+  height: 50,
+  padding: "0 12px",
   borderRadius: 999,
   background: "rgba(255,255,255,0.12)",
   color: "rgba(255,255,255,0.95)",
   border: "1px solid rgba(255,255,255,0.16)",
   fontWeight: 900,
-  fontSize: 12,
+  fontSize: 16,
   lineHeight: 1,
   backdropFilter: "blur(6px)",
   WebkitBackdropFilter: "blur(6px)",
   flex: "0 0 auto",
 };
 
-/** 再生：小さめ */
-const primaryBtnSmallBg: React.CSSProperties = {
-  height: 40,
-  minWidth: 54,
-  padding: "0 10px",
-  borderRadius: 999,
-  background: "rgba(255,255,255,0.12)",
-  color: "rgba(255,255,255,0.98)",
-  border: "1px solid rgba(255,255,255,0.16)",
-  fontWeight: 900,
-  fontSize: 12,
-  lineHeight: 1,
-  whiteSpace: "nowrap",
-  backdropFilter: "blur(6px)",
-  WebkitBackdropFilter: "blur(6px)",
-  flex: "0 0 auto",
-};
-
-/** 本編：少し小さめ */
+/** 本編：中央 */
 const productMainBtn: React.CSSProperties = {
   width: 56,
   height: 56,
@@ -711,36 +723,5 @@ const productMainBtn: React.CSSProperties = {
   justifyContent: "center",
   boxShadow: "0 12px 28px rgba(0,0,0,0.35)",
   border: "1px solid rgba(0,0,0,0.08)",
-  flex: "0 0 auto",
-};
-
-/** ♡ / 共有：小さめ */
-const miniBtn: React.CSSProperties = {
-  height: 40,
-  padding: "0 10px",
-  borderRadius: 999,
-  background: "rgba(255,255,255,0.10)",
-  color: "rgba(255,255,255,0.95)",
-  border: "1px solid rgba(255,255,255,0.14)",
-  fontWeight: 900,
-  fontSize: 12,
-  lineHeight: 1,
-  backdropFilter: "blur(6px)",
-  WebkitBackdropFilter: "blur(6px)",
-  flex: "0 0 auto",
-};
-
-/** ✅ ミュート：テキストだけ（見やすい） */
-const muteTextBtn: React.CSSProperties = {
-  height: 40,
-  minWidth: 56,
-  padding: "0 12px",
-  borderRadius: 999,
-  fontWeight: 900,
-  fontSize: 12,
-  lineHeight: 1,
-  whiteSpace: "nowrap",
-  backdropFilter: "blur(6px)",
-  WebkitBackdropFilter: "blur(6px)",
   flex: "0 0 auto",
 };
