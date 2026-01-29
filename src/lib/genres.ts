@@ -8,11 +8,6 @@ export type GenreKey = string;
 export type GenreItem = { key: string; label: string };
 export type GenreGroup = { title: string; items: GenreItem[] };
 
-/**
- * ✅ ここが「ジャンルの総数」を決める本体
- * - key は全部 小文字（URL/SEO/filter を安定させる）
- * - label は表示用（日本語）
- */
 export const GENRE_GROUPS: GenreGroup[] = [
   // ---- タイプ（見た目/属性） ----
   {
@@ -49,7 +44,9 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "bishoujo", label: "美少女" },
       { key: "other-type", label: "その他（タイプ）" },
 
-      // ✅ 追加（言い換え＋元の名前）
+      // 追加
+      { key: "fair-skin", label: "色白" },
+      { key: "clean", label: "清潔" },
       { key: "beautiful-style", label: "美乳" },
     ],
   },
@@ -77,10 +74,15 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "gym-uniform", label: "体操着" },
       { key: "business-suit", label: "ビジネススーツ" },
       { key: "other-costume", label: "その他（コス）" },
+
+      // 追加
+      { key: "student-uniform-adult", label: "学生服" },
+      { key: "secretary", label: "秘書" },
+      { key: "crossdress", label: "女装・男の娘" },
     ],
   },
 
-  // ---- 作品/ジャンル（作品タイプ） ----
+  // ---- 作品/ジャンル ----
   {
     title: "ジャンル",
     items: [
@@ -98,8 +100,6 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "planning", label: "企画" },
       { key: "other-fetish", label: "その他フェチ" },
       { key: "other-genre", label: "その他（ジャンル）" },
-
-      // ここは別枠の「ジャンル」ボタンにあったやつ
       { key: "action", label: "アクション" },
       { key: "anime", label: "アニメ" },
       { key: "classic", label: "クラシック" },
@@ -107,7 +107,16 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "gag-comedy", label: "ギャグ・コメディ" },
       { key: "school-adult", label: "学園もの" },
 
-      // ✅ 追加（言い換え＋元の名前）
+      // 追加
+      { key: "romance", label: "恋愛" },
+      { key: "seductress", label: "痴女" },
+      { key: "obscene-talk", label: "淫語" },
+      { key: "harem", label: "ハーレム" },
+      { key: "virgin-theme", label: "童貞" },
+      { key: "humiliation-strong", label: "辱め" },
+      { key: "incest-taboo", label: "近親相姦" },
+      { key: "prank", label: "イタズラ" },
+
       { key: "story-drama", label: "ドラマ" },
       { key: "ntr", label: "寝取り・寝取られ・NTR" },
       { key: "group-play", label: "乱行" },
@@ -155,13 +164,15 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "mom-friend", label: "ママ友" },
       { key: "sisters", label: "姉・妹" },
 
-      // ✅ 追加（言い換え＋元の名前）
+      // 追加
+      { key: "hostess-service", label: "キャバ嬢・風俗嬢" },
+      { key: "housewife", label: "主婦" },
+      { key: "stepmother", label: "義母" },
+
       { key: "teacher-adult", label: "女教師" },
       { key: "office-mix", label: "OL・職業色々" },
       { key: "college-student", label: "女子大生" },
       { key: "mature-mother", label: "お母さん" },
-
-      // ⚠️ 未成年想起を避ける（表示はこの形で固定推奨）
       { key: "student-adult", label: "女子校生" },
     ],
   },
@@ -190,6 +201,7 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "sixty-nine", label: "シックスナイン" },
       { key: "anal-sex", label: "アナルセックス" },
       { key: "irrumatio", label: "イマラチオ" },
+      { key: "iramachio", label: "イラマチオ" },
       { key: "creampie", label: "中出し" },
       { key: "facial", label: "顔射" },
       { key: "bondage", label: "縛り・緊縛" },
@@ -203,14 +215,13 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "big-dick", label: "デカチン・巨根" },
       { key: "other-play", label: "その他（プレイ）" },
 
-      // ✅ 追加（言い換え＋元の名前）
       { key: "electric-toy", label: "電マ" },
       { key: "restraint", label: "拘束" },
       { key: "finish", label: "ぶっかけ" },
     ],
   },
 
-  // ---- その他（機能/尺/配信など） ----
+  // ---- その他 ----
   {
     title: "その他",
     items: [
@@ -233,13 +244,11 @@ export const GENRE_GROUPS: GenreGroup[] = [
   },
 ];
 
-// 画面側で使う「全部のジャンル候補」
 export const GENRE_LIST: GenreItem[] = [
   { key: GENRE_ALL, label: "ランダム" },
   ...GENRE_GROUPS.flatMap((g) => g.items),
 ];
 
-// ✅ SEOや /genre/[slug] で使うマップ（null禁止）
 export const GENRE_SEO_MAP: Record<string, { key: GenreKey; label: string; desc: string }> =
   Object.fromEntries(
     GENRE_GROUPS.flatMap((g) =>
@@ -257,20 +266,17 @@ export const GENRE_SEO_MAP: Record<string, { key: GenreKey; label: string; desc:
     )
   );
 
-// ✅ UI表示用（GenreMenu.tsx がこれを import してても落ちないように）
 export function genreLabel(key: string): string {
   const k = String(key ?? "").toLowerCase();
   if (k === GENRE_ALL) return "ランダム";
   return GENRE_SEO_MAP[k]?.label ?? key;
 }
 
-// ✅ 型ガード（必要なら）
 export function isGenreKey(v: any): v is GenreKey {
   if (v === GENRE_ALL) return true;
   return typeof v === "string";
 }
 
-// ✅ 念のため：key を常に小文字へ寄せる
 export function normalizeGenreKey(v: any): string {
   if (v == null) return "";
   return String(v).trim().toLowerCase();

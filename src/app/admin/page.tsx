@@ -32,8 +32,8 @@ export default function AdminPage() {
   const [genres, setGenres] = useState<GenreKey[]>(["other"]);
   const [genreQuery, setGenreQuery] = useState("");
 
+  // ✅ 開閉は「開く/閉じるボタン」だけで制御（選択では閉じない）
   const [genreOpen, setGenreOpen] = useState(false);
-  const [genrePin, setGenrePin] = useState(false);
 
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -66,7 +66,10 @@ export default function AdminPage() {
       return uniq(next) as GenreKey[];
     });
 
-    if (!genrePin) setGenreOpen(false);
+    // ✅ 選んだら検索ワードを消す（次を探しやすい）
+    setGenreQuery("");
+
+    // ✅ 重要：ここで setGenreOpen(false) しない＝選択では閉じない
   }
 
   async function load() {
@@ -120,8 +123,7 @@ export default function AdminPage() {
       setAffLabel("");
       setGenres(["other"]);
       setGenreQuery("");
-      setGenreOpen(false);
-      setGenrePin(false);
+      setGenreOpen(false); // 追加完了後は閉じてOK
 
       await load();
     } finally {
@@ -130,7 +132,6 @@ export default function AdminPage() {
   }
 
   const query = genreQuery.trim().toLowerCase();
-
   const filteredGroups = useMemo(() => {
     if (!query) return GENRE_GROUPS;
 
@@ -184,7 +185,7 @@ export default function AdminPage() {
             onChange={(e) => setUrl(e.target.value)}
           />
 
-          {/* ✅ ジャンル：開閉式 */}
+          {/* ✅ ジャンル：開閉式（ただし選択では閉じない） */}
           <div className="rounded-2xl bg-neutral-800 p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-semibold">ジャンル（複数選択）</div>
@@ -198,6 +199,7 @@ export default function AdminPage() {
                   リセット
                 </button>
 
+                {/* ✅ リセット横に「閉じる/開く」 */}
                 <button
                   type="button"
                   className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
@@ -229,15 +231,6 @@ export default function AdminPage() {
                     value={genreQuery}
                     onChange={(e) => setGenreQuery(e.target.value)}
                   />
-
-                  <label className="ml-3 flex items-center gap-2 text-xs text-white/80 select-none">
-                    <input
-                      type="checkbox"
-                      checked={genrePin}
-                      onChange={(e) => setGenrePin(e.target.checked)}
-                    />
-                    固定（閉じない）
-                  </label>
                 </div>
 
                 <div className="space-y-4">
@@ -312,7 +305,6 @@ export default function AdminPage() {
         </form>
       </section>
 
-      {/* ここでは “登録済み一覧” は見せない（別ページへ） */}
       <section className="rounded-2xl bg-neutral-900 p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -330,7 +322,6 @@ export default function AdminPage() {
           </Link>
         </div>
 
-        {/* ✅ 追加：ダッシュボードボタン（ページが無いと 404 になるので注意） */}
         <Link
           href="/admin/analytics"
           className="block w-full text-center px-4 py-3 rounded-xl bg-white/10 text-white font-bold hover:bg-white/15 active:bg-white/15 border border-white/10"

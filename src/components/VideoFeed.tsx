@@ -2,10 +2,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import VideoCard from "@/components/VideoCard";
-
 import GenreMenu from "@/components/GenreMenu";
 import MoreMenu from "@/components/MoreMenu";
-
 import { GENRE_ALL, GENRE_LIKES, type GenreKey } from "@/lib/genres";
 
 type VideoItem = {
@@ -66,37 +64,48 @@ function shuffleWithSeed<T>(arr: T[], seed: number) {
   return a;
 }
 
+// ✅ 追加：検索用（全角/半角ゆらぎ対策 + 小文字化）
+function normalizeText(s: string) {
+  return String(s ?? "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 type Props = {
   /** ジャンルページなどで固定したい時に渡す（例: "amateur"） */
   initialGenre?: GenreKey;
-  /**
-   * 初期ジャンル固定時に、左上のGenreMenuを隠したい場合に true
-   *（ジャンルページは固定表示の方が迷わない）
-   */
+  /** ジャンル固定時にメニューを隠したい場合 */
   hideGenreMenu?: boolean;
 };
 
 export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
-
   const [vh, setVh] = useState<number | null>(null);
 
-  // ✅ ジャンル状態（初期値を受け取れる）
-  const [genre, setGenre] = useState<GenreKey>(initialGenre ?? GENRE_ALL);
+  // ✅ 複数ジャンル（初期値）
+  const [genres, setGenres] = useState<GenreKey[]>(
+    initialGenre ? [initialGenre] : [GENRE_ALL]
+  );
   const [shuffleSeed, setShuffleSeed] = useState<number>(() => Date.now());
 
+  // ✅ 追加：タイトル検索文字（ジャンル絞り込みにも共用）
+  const [query, setQuery] = useState("");
+
   // ✅ ルートが変わって initialGenre が変わったら追従
-  // ⚠️ 依存配列は固定（条件で [] / [xxx] を切り替えない）
   useEffect(() => {
     if (initialGenre) {
-      setGenre(initialGenre);
+      setGenres([initialGenre]);
       setIndex(0);
+      setQuery(""); // ✅ 固定ジャンルページに入ったら検索はリセット（不要なら消してOK）
       return;
     }
-    setGenre(GENRE_ALL);
+    setGenres([GENRE_ALL]);
     setIndex(0);
     setShuffleSeed(Date.now());
+    setQuery("");
   }, [initialGenre]);
 
   // ✅ 画面高さ追従
@@ -119,7 +128,6 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
         if (!alive) return;
 
         const normalized: VideoItem[] = list.map((v) => {
-          // ✅ aff をどっちで来ても拾って、両方に詰める（「商品」復活の要）
           const affUrl = (v?.affUrl ?? v?.affiliateUrl) as string | undefined;
           const affLabel = (v?.affLabel ?? v?.affiliateLabel) as string | undefined;
 
@@ -131,13 +139,11 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
             poster: v.poster,
             srcType: v.srcType,
 
-            // ✅ 重要：両方に同じ値を入れる
             affUrl,
             affLabel,
             affiliateUrl: affUrl,
             affiliateLabel: affLabel,
 
-            // genre 互換
             genres: Array.isArray(v.genres) ? v.genres : undefined,
             genre: typeof v.genre === "string" ? v.genre : undefined,
 
@@ -188,25 +194,45 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
     return () => window.removeEventListener(EVT_LIKES, on as any);
   }, []);
 
-  // ✅ フィルタ & Allはシャッフル & ♡ランキングは likeCount desc
+  // ✅ フィルタ & Allはシャッフル & ♡ランキングは likeCount desc + タイトル検索
   const viewItems = useMemo(() => {
-    if (genre === GENRE_LIKES) {
-      return items
+    const sel = Array.isArray(genres) ? genres : [GENRE_ALL];
+
+    // 1) まずジャンルで絞る
+    let base: VideoItem[] = items;
+
+    // ♡ランキング（単体だけ）
+    if (sel.length === 1 && sel[0] === GENRE_LIKES) {
+      base = items
         .slice()
         .sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
+    } else if (sel.length === 0 || (sel.length === 1 && sel[0] === GENRE_ALL)) {
+      // All（単体だけ）
+      base = shuffleWithSeed(items, shuffleSeed);
+    } else {
+      // OR フィルタ（複数どれか含めば表示）
+      const want = new Set(sel.map(String));
+      base = items.filter((v) => {
+        const tags = Array.isArray(v.genres)
+          ? v.genres
+          : typeof v.genre === "string"
+          ? [v.genre]
+          : [];
+        return tags.some((t) => want.has(String(t)));
+      });
     }
 
-    if (genre === GENRE_ALL) return shuffleWithSeed(items, shuffleSeed);
+    // 2) タイトル検索で絞る
+    const q = normalizeText(query);
+    if (!q) return base;
 
-    return items.filter((v) => {
-      const tags = Array.isArray(v.genres)
-        ? v.genres
-        : typeof v.genre === "string"
-        ? [v.genre]
-        : [];
-      return tags.includes(String(genre));
+    return base.filter((v) => {
+      const title = normalizeText(v.title);
+      const affLabel = normalizeText(v.affLabel ?? v.affiliateLabel ?? "");
+      const id = normalizeText(v.id);
+      return title.includes(q) || affLabel.includes(q) || id.includes(q);
     });
-  }, [items, genre, shuffleSeed]);
+  }, [items, genres, shuffleSeed, query]);
 
   // ✅ viewItems が変わったら index を範囲内に
   useEffect(() => {
@@ -388,24 +414,30 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
           style={{ top: safeTop, left: safeLeft }}
         >
           <GenreMenu
-            value={genre}
+            value={genres}
             onChange={(v) => {
               if (initialGenre) return;
 
-              setGenre(v);
+              setGenres(v);
               setIndex(0);
 
               // ✅ ALL だけシャッフル更新
-              if (v === GENRE_ALL) setShuffleSeed(Date.now());
+              if (v.length === 1 && v[0] === GENRE_ALL) setShuffleSeed(Date.now());
+            }}
+            query={query}
+            onChangeQuery={(s) => {
+              setQuery(s);
+              setIndex(0); // 検索を変えたら先頭に戻す
             }}
           />
         </div>
       ) : null}
 
+      {/* ✅ 右上 … だけ少し上へ */}
       <div
         className="absolute z-40"
         data-no-swipe="1"
-        style={{ top: safeTop, right: safeRight }}
+        style={{ top: `calc(${safeTop} - 8px)`, right: safeRight }}
       >
         <MoreMenu />
       </div>
