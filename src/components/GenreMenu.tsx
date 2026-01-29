@@ -50,7 +50,12 @@ function labelOf(key: GenreKey) {
   return String(key);
 }
 
-export default function GenreMenu({ value, onChange, query, onChangeQuery }: Props) {
+export default function GenreMenu({
+  value,
+  onChange,
+  query,
+  onChangeQuery,
+}: Props) {
   const [open, setOpen] = useState(false);
 
   const selected = useMemo(() => normalizeSelected(value), [value]);
@@ -72,13 +77,15 @@ export default function GenreMenu({ value, onChange, query, onChangeQuery }: Pro
   const filteredGroups = useMemo(() => {
     if (!genreQuery) return GENRE_GROUPS;
 
-    return GENRE_GROUPS.map((g) => {
-      const items = g.items.filter((it) => {
-        const t = `${it.key} ${it.label}`.toLowerCase();
-        return t.includes(genreQuery);
-      });
-      return { ...g, items };
-    }).filter((g) => g.items.length > 0);
+    return GENRE_GROUPS
+      .map((g) => {
+        const items = g.items.filter((it) => {
+          const t = `${it.key} ${it.label}`.toLowerCase();
+          return t.includes(genreQuery);
+        });
+        return { ...g, items };
+      })
+      .filter((g) => g.items.length > 0);
   }, [genreQuery]);
 
   function setSelected(next: GenreKey[]) {
@@ -139,6 +146,7 @@ export default function GenreMenu({ value, onChange, query, onChangeQuery }: Pro
           style={{
             maxHeight: "72svh",
             overflow: "hidden",
+            touchAction: "pan-y", // ✅ iOSで余計なジェスチャーを減らす
           }}
           onClick={(e) => stop(e)}
         >
@@ -170,12 +178,20 @@ export default function GenreMenu({ value, onChange, query, onChangeQuery }: Pro
             </div>
           </div>
 
-          {/* ✅ 検索（これ1本だけ：タイトル検索 + ジャンル絞り込み） */}
+          {/* ✅ 検索（iPhoneズーム対策：text-base=16px） */}
           <input
             value={query}
             onChange={(e) => onChangeQuery(e.target.value)}
             placeholder="検索（タイトル/ジャンル）"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-sm outline-none text-white placeholder:text-white/40"
+            inputMode="search"
+            autoCapitalize="none"
+            autoCorrect="off"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-base outline-none text-white placeholder:text-white/40"
+            // ✅ 念のため：Tailwindが効かん環境でも 16px を強制
+            style={{ fontSize: 16 }}
+            onPointerDown={(e) => stop(e)}
+            onTouchStart={(e) => stop(e)}
+            onTouchMove={(e) => stop(e)}
           />
 
           {/* ✅ 2カラム：左=選択UI / 右=選択中 */}
