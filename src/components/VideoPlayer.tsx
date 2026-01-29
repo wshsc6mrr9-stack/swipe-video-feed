@@ -455,6 +455,9 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         height: "100%",
         background: "black",
         overflow: "hidden",
+        overflowX: "hidden", // ✅ 横はみ出し完全に殺す
+        touchAction: "pan-y", // ✅ 縦操作だけ許可（横パン無効）
+        overscrollBehaviorX: "none" as any, // ✅ iOS横引っ張り抑止
       }}
     >
       {/* PR：safe-area top を考慮して中央 */}
@@ -534,6 +537,11 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           bottom: safeBottom,
           zIndex: 20,
           pointerEvents: "auto",
+
+          // ✅ ここが重要：controls自体も横はみ出し＆横スクロール禁止
+          overflowX: "hidden",
+          touchAction: "pan-y",
+          overscrollBehaviorX: "none" as any,
         }}
         onPointerDown={stop}
         onClick={stop}
@@ -600,10 +608,10 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
             </span>
           </div>
 
-          {/* ✅ 下段：♡（ミュートと交換）/ 共有（再生と交換） */}
-          <div style={oneRowWrap}>
+          {/* ✅ 下段：横スクロール禁止（iPhoneで横に動くのを完全に止める） */}
+          <div style={oneRowWrap} onTouchMove={stop}>
             <div style={oneRowInner}>
-              {/* ❤️ いいね：背景余白を +10 と同じにするため minWidth は付けない */}
+              {/* ❤️ いいね */}
               <button
                 onPointerDown={stop}
                 onClick={onToggleLike}
@@ -653,7 +661,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
                 +10
               </button>
 
-              {/* 共有：背景余白を +10 と同じにするため minWidth は付けない */}
+              {/* 共有 */}
               <button onPointerDown={stop} onClick={onShare} style={pillBtnSmall} aria-label="共有" title="共有">
                 共有
               </button>
@@ -731,12 +739,16 @@ const outerBtn: React.CSSProperties = {
   flex: "0 0 auto",
 };
 
-/** 下段を中央スタートにする */
+/** ✅ 下段：横スクロール禁止（iPhoneで横に動くのを止める） */
 const oneRowWrap: React.CSSProperties = {
-  overflowX: "auto",
-  WebkitOverflowScrolling: "touch",
+  overflowX: "hidden", // ✅ ここが超重要：auto をやめる
+  overflowY: "visible",
   paddingBottom: 2,
   textAlign: "center",
+
+  // ✅ iOSの横パン/横引っ張りも殺す
+  touchAction: "pan-y",
+  overscrollBehaviorX: "none" as any,
 };
 
 const oneRowInner: React.CSSProperties = {
@@ -758,7 +770,7 @@ const pillBtnSmall: React.CSSProperties = {
   color: "rgba(255,255,255,0.95)",
   border: "1px solid rgba(255,255,255,0.16)",
   fontWeight: 900,
-  fontSize: 13,
+  fontSize: 11,
   lineHeight: 1,
   backdropFilter: "blur(6px)",
   WebkitBackdropFilter: "blur(6px)",
