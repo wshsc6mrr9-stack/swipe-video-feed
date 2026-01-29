@@ -18,8 +18,10 @@ const EVT_LIKES = "likes_changed_v1";
 // ✅ 全動画を常に +7秒スタート
 const START_OFFSET_SEC = 7;
 
-// ✅ スワイプ誤クリック防止：これ以上動いたら「クリック無効」
-const TAP_MOVE_PX = 10;
+// ✅ これ以上動いたら「スワイプ扱い」でタップ判定しない（誤停止対策）
+const TAP_MOVE_PX = 14;
+// ✅ これ以上長押しはタップ扱いしない
+const TAP_MAX_MS = 350;
 
 function isHlsUrl(url?: string) {
   return !!url && url.includes(".m3u8");
@@ -119,7 +121,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     affUrl?: string;
     affiliateUrl?: string;
   };
-
   const affUrl = (vAny.affUrl ?? vAny.affiliateUrl) as string | undefined;
 
   const effectiveMuted = isActive ? muted : true;
@@ -127,15 +128,21 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const sentPlayRef = useRef(false);
   const jumpedRef = useRef(false);
 
-  // ✅ 誤クリック防止用
-  const tapDownRef = useRef<{ x: number; y: number } | null>(null);
-  const tapMovedRef = useRef(false);
+  // ✅ ユーザーが「自分で止めた」なら勝手に再開しない
+  const userPausedRef = useRef(false);
+
+  // ✅ タップ/スワイプ判定（誤停止対策）
+  const tapRef = useRef({
+    downX: 0,
+    downY: 0,
+    downT: 0,
+    moved: false,
+  });
 
   useEffect(() => {
     sentPlayRef.current = false;
     jumpedRef.current = false;
-    tapDownRef.current = null;
-    tapMovedRef.current = false;
+    userPausedRef.current = false; // ✅ 新しい動画になったら「自分で止めた」状態は解除
   }, [video.id]);
 
   useEffect(() => {
@@ -153,32 +160,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     };
   }, []);
 
-  // ✅ play の失敗を canplay でリトライ（iPhoneで止まりっぱなし対策）
-  const playWithRetry = async (el: HTMLVideoElement) => {
-    try {
-      await el.play();
-      setPlaying(true);
-      return true;
-    } catch {
-      setPlaying(false);
-
-      // isActive の時だけ「再生できるタイミング」を待って1回だけリトライ
-      if (!isActive) return false;
-
-      const once = () => {
-        el.removeEventListener("canplay", once);
-        el.removeEventListener("loadeddata", once);
-        el.play()
-          .then(() => setPlaying(true))
-          .catch(() => setPlaying(false));
-      };
-
-      el.addEventListener("canplay", once, { once: true });
-      el.addEventListener("loadeddata", once, { once: true });
-      return false;
-    }
-  };
-
   // タブ非表示で止める
   useEffect(() => {
     const onVis = () => {
@@ -191,9 +172,11 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         } catch {}
         setPlaying(false);
       } else {
-        if (isActive) {
+        if (isActive && !userPausedRef.current) {
           el.muted = effectiveMuted;
-          playWithRetry(el);
+          el.play()
+            .then(() => setPlaying(true))
+            .catch(() => setPlaying(false));
         }
       }
     };
@@ -202,7 +185,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     return () => {
       document.removeEventListener("visibilitychange", onVis);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, effectiveMuted]);
 
   // HLS attach
@@ -254,9 +236,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     if (start <= 0) return;
 
     try {
-      const cur = Number.isFinite(el.currentTime)
-        ? el.currentTime
-        : currentRef.current || 0;
+      const cur = Number.isFinite(el.currentTime) ? el.currentTime : currentRef.current || 0;
       if (cur >= start) return;
 
       el.currentTime = start;
@@ -290,31 +270,28 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       return;
     }
 
-    // ✅ アクティブになった瞬間に +7秒へ（できるタイミングで）
+    // ✅ アクティブになったら強制的に「自分で止めた」解除して自動再生
+    userPausedRef.current = false;
+
     if (!jumpedRef.current) {
       jumpToStart(el);
       jumpedRef.current = true;
     }
 
-    (async () => {
-      const ok = await playWithRetry(el);
-      if (ok && !sentPlayRef.current) {
-        sentPlayRef.current = true;
-        track(String(video.id), "play");
+    const play = async () => {
+      try {
+        await el.play();
+        setPlaying(true);
+        if (!sentPlayRef.current) {
+          sentPlayRef.current = true;
+          track(String(video.id), "play");
+        }
+      } catch {
+        setPlaying(false);
       }
-      if (!ok) {
-        // リトライで再生できたら play イベント送る
-        const onPlayed = () => {
-          el.removeEventListener("play", onPlayed);
-          if (!sentPlayRef.current) {
-            sentPlayRef.current = true;
-            track(String(video.id), "play");
-          }
-        };
-        el.addEventListener("play", onPlayed, { once: true });
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    };
+
+    play();
   }, [isActive, effectiveMuted, video.id]);
 
   // events
@@ -329,7 +306,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       setReady(true);
       if (seekRef.current) seekRef.current.max = String(Math.max(0, d || 0));
 
-      // ✅ duration が取れたタイミングで +7秒へ（未実行なら）
       if (isActive && !jumpedRef.current) {
         jumpToStart(el);
         jumpedRef.current = true;
@@ -350,7 +326,35 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     };
 
     const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
+
+    // ✅ 「勝手に停止」したら、ユーザーが止めたのでない限り復帰
+    const onPause = () => {
+      setPlaying(false);
+
+      if (!isActive) return;
+      if (document.visibilityState !== "visible") return;
+      if (userPausedRef.current) return; // ユーザーが止めたなら復帰しない
+
+      // iOSの一時的pause対策：少し待って再生
+      setTimeout(() => {
+        const v = videoRef.current;
+        if (!v) return;
+        if (!isActive) return;
+        if (document.visibilityState !== "visible") return;
+        if (userPausedRef.current) return;
+
+        v.muted = effectiveMuted;
+        v.play()
+          .then(() => {
+            setPlaying(true);
+            if (!sentPlayRef.current) {
+              sentPlayRef.current = true;
+              track(String(video.id), "play");
+            }
+          })
+          .catch(() => {});
+      }, 120);
+    };
 
     el.addEventListener("loadedmetadata", onLoaded);
     el.addEventListener("durationchange", onLoaded);
@@ -366,7 +370,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       el.removeEventListener("pause", onPause);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive]);
+  }, [isActive, effectiveMuted]);
 
   const stop = (e: any) => {
     e?.stopPropagation?.();
@@ -380,12 +384,18 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     if (!el) return;
 
     if (el.paused) {
-      const ok = await playWithRetry(el);
-      if (ok && !sentPlayRef.current) {
-        sentPlayRef.current = true;
-        track(String(video.id), "play");
-      }
+      userPausedRef.current = false;
+      try {
+        await el.play();
+        setPlaying(true);
+        if (!sentPlayRef.current) {
+          sentPlayRef.current = true;
+          track(String(video.id), "play");
+        }
+      } catch {}
     } else {
+      // ✅ ユーザーが止めたフラグ
+      userPausedRef.current = true;
       el.pause();
       setPlaying(false);
     }
@@ -488,32 +498,35 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const SAFE_PAD = 10;
   const safeBottom = `calc(env(safe-area-inset-bottom) + ${SAFE_PAD}px)`;
 
-  // ✅ video タップ誤判定（スワイプで停止しない）
-  const onVideoPointerDown = (e: any) => {
-    tapMovedRef.current = false;
-    tapDownRef.current = { x: e?.clientX ?? 0, y: e?.clientY ?? 0 };
+  // ✅ 動画タップ判定（スワイプなら無視）
+  const onVideoPointerDown = (e: React.PointerEvent) => {
+    // 操作UIの上で起きる分は UI側が止めてるが保険
+    tapRef.current.downX = e.clientX;
+    tapRef.current.downY = e.clientY;
+    tapRef.current.downT = performance.now();
+    tapRef.current.moved = false;
   };
 
-  const onVideoPointerMove = (e: any) => {
-    const d = tapDownRef.current;
-    if (!d) return;
-    const x = e?.clientX ?? 0;
-    const y = e?.clientY ?? 0;
-    const dx = Math.abs(x - d.x);
-    const dy = Math.abs(y - d.y);
-    if (dx > TAP_MOVE_PX || dy > TAP_MOVE_PX) tapMovedRef.current = true;
-  };
-
-  const onVideoPointerUp = (e: any) => {
-    // ✅ スワイプ/ドラッグだったらクリック扱いにしない
-    if (tapMovedRef.current) {
-      tapDownRef.current = null;
-      tapMovedRef.current = false;
-      return;
+  const onVideoPointerMove = (e: React.PointerEvent) => {
+    const dx = e.clientX - tapRef.current.downX;
+    const dy = e.clientY - tapRef.current.downY;
+    if (Math.abs(dx) + Math.abs(dy) > TAP_MOVE_PX) {
+      tapRef.current.moved = true;
     }
+  };
+
+  const onVideoPointerUp = (e: React.PointerEvent) => {
+    const dt = performance.now() - tapRef.current.downT;
+    const dx = e.clientX - tapRef.current.downX;
+    const dy = e.clientY - tapRef.current.downY;
+    const moved = tapRef.current.moved || Math.abs(dx) + Math.abs(dy) > TAP_MOVE_PX;
+
+    // ✅ スワイプ/ドラッグはタップ扱いしない（誤停止の根）
+    if (moved) return;
+    if (dt > TAP_MAX_MS) return;
+
+    // ✅ ここだけ「タップ」で停止/再生
     togglePlay();
-    tapDownRef.current = null;
-    tapMovedRef.current = false;
   };
 
   return (
@@ -524,9 +537,9 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         height: "100%",
         background: "black",
         overflow: "hidden",
-        overflowX: "hidden", // ✅ 横はみ出し完全に殺す
-        touchAction: "pan-y", // ✅ 縦操作だけ許可（横パン無効）
-        overscrollBehaviorX: "none" as any, // ✅ iOS横引っ張り抑止
+        overflowX: "hidden",
+        touchAction: "pan-y",
+        overscrollBehaviorX: "none" as any,
       }}
     >
       {/* PR：safe-area top を考慮して中央 */}
@@ -577,18 +590,10 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           inset: 0,
           zIndex: 0,
         }}
-        // ✅ ここが超重要：swipeをクリック扱いにさせない
-        onPointerDown={onVideoPointerDown as any}
-        onPointerMove={onVideoPointerMove as any}
-        onPointerUp={onVideoPointerUp as any}
-        // iOSでpointerが弱い端末用
-        onTouchStart={(e: any) =>
-          onVideoPointerDown({ clientX: e.touches?.[0]?.clientX ?? 0, clientY: e.touches?.[0]?.clientY ?? 0 })
-        }
-        onTouchMove={(e: any) =>
-          onVideoPointerMove({ clientX: e.touches?.[0]?.clientX ?? 0, clientY: e.touches?.[0]?.clientY ?? 0 })
-        }
-        onTouchEnd={onVideoPointerUp as any}
+        // ✅ iOSの「スワイプ離しクリック」で誤停止しないように onClick は使わない
+        onPointerDown={onVideoPointerDown}
+        onPointerMove={onVideoPointerMove}
+        onPointerUp={onVideoPointerUp}
       />
 
       {!ready && (
@@ -617,8 +622,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           bottom: safeBottom,
           zIndex: 20,
           pointerEvents: "auto",
-
-          // ✅ controls自体も横はみ出し＆横スクロール禁止
           overflowX: "hidden",
           touchAction: "pan-y",
           overscrollBehaviorX: "none" as any,
@@ -626,9 +629,8 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         onPointerDown={stop}
         onClick={stop}
       >
-        {/* ✅ 枠の外：タイトルの上（ミュートと再生にする） */}
+        {/* ✅ 枠の外：タイトルの上（左=ミュート、右=再生） */}
         <div style={outerTopBar}>
-          {/* 左：ミュート（♡の位置） */}
           <div style={outerLeft}>
             <button
               onPointerDown={stop}
@@ -643,7 +645,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
           <div />
 
-          {/* 右：再生（共有の位置） */}
           <div style={outerRight}>
             <button
               onPointerDown={stop}
@@ -657,9 +658,8 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           </div>
         </div>
 
-        {/* ✅ 枠パネル（ここから下だけが「枠」） */}
+        {/* ✅ 枠パネル */}
         <div style={panel}>
-          {/* タイトル（枠の中） */}
           <div style={titleClamp}>{titleText}</div>
 
           {/* シーク */}
@@ -688,10 +688,9 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
             </span>
           </div>
 
-          {/* ✅ 下段：横スクロール禁止 */}
+          {/* 下段 */}
           <div style={oneRowWrap} onTouchMove={stop}>
             <div style={oneRowInner}>
-              {/* ❤️ いいね */}
               <button
                 onPointerDown={stop}
                 onClick={onToggleLike}
@@ -741,7 +740,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
                 +10
               </button>
 
-              {/* 共有 */}
               <button onPointerDown={stop} onClick={onShare} style={pillBtnSmall} aria-label="共有" title="共有">
                 共有
               </button>
@@ -819,7 +817,6 @@ const outerBtn: React.CSSProperties = {
   flex: "0 0 auto",
 };
 
-/** ✅ 下段：横スクロール禁止 */
 const oneRowWrap: React.CSSProperties = {
   overflowX: "hidden",
   overflowY: "visible",
