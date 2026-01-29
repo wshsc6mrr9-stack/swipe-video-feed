@@ -693,15 +693,15 @@ const oneRowInner: React.CSSProperties = {
 
 /** スキップ/操作（共通） */
 const pillBtnSmall: React.CSSProperties = {
-  minWidth: 55,
-  height: 50,
+  minWidth: 16,
+  height: 30,
   padding: "0 12px",
   borderRadius: 999,
   background: "rgba(255,255,255,0.12)",
   color: "rgba(255,255,255,0.95)",
   border: "1px solid rgba(255,255,255,0.16)",
   fontWeight: 900,
-  fontSize: 16,
+  fontSize: 10,
   lineHeight: 1,
   backdropFilter: "blur(6px)",
   WebkitBackdropFilter: "blur(6px)",
