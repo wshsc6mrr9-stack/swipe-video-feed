@@ -17,12 +17,38 @@ type VideoItem = {
   genre?: string;
 };
 
-function uniq(arr: string[]) {
+function uniq<T>(arr: T[]) {
   return Array.from(new Set(arr));
+}
+
+function normalizeGenreToken(s: any): string {
+  return String(s ?? "")
+    .trim()
+    .replace(/^#/, "")
+    .replace(/[　]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+// ✅ クリップボードコピー（失敗時フォールバック）
+async function copyText(label: string, text: string) {
+  const t = (text ?? "").trim();
+  if (!t) {
+    alert(`${label} が空やで`);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(t);
+    // うるさくない程度に
+    alert(`${label} をコピーした`);
+  } catch {
+    // Safari等の権限で失敗することがある
+    prompt(`${label} を手動でコピーして`, t);
+  }
 }
 
 export default function AdminPage() {
   const [items, setItems] = useState<VideoItem[]>([]);
+
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [poster, setPoster] = useState("");
@@ -31,12 +57,121 @@ export default function AdminPage() {
 
   const [genres, setGenres] = useState<GenreKey[]>(["other"]);
   const [genreQuery, setGenreQuery] = useState("");
-
-  // ✅ 開閉は「開く/閉じるボタン」だけで制御（選択では閉じない）
   const [genreOpen, setGenreOpen] = useState(false);
 
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // ✅ FANZA抽出(JSON)貼り付け
+  const [importText, setImportText] = useState("");
+
+  const genreCatalog = useMemo(() => {
+    const all: { key: GenreKey; label: string; labelNorm: string }[] = [];
+    for (const g of GENRE_GROUPS) {
+      for (const it of g.items) {
+        all.push({
+          key: it.key as GenreKey,
+          label: it.label,
+          labelNorm: normalizeGenreToken(it.label),
+        });
+      }
+    }
+    return all;
+  }, []);
+
+  function toGenreKeys(raw: any): GenreKey[] {
+    const arr = Array.isArray(raw) ? raw : raw ? [raw] : [];
+
+    const tokens: string[] = [];
+    for (const v of arr) {
+      const str = String(v ?? "");
+
+      const tags = str.match(/#[^\s#]+/g) ?? [];
+      if (tags.length) {
+        for (const t of tags) tokens.push(normalizeGenreToken(t));
+        const head = normalizeGenreToken(str.split("#")[0]);
+        if (head) tokens.push(head);
+        continue;
+      }
+
+      normalizeGenreToken(str)
+        .split(/[,\s]+/g)
+        .map(normalizeGenreToken)
+        .filter(Boolean)
+        .forEach((x) => tokens.push(x));
+    }
+
+    const uniqTokens = uniq(tokens).filter((x) => x && x !== "ALL");
+    if (!uniqTokens.length) return ["other"];
+
+    const out: GenreKey[] = [];
+
+    for (const t of uniqTokens) {
+      const tNorm = normalizeGenreToken(t);
+
+      const keyHit = genreCatalog.find((x) => String(x.key) === tNorm);
+      if (keyHit) {
+        out.push(keyHit.key);
+        continue;
+      }
+
+      const labelExact = genreCatalog.find((x) => x.labelNorm === tNorm);
+      if (labelExact) {
+        out.push(labelExact.key);
+        continue;
+      }
+
+      const candidates = genreCatalog
+        .filter((x) => x.labelNorm.length >= 2)
+        .filter((x) => tNorm.includes(x.labelNorm) || x.labelNorm.includes(tNorm))
+        .sort((a, b) => b.labelNorm.length - a.labelNorm.length);
+
+      if (candidates[0]) out.push(candidates[0].key);
+    }
+
+    let unique = uniq(out) as GenreKey[];
+    if (!unique.length) unique = ["other"];
+
+    if (unique.length >= 2 && unique.includes("other")) {
+      unique = unique.filter((x) => x !== "other") as GenreKey[];
+      if (!unique.length) unique = ["other"];
+    }
+
+    return unique;
+  }
+
+  function applyImport(raw: string) {
+    try {
+      const o = JSON.parse(raw);
+
+      if (typeof o?.title === "string") setTitle(o.title.trim());
+
+      // ✅ affUrl / affiliateUrl（入ってたら反映）
+      const aurl = o?.affUrl ?? o?.affiliateUrl ?? "";
+      if (typeof aurl === "string" && aurl.trim()) setAffUrl(aurl.trim());
+
+      const alabel = o?.affLabel ?? o?.affiliateLabel ?? "";
+      if (typeof alabel === "string" && alabel.trim()) setAffLabel(alabel.trim());
+
+      const p = o?.poster ?? "";
+      if (typeof p === "string" && p.trim()) setPoster(p.trim());
+
+      const gRaw = o?.genres ?? o?.genre ?? [];
+      let gKeys = toGenreKeys(gRaw);
+
+      if (gKeys.length >= 2 && gKeys.includes("other")) {
+        gKeys = gKeys.filter((x) => x !== "other") as GenreKey[];
+        if (!gKeys.length) gKeys = ["other"];
+      }
+
+      setGenres(gKeys);
+      setGenreQuery("");
+
+      alert("取込OK：タイトル/ジャンル/アフィ(あれば)を反映したで");
+    } catch {
+      alert("JSONが読めない：FANZA抽出のJSONをそのまま貼ってな");
+    }
+  }
 
   const normalizedSelected = useMemo(() => {
     const cleaned = (genres ?? [])
@@ -66,10 +201,7 @@ export default function AdminPage() {
       return uniq(next) as GenreKey[];
     });
 
-    // ✅ 選んだら検索ワードを消す（次を探しやすい）
     setGenreQuery("");
-
-    // ✅ 重要：ここで setGenreOpen(false) しない＝選択では閉じない
   }
 
   async function load() {
@@ -123,7 +255,8 @@ export default function AdminPage() {
       setAffLabel("");
       setGenres(["other"]);
       setGenreQuery("");
-      setGenreOpen(false); // 追加完了後は閉じてOK
+      setGenreOpen(false);
+      setImportText("");
 
       await load();
     } finally {
@@ -143,6 +276,43 @@ export default function AdminPage() {
       return { ...g, items };
     }).filter((g) => g.items.length > 0);
   }, [query]);
+
+  // ✅ 入力欄（右側にコピーボタン付ける用）
+  function Field({
+    label,
+    value,
+    onChange,
+    placeholder,
+    copyLabel,
+  }: {
+    label: string;
+    value: string;
+    onChange: (v: string) => void;
+    placeholder: string;
+    copyLabel: string;
+  }) {
+    return (
+      <div className="grid gap-1">
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-white/70">{label}</div>
+          <button
+            type="button"
+            className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
+            onClick={() => copyText(copyLabel, value)}
+          >
+            コピー
+          </button>
+        </div>
+
+        <input
+          className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </div>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-black text-white p-6 space-y-6">
@@ -170,19 +340,71 @@ export default function AdminPage() {
       <section className="rounded-2xl bg-neutral-900 p-4">
         <h2 className="font-bold mb-3">動画追加</h2>
 
-        <form onSubmit={onAdd} className="grid gap-3">
-          <input
-            className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
-            placeholder="タイトル"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
+        {/* ✅ FANZA抽出（JSON貼り付け→自動入力） */}
+        <div className="border border-white/10 rounded-2xl bg-neutral-900/60 p-3 mb-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-bold">FANZA抽出（JSON貼り付け）</div>
+            <button
+              type="button"
+              className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
+              onClick={() => copyText("JSON", importText)}
+            >
+              JSONコピー
+            </button>
+          </div>
+
+          <textarea
+            value={importText}
+            onChange={(e) => setImportText(e.target.value)}
+            onPaste={(e) => {
+              const t = e.clipboardData.getData("text/plain");
+              setImportText(t);
+              applyImport(t);
+            }}
+            placeholder="ここにJSONを貼る（貼った瞬間にタイトル/ジャンル/アフィ(あれば)を自動入力）"
+            className="w-full h-28 border border-white/10 rounded-xl bg-neutral-800 outline-none p-2 mt-2"
           />
 
-          <input
-            className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
-            placeholder="動画URL（mp4 / m3u8）"
+          <div className="flex gap-2 mt-2">
+            <button
+              type="button"
+              className="px-3 py-2 rounded bg-white text-black font-bold"
+              onClick={() => applyImport(importText)}
+              disabled={!importText.trim()}
+            >
+              取込
+            </button>
+
+            <button
+              type="button"
+              className="px-3 py-2 rounded bg-white/10 text-white font-semibold"
+              onClick={() => setImportText("")}
+              disabled={!importText.trim()}
+            >
+              クリア
+            </button>
+          </div>
+
+          <div className="text-xs text-white/60 mt-2">
+            ※ ここは「作品情報」用。動画URL（mp4/m3u8）は別欄に手貼りして「追加」。
+          </div>
+        </div>
+
+        <form onSubmit={onAdd} className="grid gap-3">
+          <Field
+            label="タイトル"
+            value={title}
+            onChange={setTitle}
+            placeholder="タイトル"
+            copyLabel="タイトル"
+          />
+
+          <Field
+            label="動画URL（mp4 / m3u8）"
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={setUrl}
+            placeholder="動画URL（mp4 / m3u8）"
+            copyLabel="動画URL"
           />
 
           {/* ✅ ジャンル：開閉式（ただし選択では閉じない） */}
@@ -199,7 +421,6 @@ export default function AdminPage() {
                   リセット
                 </button>
 
-                {/* ✅ リセット横に「閉じる/開く」 */}
                 <button
                   type="button"
                   className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
@@ -210,7 +431,6 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* 選択中タグ */}
             <div className="mt-3 flex flex-wrap gap-2">
               {normalizedSelected.map((g) => (
                 <span
@@ -224,16 +444,14 @@ export default function AdminPage() {
 
             {genreOpen ? (
               <div className="mt-3">
-                <div className="flex items-center justify-between mb-2">
-                  <input
-                    className="w-full px-3 py-2 rounded bg-neutral-900 outline-none"
-                    placeholder="検索（例：オタク / office / 旅行）"
-                    value={genreQuery}
-                    onChange={(e) => setGenreQuery(e.target.value)}
-                  />
-                </div>
+                <input
+                  className="w-full px-3 py-2 rounded bg-neutral-900 outline-none"
+                  placeholder="検索（例：オタク / office / 旅行）"
+                  value={genreQuery}
+                  onChange={(e) => setGenreQuery(e.target.value)}
+                />
 
-                <div className="space-y-4">
+                <div className="space-y-4 mt-3">
                   {filteredGroups.map((g) => (
                     <div key={String(g.title)} className="space-y-2">
                       <div className="text-xs font-semibold text-white/80">
@@ -273,25 +491,28 @@ export default function AdminPage() {
             ) : null}
           </div>
 
-          <input
-            className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
-            placeholder="ポスターURL（任意）"
+          <Field
+            label="ポスターURL（任意）"
             value={poster}
-            onChange={(e) => setPoster(e.target.value)}
+            onChange={setPoster}
+            placeholder="ポスターURL（任意）"
+            copyLabel="ポスターURL"
           />
 
-          <input
-            className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
-            placeholder="アフィURL（任意）"
+          <Field
+            label="アフィURL（任意）"
             value={affUrl}
-            onChange={(e) => setAffUrl(e.target.value)}
+            onChange={setAffUrl}
+            placeholder="アフィURL（任意）"
+            copyLabel="アフィURL"
           />
 
-          <input
-            className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
-            placeholder="アフィ文言（任意：例「商品を見る」）"
+          <Field
+            label="アフィ文言（任意）"
             value={affLabel}
-            onChange={(e) => setAffLabel(e.target.value)}
+            onChange={setAffLabel}
+            placeholder="アフィ文言（任意：例「商品を見る」）"
+            copyLabel="アフィ文言"
           />
 
           <button
