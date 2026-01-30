@@ -46,6 +46,28 @@ function splitWords(s: string) {
     .filter(Boolean);
 }
 
+/** ✅ FANZAの末尾タイトル（いらない文言）を消す */
+function sanitizeTitle(raw: string) {
+  let s = normalizeText(raw);
+  if (!s) return s;
+
+  // 末尾の共通フッター系を削る（必要なら増やしてOK）
+  s = s
+    .replace(/\s*[｜|]\s*エロ動画・アダルトビデオ\s*[｜|]\s*FANZA動画\s*$/i, "")
+    .replace(/\s*[｜|]\s*エロ動画・アダルトビデオ\s*$/i, "")
+    .replace(/\s*[｜|]\s*FANZA動画\s*$/i, "")
+    .replace(/\s*[｜|]\s*FANZA\s*$/i, "")
+    .replace(/\s*[｜|]\s*DMM(?:\.co\.jp)?\s*$/i, "");
+
+  // 文中に混ざった同一文言も削りたい場合（保険）
+  s = s
+    .replace(/エロ動画・アダルトビデオ\s*[｜|]\s*FANZA動画/gi, "")
+    .replace(/エロ動画\s*[｜|]\s*FANZA動画/gi, "")
+    .replace(/アダルトビデオ\s*[｜|]\s*FANZA動画/gi, "");
+
+  return normalizeText(s);
+}
+
 export default function AdminPage() {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [title, setTitle] = useState("");
@@ -174,7 +196,7 @@ export default function AdminPage() {
     if (!obj || typeof obj !== "object") return;
 
     // ---- title
-    const t = normalizeText(
+    const t = sanitizeTitle(
       obj.title ??
         obj.name ??
         obj.workTitle ??
