@@ -1,7 +1,7 @@
 // src/app/admin/page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { GENRE_GROUPS, type GenreKey } from "@/lib/genres";
 
@@ -21,39 +21,42 @@ function uniq<T>(arr: T[]) {
   return Array.from(new Set(arr));
 }
 
-function normalizeGenreToken(s: any): string {
-  return String(s ?? "")
-    .trim()
-    .replace(/^#/, "")
-    .replace(/[　]/g, " ")
-    .replace(/\s+/g, " ");
+function normalizeText(v: any) {
+  return String(v ?? "").replace(/\s+/g, " ").trim();
 }
 
-// ✅ クリップボードコピー（失敗時フォールバック）
-async function copyText(label: string, text: string) {
-  const t = (text ?? "").trim();
-  if (!t) {
-    alert(`${label} が空やで`);
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(t);
-    // うるさくない程度に
-    alert(`${label} をコピーした`);
-  } catch {
-    // Safari等の権限で失敗することがある
-    prompt(`${label} を手動でコピーして`, t);
-  }
+function normalizeKey(v: any) {
+  return normalizeText(v)
+    .toLowerCase()
+    .replace(/[“”"']/g, "")
+    .replace(/[＿—–]/g, "-")
+    .replace(/_/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/^#/, "");
+}
+
+/** "新人 #デビュー" / "ベスト #単体" みたいなのを単語にバラす */
+function splitWords(s: string) {
+  const t = normalizeText(s);
+  if (!t) return [];
+  return t
+    .replace(/[“”"']/g, "")
+    .split(/[\s#＃/／｜|・,、:：()（）【】\[\]{}「」<>]+/g)
+    .map((x) => normalizeText(x))
+    .filter(Boolean);
 }
 
 export default function AdminPage() {
   const [items, setItems] = useState<VideoItem[]>([]);
-
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [poster, setPoster] = useState("");
   const [affUrl, setAffUrl] = useState("");
   const [affLabel, setAffLabel] = useState("");
+
+  // ✅ JSON貼り付け欄
+  const [fanzaJson, setFanzaJson] = useState("");
+  const fanzaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const [genres, setGenres] = useState<GenreKey[]>(["other"]);
   const [genreQuery, setGenreQuery] = useState("");
@@ -62,116 +65,58 @@ export default function AdminPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // ✅ FANZA抽出(JSON)貼り付け
-  const [importText, setImportText] = useState("");
+  // ✅ トースト（ダイアログは出さない）
+  const [toast, setToast] = useState<string | null>(null);
+  function showToast(msg: string) {
+    setToast(msg);
+    window.setTimeout(() => setToast(null), 2200);
+  }
 
-  const genreCatalog = useMemo(() => {
-    const all: { key: GenreKey; label: string; labelNorm: string }[] = [];
+  /** GENRE_GROUPS から (key/label)→key の辞書を作る */
+  const genreIndex = useMemo(() => {
+    const map = new Map<string, GenreKey>();
+    const allKeys: GenreKey[] = [];
     for (const g of GENRE_GROUPS) {
       for (const it of g.items) {
-        all.push({
-          key: it.key as GenreKey,
-          label: it.label,
-          labelNorm: normalizeGenreToken(it.label),
-        });
+        const k = it.key as GenreKey;
+        allKeys.push(k);
+        map.set(normalizeKey(it.key), k);
+        map.set(normalizeKey(it.label), k);
       }
     }
-    return all;
+    return { map, allKeys: uniq(allKeys) };
   }, []);
 
-  function toGenreKeys(raw: any): GenreKey[] {
-    const arr = Array.isArray(raw) ? raw : raw ? [raw] : [];
-
-    const tokens: string[] = [];
-    for (const v of arr) {
-      const str = String(v ?? "");
-
-      const tags = str.match(/#[^\s#]+/g) ?? [];
-      if (tags.length) {
-        for (const t of tags) tokens.push(normalizeGenreToken(t));
-        const head = normalizeGenreToken(str.split("#")[0]);
-        if (head) tokens.push(head);
-        continue;
+  /** ✅ key → 日本語ラベル（選択済み表示を日本語にする） */
+  const keyToLabel = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const g of GENRE_GROUPS) {
+      for (const it of g.items) {
+        map.set(String(it.key), String(it.label));
       }
-
-      normalizeGenreToken(str)
-        .split(/[,\s]+/g)
-        .map(normalizeGenreToken)
-        .filter(Boolean)
-        .forEach((x) => tokens.push(x));
     }
+    return map;
+  }, []);
 
-    const uniqTokens = uniq(tokens).filter((x) => x && x !== "ALL");
-    if (!uniqTokens.length) return ["other"];
-
-    const out: GenreKey[] = [];
-
-    for (const t of uniqTokens) {
-      const tNorm = normalizeGenreToken(t);
-
-      const keyHit = genreCatalog.find((x) => String(x.key) === tNorm);
-      if (keyHit) {
-        out.push(keyHit.key);
-        continue;
-      }
-
-      const labelExact = genreCatalog.find((x) => x.labelNorm === tNorm);
-      if (labelExact) {
-        out.push(labelExact.key);
-        continue;
-      }
-
-      const candidates = genreCatalog
-        .filter((x) => x.labelNorm.length >= 2)
-        .filter((x) => tNorm.includes(x.labelNorm) || x.labelNorm.includes(tNorm))
-        .sort((a, b) => b.labelNorm.length - a.labelNorm.length);
-
-      if (candidates[0]) out.push(candidates[0].key);
-    }
-
-    let unique = uniq(out) as GenreKey[];
-    if (!unique.length) unique = ["other"];
-
-    if (unique.length >= 2 && unique.includes("other")) {
-      unique = unique.filter((x) => x !== "other") as GenreKey[];
-      if (!unique.length) unique = ["other"];
-    }
-
-    return unique;
-  }
-
-  function applyImport(raw: string) {
-    try {
-      const o = JSON.parse(raw);
-
-      if (typeof o?.title === "string") setTitle(o.title.trim());
-
-      // ✅ affUrl / affiliateUrl（入ってたら反映）
-      const aurl = o?.affUrl ?? o?.affiliateUrl ?? "";
-      if (typeof aurl === "string" && aurl.trim()) setAffUrl(aurl.trim());
-
-      const alabel = o?.affLabel ?? o?.affiliateLabel ?? "";
-      if (typeof alabel === "string" && alabel.trim()) setAffLabel(alabel.trim());
-
-      const p = o?.poster ?? "";
-      if (typeof p === "string" && p.trim()) setPoster(p.trim());
-
-      const gRaw = o?.genres ?? o?.genre ?? [];
-      let gKeys = toGenreKeys(gRaw);
-
-      if (gKeys.length >= 2 && gKeys.includes("other")) {
-        gKeys = gKeys.filter((x) => x !== "other") as GenreKey[];
-        if (!gKeys.length) gKeys = ["other"];
-      }
-
-      setGenres(gKeys);
-      setGenreQuery("");
-
-      alert("取込OK：タイトル/ジャンル/アフィ(あれば)を反映したで");
-    } catch {
-      alert("JSONが読めない：FANZA抽出のJSONをそのまま貼ってな");
-    }
-  }
+  /** ✅ 日本語タグ→あなたのGenreKeyへ寄せる（必要なら増やせる） */
+  const jpToKey = useMemo(() => {
+    const dict: Array<[GenreKey, string[]]> = [
+      ["debut", ["デビュー", "新人", "初av", "初AV", "初出演", "初登場", "初解禁"]],
+      ["facial", ["顔射", "ぶっかけ"]],
+      [
+        "office-mix",
+        ["ol", "ＯＬ", "オフィス", "女上司", "部下", "秘書", "社内", "人事"],
+      ],
+      ["bishoujo", ["美少女", "ロリ", "かわいい", "清純", "美形"]],
+      ["solo", ["単体", "単体作品", "単体作", "ソロ", "1人", "一人"]],
+      ["4k", ["4k", "４ｋ", "高画質", "uhd", "UHD"]],
+      ["hospital-clinic", ["病院", "クリニック", "医師", "看護", "ナース", "診察"]],
+      ["college-student", ["大学生", "女子大生", "学生", "大学"]],
+      ["massage-play", ["マッサージ", "エステ", "施術", "リフレ", "オイル"]],
+      ["anal-sex", ["アナル", "肛門", "アナルセックス"]],
+    ];
+    return dict;
+  }, []);
 
   const normalizedSelected = useMemo(() => {
     const cleaned = (genres ?? [])
@@ -193,7 +138,6 @@ export default function AdminPage() {
       let next = exists ? cur.filter((x) => x !== key) : [...cur, key];
 
       if (next.length === 0) next = ["other"];
-
       if (next.length >= 2 && next.includes("other")) {
         next = next.filter((x) => x !== "other");
       }
@@ -218,6 +162,162 @@ export default function AdminPage() {
   useEffect(() => {
     load();
   }, []);
+
+  // ===========================================
+  // ✅ ここが重要：promptを完全廃止して「瞬間ペーストのみ」
+  // ===========================================
+  async function readClipboardTextInstant() {
+    // これが成功する時だけ「瞬間ペースト」できる
+    const t = await navigator.clipboard.readText();
+    return normalizeText(t);
+  }
+
+  function PasteButton({
+    label,
+    onPaste,
+    disabled,
+  }: {
+    label: string;
+    onPaste: () => void;
+    disabled?: boolean;
+  }) {
+    return (
+      <button
+        type="button"
+        className="px-3 py-2 rounded bg-white/10 text-white text-sm font-semibold shrink-0"
+        onClick={onPaste}
+        disabled={disabled}
+      >
+        ペースト
+      </button>
+    );
+  }
+
+  function InputWithPaste({
+    placeholder,
+    value,
+    onChange,
+    onPaste,
+    disabled,
+    inputRef,
+  }: {
+    placeholder: string;
+    value: string;
+    onChange: (v: string) => void;
+    onPaste: () => void;
+    disabled?: boolean;
+    inputRef?: React.RefObject<HTMLInputElement | null>;
+  }) {
+    return (
+      <div className="flex items-center gap-2">
+        <input
+          ref={inputRef as any}
+          className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+        />
+        <PasteButton label={placeholder} onPaste={onPaste} disabled={disabled} />
+      </div>
+    );
+  }
+
+  /** ✅ 貼ったJSONから「タイトル＋ジャンル」だけ拾う（即反映） */
+  function applyPasteText(raw: string) {
+    const s = normalizeText(raw);
+    if (!s) return;
+
+    let obj: any = null;
+    try {
+      obj = JSON.parse(s);
+    } catch {
+      return;
+    }
+    if (!obj || typeof obj !== "object") return;
+
+    const t = normalizeText(
+      obj.title ??
+        obj.name ??
+        obj.workTitle ??
+        obj.pageTitle ??
+        obj.productTitle ??
+        ""
+    );
+    if (t) setTitle(t);
+
+    const source =
+      obj.genres ??
+      obj.genre ??
+      obj.tags ??
+      obj.tag ??
+      obj.hashtags ??
+      obj.hashTags ??
+      obj.categories ??
+      obj.category ??
+      [];
+
+    let tokens: string[] = [];
+    if (Array.isArray(source)) {
+      tokens = source.map((x) => normalizeText(x)).filter(Boolean);
+    } else if (typeof source === "string") {
+      tokens = source
+        .split(/[,\n]/g)
+        .map((x) => normalizeText(x))
+        .filter(Boolean);
+    } else {
+      tokens = [];
+    }
+
+    const words = uniq(tokens.flatMap(splitWords));
+
+    const noiseRe =
+      /(キャンペーン|セール|おすすめ順|人気順|売上|評価|お気に入り|新着|予約|最新作|準新作|ポイント|ログアウト|購入済み|月額|レンタル|リスト|ブランドストア)/i;
+    const cleanTokens = tokens.filter((x) => !noiseRe.test(x));
+    const cleanWords = words.filter((x) => !noiseRe.test(x));
+
+    const joinedRaw = cleanTokens.join(" ");
+    const joinedRaw2 = `${joinedRaw} ${cleanWords.join(" ")}`.trim();
+    const joinedN = normalizeKey(joinedRaw2);
+
+    const matched: GenreKey[] = [];
+
+    for (const tok of [...cleanTokens, ...cleanWords]) {
+      const k = genreIndex.map.get(normalizeKey(tok));
+      if (k) matched.push(k);
+    }
+
+    if (joinedN) {
+      for (const k of genreIndex.allKeys) {
+        const kk = normalizeKey(k);
+        if (kk && joinedN.includes(kk)) matched.push(k);
+      }
+    }
+
+    const lower = joinedRaw2.toLowerCase();
+    for (const [k, ws] of jpToKey) {
+      for (const w of ws) {
+        if (lower.includes(String(w).toLowerCase())) {
+          matched.push(k);
+          break;
+        }
+      }
+    }
+
+    const picked = uniq(matched);
+
+    if (picked.length > 0) {
+      const next =
+        picked.includes("other") && picked.length >= 2
+          ? picked.filter((x) => x !== "other")
+          : picked;
+      setGenres(next as GenreKey[]);
+    } else {
+      setGenres(["other"]);
+    }
+
+    setGenreQuery("");
+  }
 
   async function onAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -256,7 +356,7 @@ export default function AdminPage() {
       setGenres(["other"]);
       setGenreQuery("");
       setGenreOpen(false);
-      setImportText("");
+      setFanzaJson("");
 
       await load();
     } finally {
@@ -268,54 +368,58 @@ export default function AdminPage() {
   const filteredGroups = useMemo(() => {
     if (!query) return GENRE_GROUPS;
 
-    return GENRE_GROUPS.map((g) => {
-      const items = g.items.filter((it) => {
-        const t = `${it.key} ${it.label}`.toLowerCase();
-        return t.includes(query);
-      });
-      return { ...g, items };
-    }).filter((g) => g.items.length > 0);
+    return GENRE_GROUPS
+      .map((g) => {
+        const items = g.items.filter((it) => {
+          const t = `${it.key} ${it.label}`.toLowerCase();
+          return t.includes(query);
+        });
+        return { ...g, items };
+      })
+      .filter((g) => g.items.length > 0);
   }, [query]);
 
-  // ✅ 入力欄（右側にコピーボタン付ける用）
-  function Field({
-    label,
-    value,
-    onChange,
-    placeholder,
-    copyLabel,
-  }: {
-    label: string;
-    value: string;
-    onChange: (v: string) => void;
-    placeholder: string;
-    copyLabel: string;
-  }) {
-    return (
-      <div className="grid gap-1">
-        <div className="flex items-center justify-between">
-          <div className="text-xs text-white/70">{label}</div>
-          <button
-            type="button"
-            className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
-            onClick={() => copyText(copyLabel, value)}
-          >
-            コピー
-          </button>
-        </div>
+  // ✅ 各入力のref（失敗時にフォーカス→⌘V誘導）
+  const titleRef = useRef<HTMLInputElement | null>(null);
+  const urlRef = useRef<HTMLInputElement | null>(null);
+  const posterRef = useRef<HTMLInputElement | null>(null);
+  const affUrlRef = useRef<HTMLInputElement | null>(null);
+  const affLabelRef = useRef<HTMLInputElement | null>(null);
+  const genreQueryRef = useRef<HTMLInputElement | null>(null);
 
-        <input
-          className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
-          placeholder={placeholder}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      </div>
-    );
+  async function instantPasteInto(
+    label: string,
+    setValue: (v: string) => void,
+    ref?: React.RefObject<HTMLInputElement | null>
+  ) {
+    try {
+      const v = await readClipboardTextInstant();
+      if (!v) {
+        showToast(`${label}：クリップボードが空`);
+        ref?.current?.focus();
+        ref?.current?.select?.();
+        return;
+      }
+      setValue(v);
+    } catch {
+      // ここが Safari で起きがち
+      showToast(`${label}：自動ペースト不可。欄を選択したので ⌘V して`);
+      ref?.current?.focus();
+      ref?.current?.select?.();
+    }
   }
 
   return (
     <main className="min-h-screen bg-black text-white p-6 space-y-6">
+      {/* ✅ トースト */}
+      {toast ? (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50">
+          <div className="px-4 py-2 rounded-full bg-black/80 border border-white/10 text-white text-sm">
+            {toast}
+          </div>
+        </div>
+      ) : null}
+
       <header className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Admin</h1>
 
@@ -340,74 +444,84 @@ export default function AdminPage() {
       <section className="rounded-2xl bg-neutral-900 p-4">
         <h2 className="font-bold mb-3">動画追加</h2>
 
-        {/* ✅ FANZA抽出（JSON貼り付け→自動入力） */}
-        <div className="border border-white/10 rounded-2xl bg-neutral-900/60 p-3 mb-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="font-bold">FANZA抽出（JSON貼り付け）</div>
-            <button
-              type="button"
-              className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
-              onClick={() => copyText("JSON", importText)}
-            >
-              JSONコピー
-            </button>
+        {/* ✅ FANZA抽出（JSON貼り付け） */}
+        <div className="rounded-2xl bg-neutral-800 p-3 mb-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold">FANZA抽出（JSON貼り付け）</div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
+                onClick={async () => {
+                  try {
+                    const v = await readClipboardTextInstant();
+                    if (!v) {
+                      showToast("JSON：クリップボードが空");
+                      return;
+                    }
+                    setFanzaJson(v);
+                    applyPasteText(v);
+                  } catch {
+                    showToast("JSON：自動ペースト不可。欄を選択したので ⌘V して");
+                    fanzaRef.current?.focus();
+                    fanzaRef.current?.select?.();
+                  }
+                }}
+              >
+                ペースト
+              </button>
+
+              <button
+                type="button"
+                className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
+                onClick={() => setFanzaJson("")}
+              >
+                クリア
+              </button>
+            </div>
           </div>
 
           <textarea
-            value={importText}
-            onChange={(e) => setImportText(e.target.value)}
-            onPaste={(e) => {
-              const t = e.clipboardData.getData("text/plain");
-              setImportText(t);
-              applyImport(t);
+            ref={fanzaRef}
+            className="mt-2 w-full h-24 px-3 py-2 rounded bg-neutral-900 outline-none text-xs leading-relaxed"
+            placeholder="ここにJSONを貼る（貼った瞬間にタイトル/ジャンルだけ反映）"
+            value={fanzaJson}
+            onChange={(e) => {
+              const v = e.target.value;
+              setFanzaJson(v);
+              if (v.trim().endsWith("}")) applyPasteText(v);
             }}
-            placeholder="ここにJSONを貼る（貼った瞬間にタイトル/ジャンル/アフィ(あれば)を自動入力）"
-            className="w-full h-28 border border-white/10 rounded-xl bg-neutral-800 outline-none p-2 mt-2"
+            onPaste={() => {
+              setTimeout(() => {
+                const v = fanzaRef.current?.value ?? "";
+                setFanzaJson(v);
+                applyPasteText(v);
+              }, 0);
+            }}
           />
-
-          <div className="flex gap-2 mt-2">
-            <button
-              type="button"
-              className="px-3 py-2 rounded bg-white text-black font-bold"
-              onClick={() => applyImport(importText)}
-              disabled={!importText.trim()}
-            >
-              取込
-            </button>
-
-            <button
-              type="button"
-              className="px-3 py-2 rounded bg-white/10 text-white font-semibold"
-              onClick={() => setImportText("")}
-              disabled={!importText.trim()}
-            >
-              クリア
-            </button>
-          </div>
-
-          <div className="text-xs text-white/60 mt-2">
-            ※ ここは「作品情報」用。動画URL（mp4/m3u8）は別欄に手貼りして「追加」。
-          </div>
         </div>
 
         <form onSubmit={onAdd} className="grid gap-3">
-          <Field
-            label="タイトル"
+          <InputWithPaste
+            placeholder="タイトル"
             value={title}
             onChange={setTitle}
-            placeholder="タイトル"
-            copyLabel="タイトル"
+            disabled={busy}
+            inputRef={titleRef}
+            onPaste={() => instantPasteInto("タイトル", setTitle, titleRef)}
           />
 
-          <Field
-            label="動画URL（mp4 / m3u8）"
+          <InputWithPaste
+            placeholder="動画URL（mp4 / m3u8）"
             value={url}
             onChange={setUrl}
-            placeholder="動画URL（mp4 / m3u8）"
-            copyLabel="動画URL"
+            disabled={busy}
+            inputRef={urlRef}
+            onPaste={() => instantPasteInto("動画URL", setUrl, urlRef)}
           />
 
-          {/* ✅ ジャンル：開閉式（ただし選択では閉じない） */}
+          {/* ✅ ジャンル：開閉式 */}
           <div className="rounded-2xl bg-neutral-800 p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-semibold">ジャンル（複数選択）</div>
@@ -436,22 +550,33 @@ export default function AdminPage() {
                 <span
                   key={g}
                   className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
+                  title={String(g)}
                 >
-                  {g}
+                  {keyToLabel.get(String(g)) ?? String(g)}
                 </span>
               ))}
             </div>
 
             {genreOpen ? (
               <div className="mt-3">
-                <input
-                  className="w-full px-3 py-2 rounded bg-neutral-900 outline-none"
-                  placeholder="検索（例：オタク / office / 旅行）"
-                  value={genreQuery}
-                  onChange={(e) => setGenreQuery(e.target.value)}
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={genreQueryRef}
+                    className="w-full px-3 py-2 rounded bg-neutral-900 outline-none"
+                    placeholder="検索（例：office / 旅行）"
+                    value={genreQuery}
+                    onChange={(e) => setGenreQuery(e.target.value)}
+                  />
+                  <PasteButton
+                    label="検索"
+                    disabled={busy}
+                    onPaste={() =>
+                      instantPasteInto("検索", setGenreQuery, genreQueryRef)
+                    }
+                  />
+                </div>
 
-                <div className="space-y-4 mt-3">
+                <div className="mt-3 space-y-4">
                   {filteredGroups.map((g) => (
                     <div key={String(g.title)} className="space-y-2">
                       <div className="text-xs font-semibold text-white/80">
@@ -491,28 +616,31 @@ export default function AdminPage() {
             ) : null}
           </div>
 
-          <Field
-            label="ポスターURL（任意）"
+          <InputWithPaste
+            placeholder="ポスターURL（任意）"
             value={poster}
             onChange={setPoster}
-            placeholder="ポスターURL（任意）"
-            copyLabel="ポスターURL"
+            disabled={busy}
+            inputRef={posterRef}
+            onPaste={() => instantPasteInto("ポスターURL", setPoster, posterRef)}
           />
 
-          <Field
-            label="アフィURL（任意）"
+          <InputWithPaste
+            placeholder="アフィURL（任意）"
             value={affUrl}
             onChange={setAffUrl}
-            placeholder="アフィURL（任意）"
-            copyLabel="アフィURL"
+            disabled={busy}
+            inputRef={affUrlRef}
+            onPaste={() => instantPasteInto("アフィURL", setAffUrl, affUrlRef)}
           />
 
-          <Field
-            label="アフィ文言（任意）"
+          <InputWithPaste
+            placeholder="アフィ文言（任意：例「商品を見る」）"
             value={affLabel}
             onChange={setAffLabel}
-            placeholder="アフィ文言（任意：例「商品を見る」）"
-            copyLabel="アフィ文言"
+            disabled={busy}
+            inputRef={affLabelRef}
+            onPaste={() => instantPasteInto("アフィ文言", setAffLabel, affLabelRef)}
           />
 
           <button
