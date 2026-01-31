@@ -231,12 +231,16 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   }, [src]);
 
   const jumpToStart = (el: HTMLVideoElement) => {
-    const d = Number.isFinite(el.duration) ? el.duration : durationRef.current || 0;
+    const d = Number.isFinite(el.duration)
+      ? el.duration
+      : durationRef.current || 0;
     const start = computeStart(d);
     if (start <= 0) return;
 
     try {
-      const cur = Number.isFinite(el.currentTime) ? el.currentTime : currentRef.current || 0;
+      const cur = Number.isFinite(el.currentTime)
+        ? el.currentTime
+        : currentRef.current || 0;
       if (cur >= start) return;
 
       el.currentTime = start;
@@ -415,14 +419,18 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const seekTo = (t: number) => {
     const el = videoRef.current;
     if (!el) return;
-    const d = Number.isFinite(el.duration) ? el.duration : durationRef.current || 0;
+    const d = Number.isFinite(el.duration)
+      ? el.duration
+      : durationRef.current || 0;
     el.currentTime = clamp(t, 0, d || 0);
   };
 
   const skip = (sec: number) => {
     const el = videoRef.current;
     if (!el) return;
-    const base = Number.isFinite(el.currentTime) ? el.currentTime : currentRef.current;
+    const base = Number.isFinite(el.currentTime)
+      ? el.currentTime
+      : currentRef.current;
     seekTo(base + sec);
   };
 
@@ -473,10 +481,14 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     }
   };
 
+  // ✅ ここが修正点：共有URLを /video/{id} に固定
   const onShare = async (e: any) => {
     stop(e);
 
-    const shareUrl = typeof location !== "undefined" ? location.href : "";
+    const origin = typeof location !== "undefined" ? location.origin : "";
+    const shareUrl = origin
+      ? `${origin}/video/${encodeURIComponent(String(video.id))}`
+      : "";
     const text = titleText || "Swipe Video Feed";
 
     try {
@@ -488,9 +500,9 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
     try {
       await navigator.clipboard.writeText(shareUrl);
-      alert("リンクをコピーした");
+      alert("共有URLをコピーした");
     } catch {
-      prompt("このリンクをコピーして共有してな", shareUrl);
+      prompt("このURLをコピーして共有してな", shareUrl);
     }
   };
 
@@ -500,7 +512,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   // ✅ 動画タップ判定（スワイプなら無視）
   const onVideoPointerDown = (e: React.PointerEvent) => {
-    // 操作UIの上で起きる分は UI側が止めてるが保険
     tapRef.current.downX = e.clientX;
     tapRef.current.downY = e.clientY;
     tapRef.current.downT = performance.now();
@@ -519,13 +530,12 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     const dt = performance.now() - tapRef.current.downT;
     const dx = e.clientX - tapRef.current.downX;
     const dy = e.clientY - tapRef.current.downY;
-    const moved = tapRef.current.moved || Math.abs(dx) + Math.abs(dy) > TAP_MOVE_PX;
+    const moved =
+      tapRef.current.moved || Math.abs(dx) + Math.abs(dy) > TAP_MOVE_PX;
 
-    // ✅ スワイプ/ドラッグはタップ扱いしない（誤停止の根）
     if (moved) return;
     if (dt > TAP_MAX_MS) return;
 
-    // ✅ ここだけ「タップ」で停止/再生
     togglePlay();
   };
 
@@ -590,7 +600,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           inset: 0,
           zIndex: 0,
         }}
-        // ✅ iOSの「スワイプ離しクリック」で誤停止しないように onClick は使わない
         onPointerDown={onVideoPointerDown}
         onPointerMove={onVideoPointerMove}
         onPointerUp={onVideoPointerUp}
