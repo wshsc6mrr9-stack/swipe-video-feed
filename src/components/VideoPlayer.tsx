@@ -481,14 +481,18 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     }
   };
 
-  // ✅ ここが修正点：共有URLを /video/{id} に固定
+  // ✅ ✅ ✅ 共有：本番URL（NEXT_PUBLIC_SITE_URL）優先、無ければ location.origin
   const onShare = async (e: any) => {
     stop(e);
 
-    const origin = typeof location !== "undefined" ? location.origin : "";
-    const shareUrl = origin
-      ? `${origin}/video/${encodeURIComponent(String(video.id))}`
+    const base =
+      (process.env.NEXT_PUBLIC_SITE_URL || "").trim() ||
+      (typeof location !== "undefined" ? location.origin : "");
+
+    const shareUrl = base
+      ? `${base}/video/${encodeURIComponent(String(video.id))}`
       : "";
+
     const text = titleText || "Swipe Video Feed";
 
     try {
@@ -673,7 +677,13 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
           {/* シーク */}
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ color: "rgba(255,255,255,0.85)", fontSize: 12, minWidth: 42 }}>
+            <span
+              style={{
+                color: "rgba(255,255,255,0.85)",
+                fontSize: 12,
+                minWidth: 42,
+              }}
+            >
               {formatTime(current)}
             </span>
 
@@ -688,11 +698,20 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
               defaultValue={0}
               onPointerDown={stop}
               onClick={stop}
-              onChange={(e) => seekTo(Number((e.target as HTMLInputElement).value))}
+              onChange={(e) =>
+                seekTo(Number((e.target as HTMLInputElement).value))
+              }
               style={{ width: "100%" }}
             />
 
-            <span style={{ color: "rgba(255,255,255,0.85)", fontSize: 12, minWidth: 42, textAlign: "right" }}>
+            <span
+              style={{
+                color: "rgba(255,255,255,0.85)",
+                fontSize: 12,
+                minWidth: 42,
+                textAlign: "right",
+              }}
+            >
               {formatTime(duration)}
             </span>
           </div>
@@ -705,9 +724,13 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
                 onClick={onToggleLike}
                 style={{
                   ...pillBtnSmall,
-                  background: liked ? "rgba(255,255,255,0.92)" : pillBtnSmall.background,
+                  background: liked
+                    ? "rgba(255,255,255,0.92)"
+                    : pillBtnSmall.background,
                   color: liked ? "#000" : pillBtnSmall.color,
-                  border: liked ? "1px solid rgba(255,255,255,0.85)" : pillBtnSmall.border,
+                  border: liked
+                    ? "1px solid rgba(255,255,255,0.85)"
+                    : pillBtnSmall.border,
                 }}
                 aria-label="いいね"
                 title="いいね"
@@ -715,11 +738,19 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
                 {liked ? "♥" : "♡"} {likeCount}
               </button>
 
-              <button onPointerDown={stop} onClick={(e) => (stop(e), skip(-10))} style={pillBtnSmall}>
+              <button
+                onPointerDown={stop}
+                onClick={(e) => (stop(e), skip(-10))}
+                style={pillBtnSmall}
+              >
                 -10
               </button>
 
-              <button onPointerDown={stop} onClick={(e) => (stop(e), skip(-5))} style={pillBtnSmall}>
+              <button
+                onPointerDown={stop}
+                onClick={(e) => (stop(e), skip(-5))}
+                style={pillBtnSmall}
+              >
                 -5
               </button>
 
@@ -741,15 +772,29 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
                 <div style={{ width: 56, height: 56, flex: "0 0 auto" }} />
               )}
 
-              <button onPointerDown={stop} onClick={(e) => (stop(e), skip(5))} style={pillBtnSmall}>
+              <button
+                onPointerDown={stop}
+                onClick={(e) => (stop(e), skip(5))}
+                style={pillBtnSmall}
+              >
                 +5
               </button>
 
-              <button onPointerDown={stop} onClick={(e) => (stop(e), skip(10))} style={pillBtnSmall}>
+              <button
+                onPointerDown={stop}
+                onClick={(e) => (stop(e), skip(10))}
+                style={pillBtnSmall}
+              >
                 +10
               </button>
 
-              <button onPointerDown={stop} onClick={onShare} style={pillBtnSmall} aria-label="共有" title="共有">
+              <button
+                onPointerDown={stop}
+                onClick={onShare}
+                style={pillBtnSmall}
+                aria-label="共有"
+                title="共有"
+              >
                 共有
               </button>
             </div>

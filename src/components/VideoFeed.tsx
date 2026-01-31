@@ -1,3 +1,4 @@
+// src/components/VideoFeed.tsx
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -72,9 +73,12 @@ function normalizeText(s: string) {
 type Props = {
   initialGenre?: GenreKey;
   hideGenreMenu?: boolean;
+
+  // ✅ /video/[id] で「最初に表示したい動画」
+  startId?: string;
 };
 
-export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
+export default function VideoFeed({ initialGenre, hideGenreMenu, startId }: Props = {}) {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
   const [vh, setVh] = useState<number>(() =>
@@ -104,6 +108,9 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
   const startTimeRef = useRef(0);
   const pointerIdRef = useRef<number | null>(null);
 
+  // ✅ startId を「最初に1回だけ」適用するためのフラグ
+  const appliedStartIdRef = useRef<string>("");
+
   // ===== 高さ追従（ドラッグ中は無視） =====
   useEffect(() => {
     const update = () => {
@@ -123,6 +130,9 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
 
   // ===== initialGenre 追従 =====
   useEffect(() => {
+    // ✅ /video/[id] の startId がある時は、ここで index=0 に戻すとズレる原因になる
+    if (startId) return;
+
     if (initialGenre) {
       setGenres([initialGenre]);
       setIndex(0);
@@ -135,7 +145,7 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
     setShuffleSeed(Date.now());
     setQuery("");
     setTranslate(0);
-  }, [initialGenre, setTranslate]);
+  }, [initialGenre, setTranslate, startId]);
 
   // ===== 初回ロード + いいね数 =====
   useEffect(() => {
@@ -144,33 +154,35 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
     (async () => {
       try {
         const res = await fetch("/api/videos", { cache: "no-store" });
-        const json = await res.json();
+        const json = await res.json().catch(() => null);
         const list = (json?.items ?? json?.data ?? json ?? []) as any[];
         if (!alive) return;
 
-        const normalized: VideoItem[] = list.map((v) => {
-          const affUrl = (v?.affUrl ?? v?.affiliateUrl) as string | undefined;
-          const affLabel = (v?.affLabel ?? v?.affiliateLabel) as string | undefined;
+        const normalized: VideoItem[] = list
+          .map((v) => {
+            const affUrl = (v?.affUrl ?? v?.affiliateUrl) as string | undefined;
+            const affLabel = (v?.affLabel ?? v?.affiliateLabel) as string | undefined;
 
-          return {
-            id: String(v.id ?? crypto.randomUUID?.() ?? Math.random()),
-            title: String(v.title ?? ""),
-            url: v.url ?? v.src,
-            src: v.src ?? v.url,
-            poster: v.poster,
-            srcType: v.srcType,
+            return {
+              id: String(v.id ?? ""),
+              title: String(v.title ?? ""),
+              url: v.url ?? v.src,
+              src: v.src ?? v.url,
+              poster: v.poster,
+              srcType: v.srcType,
 
-            affUrl,
-            affLabel,
-            affiliateUrl: affUrl,
-            affiliateLabel: affLabel,
+              affUrl,
+              affLabel,
+              affiliateUrl: affUrl,
+              affiliateLabel: affLabel,
 
-            genres: Array.isArray(v.genres) ? v.genres : undefined,
-            genre: typeof v.genre === "string" ? v.genre : undefined,
+              genres: Array.isArray(v.genres) ? v.genres : undefined,
+              genre: typeof v.genre === "string" ? v.genre : undefined,
 
-            likeCount: 0,
-          };
-        });
+              likeCount: 0,
+            };
+          })
+          .filter((v) => !!v.id);
 
         try {
           const ids = normalized.map((v) => v.id).filter(Boolean);
@@ -186,7 +198,6 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
         } catch {}
 
         setItems(normalized);
-        setIndex((i) => Math.min(i, Math.max(0, normalized.length - 1)));
       } catch (e) {
         console.error(e);
       }
@@ -225,6 +236,7 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
         .slice()
         .sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
     } else if (sel.length === 0 || (sel.length === 1 && sel[0] === GENRE_ALL)) {
+      // ✅ startId の時もシャッフルはしてOK（ただし最初に startId を合わせる）
       base = shuffleWithSeed(items, shuffleSeed);
     } else {
       const want = new Set(sel.map(String));
@@ -249,6 +261,24 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
     });
   }, [items, genres, shuffleSeed, query]);
 
+  // ✅ startId を「最初に1回だけ」反映して、必ずその動画を表示する
+  useEffect(() => {
+    const sid = String(startId ?? "").trim();
+    if (!sid) return;
+    if (!viewItems.length) return;
+
+    // もう適用済みなら何もしない
+    if (appliedStartIdRef.current === sid) return;
+
+    const i = viewItems.findIndex((v) => String(v.id) === sid);
+    if (i < 0) return;
+
+    setIndex(i);
+    setTranslate(0, "none");
+    appliedStartIdRef.current = sid;
+  }, [startId, viewItems, setTranslate]);
+
+  // ✅ viewItems長が変わったら index を範囲内に収めるだけ
   useEffect(() => {
     setIndex((i) => Math.max(0, Math.min(viewItems.length - 1, i)));
     setTranslate(0);
@@ -257,8 +287,7 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
   const count = viewItems.length;
   const h = vh || 0;
 
-  // ✅ チラ見え量（上下に少し見せる）
-  const PEEK = 14; // 好みで 8〜20
+  const PEEK = 14;
   const cardH = Math.max(0, h - PEEK * 2);
 
   // prev/current/next だけ描画
@@ -470,7 +499,6 @@ export default function VideoFeed({ initialGenre, hideGenreMenu }: Props = {}) {
               position: "absolute",
               left: 0,
               right: 0,
-              // ✅ 上下に少し見せるため PEEK を足す
               top: h ? `${pos * h + PEEK}px` : `${PEEK}px`,
               height: `${cardH}px`,
             }}
