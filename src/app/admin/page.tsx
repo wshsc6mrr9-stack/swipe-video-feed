@@ -68,6 +68,35 @@ function sanitizeTitle(raw: string) {
   return normalizeText(s);
 }
 
+/** ✅ URLっぽい文字列なら返す（雑に安全化） */
+function normalizeUrl(v: any): string {
+  const s = normalizeText(v);
+  if (!s) return "";
+  // スペース混入や全角を最低限除去
+  return s.replace(/\s/g, "");
+}
+
+/** ✅ poster候補を色々なキーから拾う */
+function pickPoster(obj: any): string {
+  const candidates = [
+    obj?.poster,
+    obj?.posterUrl,
+    obj?.thumbnail,
+    obj?.thumbnailUrl,
+    obj?.thumb,
+    obj?.thumbUrl,
+    obj?.image,
+    obj?.imageUrl,
+    obj?.ogImage,
+    obj?.ogImageUrl,
+  ];
+  for (const c of candidates) {
+    const p = normalizeUrl(c);
+    if (p) return p;
+  }
+  return "";
+}
+
 export default function AdminPage() {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [title, setTitle] = useState("");
@@ -208,23 +237,22 @@ export default function AdminPage() {
     if (t) setTitle(t);
 
     // ---- url (videoUrl / url / src)
-    const u = normalizeText(obj.videoUrl ?? obj.url ?? obj.src ?? obj.videoSrc ?? "");
+    const u = normalizeUrl(obj.videoUrl ?? obj.url ?? obj.src ?? obj.videoSrc ?? "");
     if (u) setUrl(u);
 
-    // ---- poster
-    const p = normalizeText(obj.poster ?? obj.thumbnail ?? obj.thumb ?? obj.image ?? "");
+    // ---- poster（候補キー増やした）
+    const p = pickPoster(obj);
     if (p) setPoster(p);
 
     // ---- affUrl (無ければ pageUrl)
-    const au = normalizeText(obj.affUrl ?? obj.affiliateUrl ?? obj.pageUrl ?? obj.sourceUrl ?? "");
+    const au = normalizeUrl(obj.affUrl ?? obj.affiliateUrl ?? obj.pageUrl ?? obj.sourceUrl ?? "");
     if (au) setAffUrl(au);
 
-    // ---- affLabel（未入力ならデフォ入れてもOK。不要ならこのif丸ごと消してOK）
+    // ---- affLabel（未入力ならデフォ入れてもOK）
     const al = normalizeText(obj.affLabel ?? obj.affiliateLabel ?? "");
     if (al) {
       setAffLabel(al);
     } else {
-      // affUrlが入ってて、ラベルが空なら一旦「商品を見る」
       if (au && !normalizeText(affLabel)) setAffLabel("商品を見る");
     }
 
@@ -300,12 +328,7 @@ export default function AdminPage() {
     setGenreQuery("");
   }
 
-  /** ✅ 追加：URLクエリ/ハッシュで受け取って自動反映（クリップボード不要）
-   *  対応：
-   *   - /admin?fanza=ENC
-   *   - /admin?import=ENC
-   *   - /admin#import=ENC
-   */
+  /** ✅ 追加：URLクエリ/ハッシュで受け取って自動反映（クリップボード不要） */
   useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search);
@@ -352,11 +375,11 @@ export default function AdminPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title,
-          url,
-          poster: poster || undefined,
-          affUrl: affUrl || undefined,
-          affLabel: affLabel || undefined,
+          title: normalizeText(title),
+          url: normalizeUrl(url),
+          poster: normalizeUrl(poster) || undefined,
+          affUrl: normalizeUrl(affUrl) || undefined,
+          affLabel: normalizeText(affLabel) || undefined,
           genres: payloadGenres,
         }),
       });
@@ -398,6 +421,8 @@ export default function AdminPage() {
       })
       .filter((g) => g.items.length > 0);
   }, [query]);
+
+  const posterPreview = normalizeUrl(poster);
 
   return (
     <main className="min-h-screen bg-black text-white p-6 space-y-6">
@@ -453,13 +478,12 @@ export default function AdminPage() {
           <textarea
             ref={fanzaRef}
             className="mt-2 w-full h-24 px-3 py-2 rounded bg-neutral-900 outline-none text-xs leading-relaxed"
-            placeholder="ここにJSONを貼る（貼った瞬間にタイトル/URL/ジャンル/affを反映）"
+            placeholder="ここにJSONを貼る（貼った瞬間にタイトル/URL/ジャンル/aff/posterを反映）"
             value={fanzaJson}
             onChange={(e) => {
               const v = e.target.value;
               setFanzaJson(v);
 
-              // JSONとしてパースできるなら即反映（末尾"}"判定より安定）
               try {
                 JSON.parse(v);
                 applyPasteText(v);
@@ -534,7 +558,9 @@ export default function AdminPage() {
                 <div className="mt-3 space-y-4">
                   {filteredGroups.map((g) => (
                     <div key={String(g.title)} className="space-y-2">
-                      <div className="text-xs font-semibold text-white/80">{g.title}</div>
+                      <div className="text-xs font-semibold text-white/80">
+                        {g.title}
+                      </div>
 
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                         {g.items.map((it) => {
@@ -576,6 +602,25 @@ export default function AdminPage() {
             onChange={(e) => setPoster(e.target.value)}
           />
 
+          {/* ✅ posterプレビュー（入ってれば見える） */}
+          {posterPreview ? (
+            <div className="rounded-2xl bg-neutral-800 p-3">
+              <div className="text-xs text-white/70 mb-2">poster プレビュー</div>
+              <div className="flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={posterPreview}
+                  alt="poster preview"
+                  className="w-28 h-28 object-cover rounded-xl bg-black/40 border border-white/10"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.opacity = "0.35";
+                  }}
+                />
+                <div className="text-xs text-white/70 break-all">{posterPreview}</div>
+              </div>
+            </div>
+          ) : null}
+
           <input
             className="w-full px-3 py-2 rounded bg-neutral-800 outline-none"
             placeholder="アフィURL（任意）"
@@ -605,7 +650,9 @@ export default function AdminPage() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="font-bold">登録済みは別ページで管理</div>
-            <div className="text-sm text-white/60 mt-1">現在: {items.length} 件（更新で反映）</div>
+            <div className="text-sm text-white/60 mt-1">
+              現在: {items.length} 件（更新で反映）
+            </div>
           </div>
 
           <Link

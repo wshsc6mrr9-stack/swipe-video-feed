@@ -1,16 +1,27 @@
-// src/app/video/[id]/opengraph-image/route.ts
 import React from "react";
 import { ImageResponse } from "next/og";
 
-export const runtime = "nodejs"; // ✅ ここが本番0バイトの特効薬
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Ctx = { params: Promise<{ id?: string }> };
-
-export async function GET(_req: Request, ctx: Ctx) {
+function pickIdFromUrl(url: string): string | null {
   try {
-    const p = await ctx.params;
-    const id = String(p?.id ?? "unknown");
+    const u = new URL(url);
+    const m = u.pathname.match(/^\/video\/([^/]+)\/opengraph-image\/?$/);
+    return m?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function GET(
+  req: Request,
+  ctx: { params?: { id?: string } }
+) {
+  try {
+    const idFromParams = ctx?.params?.id ? String(ctx.params.id) : null;
+    const idFromUrl = pickIdFromUrl(req.url);
+    const id = (idFromParams || idFromUrl || "unknown").trim();
 
     const el = React.createElement(
       "div",
@@ -18,16 +29,17 @@ export async function GET(_req: Request, ctx: Ctx) {
         style: {
           width: "1200px",
           height: "630px",
+          background: "#0b0b0f",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#0b0b0f",
           color: "#fff",
           fontSize: 64,
           fontWeight: 800,
-        },
+          letterSpacing: "-1px",
+        } as React.CSSProperties,
       },
-      `VIDEO ${id}`
+      `Video ${id}`
     );
 
     return new ImageResponse(el, { width: 1200, height: 630 });

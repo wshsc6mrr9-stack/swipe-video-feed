@@ -88,7 +88,7 @@ export async function addVideo(input: any): Promise<VideoItem> {
     throw new Error("title と url は必須");
   }
 
-  const finalGenres = (genres && genres.length ? genres : ["other"]);
+  const finalGenres = genres && genres.length ? genres : ["other"];
 
   const item: VideoItem = {
     id: newId(),
@@ -120,4 +120,11 @@ export async function deleteVideoById(id: string): Promise<{ removed: number }> 
 
   await writeAll(next);
   return { removed };
+}
+
+// ✅ 追加：idで1件取得（OG画像生成などで使う）
+export async function getVideoById(id: string): Promise<VideoItem | null> {
+  const items = await readAll();
+  const v = items.find((x) => x?.id === id);
+  return v ?? null;
 }
