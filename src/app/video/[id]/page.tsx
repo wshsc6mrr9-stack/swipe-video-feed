@@ -5,40 +5,6 @@ import type { Metadata } from "next";
 
 type ParamsPromise = Promise<{ id?: string }>;
 
-type VideoItem = {
-  id: string;
-  title?: string;
-  poster?: string;
-  // 他にもあるけどOGには不要
-};
-
-function toAbsUrl(maybeUrl: string, siteUrl: string) {
-  try {
-    // すでに絶対URLならそのまま
-    if (/^https?:\/\//i.test(maybeUrl)) return maybeUrl;
-    // 相対なら siteUrl をベースに絶対化
-    return new URL(maybeUrl, siteUrl).toString();
-  } catch {
-    return "";
-  }
-}
-
-async function fetchVideoById(siteUrl: string, id: string): Promise<VideoItem | null> {
-  try {
-    const res = await fetch(`${siteUrl}/api/videos`, {
-      // OG用途は毎回最新でOK（キャッシュで変になりがち）
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-
-    const list = (await res.json()) as VideoItem[];
-    const v = list?.find((x) => String(x?.id) === id);
-    return v ?? null;
-  } catch {
-    return null;
-  }
-}
-
 export async function generateMetadata({
   params,
 }: {
@@ -47,53 +13,42 @@ export async function generateMetadata({
   const p = await params;
   const id = String(p?.id ?? "").trim();
 
-  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://swipe-video-feed.vercel.app").trim();
-  const url = `${siteUrl}/video/${encodeURIComponent(id)}`;
+  const siteUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL || "https://swipe-video-feed.vercel.app"
+  ).trim();
 
-  // ✅ デフォルト（固定OG画像）
-  const fallbackOg = `${siteUrl}/opengraph-image.png`;
-  const fallbackTw = `${siteUrl}/twitter-image.png`;
+  const url = `${siteUrl}/video/${encodeURIComponent(id || "")}`;
 
-  let ogImage = fallbackOg;
-  let twImage = fallbackTw;
-
-  if (id) {
-    const v = await fetchVideoById(siteUrl, id);
-    const poster = (v?.poster || "").trim();
-    const absPoster = poster ? toAbsUrl(poster, siteUrl) : "";
-
-    if (absPoster) {
-      // ✅ 動画ごとのサムネ（poster）があればそれを使う
-      ogImage = absPoster;
-      twImage = absPoster;
-    }
-  }
+  // ✅ まずは「全動画共通サムネ」で確実に出す（あとで動画ごとに差し替え可能）
+  const ogImage = `${siteUrl}/opengraph-image.png`;
+  const twImage = `${siteUrl}/twitter-image.png`;
 
   const title = id ? `Video ${id} | Swipe Video Feed` : "Swipe Video Feed";
+  const desc =
+    "スワイプでアダルトショート動画を連続視聴。毎日更新の大人向けショート動画サイト。";
 
   return {
     title,
+    description: desc,
     alternates: { canonical: url },
-
     openGraph: {
       title,
+      description: desc,
       url,
       siteName: "Swipe Video Feed",
-      type: "video.other",
+      type: "website",
       images: [
         {
-          // ✅ ここが最重要：Xは絶対URL推奨
-          url: ogImage,
+          url: ogImage, // ✅ 絶対URL
           width: 1200,
           height: 630,
-          alt: title,
         },
       ],
     },
-
     twitter: {
       card: "summary_large_image",
       title,
+      description: desc,
       images: [twImage], // ✅ 絶対URL
     },
   };
@@ -104,7 +59,6 @@ export default async function Page({
 }: {
   params: ParamsPromise;
 }) {
-  // ✅ paramsをawaitしてPromiseエラー回避
   await params;
 
   return (
