@@ -2,14 +2,14 @@
 import React from "react";
 import { ImageResponse } from "next/og";
 
-export const runtime = "edge";
+export const runtime = "nodejs"; // ✅ ここが本番0バイトの特効薬
 export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ id?: string }> };
 
 export async function GET(_req: Request, ctx: Ctx) {
   try {
-    const p = await ctx.params; // ✅ ここが重要
+    const p = await ctx.params;
     const id = String(p?.id ?? "unknown");
 
     const el = React.createElement(
