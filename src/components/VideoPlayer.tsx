@@ -481,27 +481,28 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     }
   };
 
-  // ✅ ✅ ✅ 共有：本番URL（NEXT_PUBLIC_SITE_URL）優先、無ければ location.origin
+  // ✅ ✅ ✅ 共有：絶対に本番URLを共有する（ローカルIP/localhost共有は禁止）
   const onShare = async (e: any) => {
     stop(e);
 
-    const base =
-      (process.env.NEXT_PUBLIC_SITE_URL || "").trim() ||
-      (typeof location !== "undefined" ? location.origin : "");
-
-    const shareUrl = base
-      ? `${base}/video/${encodeURIComponent(String(video.id))}`
-      : "";
+    const shareUrl = `https://swipe-video-feed.vercel.app/video/${encodeURIComponent(
+      String(video.id)
+    )}`;
 
     const text = titleText || "Swipe Video Feed";
 
+    // ✅ iOS共有シートを最優先（X/LINE等を選べる）
     try {
-      if ((navigator as any)?.share) {
-        await (navigator as any).share({ title: text, text, url: shareUrl });
+      if (typeof navigator !== "undefined" && "share" in navigator) {
+        // @ts-ignore
+        await navigator.share({ title: text, text, url: shareUrl });
         return;
       }
-    } catch {}
+    } catch {
+      // キャンセル/失敗は下のコピーへ
+    }
 
+    // ✅ フォールバック：コピー（共有シートが無い環境用）
     try {
       await navigator.clipboard.writeText(shareUrl);
       alert("共有URLをコピーした");

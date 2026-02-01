@@ -1,53 +1,27 @@
-// src/app/twitter-image.tsx
 import { ImageResponse } from "next/og";
 
 export const runtime = "edge";
-export const size = { width: 1200, height: 675 };
-export const contentType = "image/png";
-export const revalidate = 0;
 
-export default function TwitterImage() {
+export default function Image() {
   return new ImageResponse(
     (
       <div
         style={{
-          width: "100%",
-          height: "100%",
+          width: "1200px",
+          height: "630px",
           display: "flex",
-          flexDirection: "column",
+          alignItems: "center",
           justifyContent: "center",
-          padding: 72,
-          backgroundColor: "#0b1220",
-          color: "#e5e7eb",
-          fontFamily:
-            'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
+          background: "#0b0b0b",
+          color: "white",
+          fontSize: 64,
+          fontWeight: 800,
+          letterSpacing: -1,
         }}
       >
-        <div style={{ display: "flex", gap: 18, alignItems: "center" }}>
-          <div
-            style={{
-              width: 10,
-              height: 110,
-              borderRadius: 999,
-              background:
-                "linear-gradient(180deg, #60a5fa 0%, #34d399 100%)",
-            }}
-          />
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 72, fontWeight: 800, letterSpacing: -1 }}>
-              Swipe Video Feed
-            </div>
-            <div style={{ fontSize: 30, color: "#cbd5e1" }}>
-              縦スワイプでショート動画を連続視聴
-            </div>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 40, fontSize: 18, color: "#94a3b8" }}>
-          swipe-video-feed.vercel.app
-        </div>
+        Swipe Video Feed
       </div>
     ),
-    { ...size }
+    { width: 1200, height: 630 }
   );
 }

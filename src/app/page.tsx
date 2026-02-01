@@ -1,17 +1,17 @@
-import AgeGateGuard from "@/components/AgeGateGuard";
-import VideoFeedNoSSR from "./VideoFeedNoSSR";
+// src/app/page.tsx
+import VideoFeedNoSSR from "@/app/VideoFeedNoSSR";
 
-type Props = {
-  searchParams?: { [key: string]: string | string[] | undefined };
-};
+type SearchParamsPromise = Promise<Record<string, string | string[] | undefined>>;
 
-export default function HomePage({ searchParams }: Props) {
-  const v = searchParams?.v;
-  const startId = Array.isArray(v) ? String(v[0] ?? "") : String(v ?? "");
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: SearchParamsPromise;
+}) {
+  const sp = await searchParams;
 
-  return (
-    <AgeGateGuard>
-      <VideoFeedNoSSR startId={startId || undefined} />
-    </AgeGateGuard>
-  );
+  const v = sp?.v;
+  const startId = Array.isArray(v) ? String(v[0] ?? "").trim() : String(v ?? "").trim();
+
+  return <VideoFeedNoSSR startId={startId} />;
 }

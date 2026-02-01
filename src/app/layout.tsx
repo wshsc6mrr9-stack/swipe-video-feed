@@ -1,13 +1,15 @@
+// src/app/layout.tsx
 import type { Metadata } from "next";
 import "./globals.css";
 
 const siteUrl = "https://swipe-video-feed.vercel.app";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
+
   title: "アダルトショート動画 | Swipe Video Feed",
   description:
     "スワイプでアダルトショート動画を連続視聴。毎日更新の大人向けショート動画サイト。",
-  metadataBase: new URL(siteUrl),
 
   robots: {
     index: true,
@@ -33,7 +35,12 @@ export const metadata: Metadata = {
     siteName: "Swipe Video Feed",
     type: "website",
     images: [
-      { url: "/opengraph-image", width: 1200, height: 630, alt: "Swipe Video Feed" },
+      {
+        url: "/opengraph-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Swipe Video Feed",
+      },
     ],
   },
 
@@ -42,7 +49,7 @@ export const metadata: Metadata = {
     title: "アダルトショート動画 | Swipe Video Feed",
     description:
       "スワイプでアダルトショート動画を連続視聴。毎日更新の大人向けショート動画サイト。",
-    images: ["/twitter-image"],
+    images: ["/twitter-image.png"],
   },
 };
 

@@ -5,9 +5,15 @@ import React from "react";
 import { useParams } from "next/navigation";
 import VideoFeedNoSSR from "@/app/VideoFeedNoSSR";
 
-export default function VideoPageClient() {
+type Props = {
+  id?: string; // ✅ あってもなくてもOK（page.tsx から渡されなくてもエラーにしない）
+};
+
+export default function VideoPageClient(props: Props) {
   const params = useParams() as { id?: string };
-  const startId = String(params?.id ?? "").trim();
+
+  // ✅ props.id が来てたらそれ優先、無ければURL paramsから取る
+  const startId = String(props?.id ?? params?.id ?? "").trim();
 
   return <VideoFeedNoSSR startId={startId} />;
 }
