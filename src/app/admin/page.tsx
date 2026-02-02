@@ -1,4 +1,4 @@
-// src/app/admin/page.tsx
+// ===== src/app/admin/page.tsx =====
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -123,19 +123,35 @@ export default function AdminPage() {
     window.setTimeout(() => setToast(null), 1200);
   }
 
-  /** GENRE_GROUPS から (key/label)→key の辞書を作る */
+  /** GENRE_GROUPS から (key/label)→key の辞書を作る + includes 用の正規化リスト */
   const genreIndex = useMemo(() => {
     const map = new Map<string, GenreKey>();
     const allKeys: GenreKey[] = [];
+    const allNorms: Array<{ norm: string; key: GenreKey }> = [];
+
     for (const g of GENRE_GROUPS) {
       for (const it of g.items) {
         const k = it.key as GenreKey;
         allKeys.push(k);
-        map.set(normalizeKey(it.key), k);
-        map.set(normalizeKey(it.label), k);
+
+        const kn = normalizeKey(it.key);
+        const ln = normalizeKey(it.label);
+
+        if (kn) {
+          map.set(kn, k);
+          allNorms.push({ norm: kn, key: k });
+        }
+        if (ln) {
+          map.set(ln, k);
+          allNorms.push({ norm: ln, key: k });
+        }
       }
     }
-    return { map, allKeys: uniq(allKeys) };
+
+    // norm が長い方を先に試す（部分一致で強い）
+    allNorms.sort((a, b) => b.norm.length - a.norm.length);
+
+    return { map, allKeys: uniq(allKeys), allNorms };
   }, []);
 
   /** ✅ key → 日本語ラベル（選択済み表示を日本語にする） */
@@ -278,33 +294,50 @@ export default function AdminPage() {
         .filter(Boolean);
     }
 
-    const words = uniq(tokens.flatMap(splitWords));
-
+    // ✅ ここがポイント：ブックマークレット側で「ナビ/サイドバー」まで拾うケースがあるので強めに除外
     const noiseRe =
-      /(キャンペーン|セール|おすすめ順|人気順|売上|評価|お気に入り|新着|予約|最新作|準新作|ポイント|ログアウト|購入済み|月額|レンタル|リスト|ブランドストア)/i;
+      /(キャンペーン|セール|おすすめ順|人気順|売上|評価|お気に入り|新着|予約|最新作|準新作|ポイント|ログアウト|購入済み|月額|レンタル|リスト|ブランドストア|FANZA\s*トップ|FANZA\s*TV|みんなのおすすめ|ライブチャット|キャラチャット|出会い|オンラインゲーム|PCゲーム|ゲーム|動画(?!作品)|検索|ジャンルから探す|商品リストから探す)/i;
+
+    // 「#タグ」っぽいのは優先したいので、まず raw を温存
+    const rawTokens = tokens.slice();
 
     const cleanTokens = tokens.filter((x) => !noiseRe.test(x));
+    const words = uniq(cleanTokens.flatMap(splitWords));
     const cleanWords = words.filter((x) => !noiseRe.test(x));
 
-    const joinedRaw = cleanTokens.join(" ");
-    const joinedRaw2 = `${joinedRaw} ${cleanWords.join(" ")}`.trim();
-    const joinedN = normalizeKey(joinedRaw2);
+    // もし clean がほぼ消えた場合は、raw からも "タグっぽい短語" だけ救済
+    let rescued: string[] = [];
+    if (cleanTokens.length === 0) {
+      rescued = uniq(
+        rawTokens
+          .flatMap(splitWords)
+          .map((x) => normalizeText(x))
+          .filter(Boolean)
+          .filter((x) => !noiseRe.test(x))
+          .filter((x) => x.length <= 20) // 短いタグっぽいものだけ
+      );
+    }
+
+    const joinedRaw = [...cleanTokens, ...cleanWords, ...rescued].join(" ");
+    const joinedN = normalizeKey(joinedRaw);
 
     const matched: GenreKey[] = [];
 
-    for (const tok of [...cleanTokens, ...cleanWords]) {
+    // 1) 1語ずつ完全一致（label/key の両方を map に入れてる）
+    for (const tok of [...cleanTokens, ...cleanWords, ...rescued]) {
       const k = genreIndex.map.get(normalizeKey(tok));
       if (k) matched.push(k);
     }
 
+    // 2) 文字列全体に「ラベル/キー」が含まれるか（ここを強化：keyだけじゃなくlabel側も見たい）
     if (joinedN) {
-      for (const k of genreIndex.allKeys) {
-        const kk = normalizeKey(k);
-        if (kk && joinedN.includes(kk)) matched.push(k);
+      for (const { norm, key } of genreIndex.allNorms) {
+        if (norm && joinedN.includes(norm)) matched.push(key);
       }
     }
 
-    const lower = joinedRaw2.toLowerCase();
+    // 3) 日本語の同義語辞書（タイトルやタグに入ってることが多い）
+    const lower = joinedRaw.toLowerCase();
     for (const [k, ws] of jpToKey) {
       for (const w of ws) {
         if (lower.includes(String(w).toLowerCase())) {
@@ -322,6 +355,7 @@ export default function AdminPage() {
           : picked;
       setGenres(next as GenreKey[]);
     } else {
+      // ✅ 何も一致しない時は other のまま（= 0件に見えても正常）
       setGenres(["other"]);
     }
 
@@ -345,7 +379,13 @@ export default function AdminPage() {
 
       if (!enc) return;
 
-      const json = decodeURIComponent(enc);
+      // URLSearchParams は既にデコード済みの場合があるので安全に扱う
+      let json = enc;
+      try {
+        json = decodeURIComponent(enc);
+      } catch {
+        // noop
+      }
 
       setFanzaJson(json);
       applyPasteText(json);
