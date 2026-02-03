@@ -44,7 +44,7 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "bishoujo", label: "美少女" },
       { key: "other-type", label: "その他（タイプ）" },
 
-      // 追加
+      // 追加（既存に無いもののみ）
       { key: "fair-skin", label: "色白" },
       { key: "clean", label: "清潔" },
       { key: "beautiful-style", label: "美乳" },
@@ -75,10 +75,18 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "business-suit", label: "ビジネススーツ" },
       { key: "other-costume", label: "その他（コス）" },
 
-      // 追加
+      // 追加（既存に無いもののみ）
       { key: "student-uniform-adult", label: "学生服" },
       { key: "secretary", label: "秘書" },
       { key: "crossdress", label: "女装・男の娘" },
+
+      // ✅ FANZA一覧から追加（未収録のみ）
+      { key: "china-dress", label: "チャイナドレス" },
+      { key: "loose-socks", label: "ルーズソックス" },
+      { key: "race-queen", label: "レースクィーン" },
+      { key: "cheerleader", label: "チアガール" },
+      { key: "bloomers", label: "ブルマ" },
+      { key: "stewardess", label: "スチュワーデス" }, // CAとは別で衣装として
     ],
   },
 
@@ -107,7 +115,7 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "gag-comedy", label: "ギャグ・コメディ" },
       { key: "school-adult", label: "学園もの" },
 
-      // 追加
+      // 追加（既存）
       { key: "romance", label: "恋愛" },
       { key: "seductress", label: "痴女" },
       { key: "obscene-talk", label: "淫語" },
@@ -126,6 +134,20 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "pickup", label: "ナンパ" },
       { key: "instant", label: "即ハメ" },
       { key: "affair", label: "不倫" },
+
+      // ✅ FANZA一覧から追加（未収録のみ）
+      { key: "bl", label: "BL（ボーイズラブ）" },
+      { key: "otaku", label: "オタク" },
+      { key: "princess", label: "お姫様" },
+      { key: "giri-mosaic", label: "ギリモザ" },
+      { key: "companion", label: "コンパニオン" },
+      { key: "celebrity", label: "セレブ" },
+      { key: "voyeur", label: "盗撮・のぞき" },
+      { key: "multiple-episodes", label: "複数話" },
+      { key: "hands-off", label: "放置" },
+      { key: "bitch", label: "ビッチ" },
+      { key: "tentacle", label: "触手" },
+      { key: "time-stop", label: "時間停止" },
     ],
   },
 
@@ -164,7 +186,7 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "mom-friend", label: "ママ友" },
       { key: "sisters", label: "姉・妹" },
 
-      // 追加
+      // 追加（既存）
       { key: "hostess-service", label: "キャバ嬢・風俗嬢" },
       { key: "housewife", label: "主婦" },
       { key: "stepmother", label: "義母" },
@@ -218,6 +240,15 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "electric-toy", label: "電マ" },
       { key: "restraint", label: "拘束" },
       { key: "finish", label: "ぶっかけ" },
+
+      // ✅ FANZA一覧から追加（未収録のみ）
+      { key: "panty-shot", label: "パンチラ" },
+      { key: "boob-slip", label: "胸チラ" },
+      { key: "spanking", label: "スパンキング" },
+      { key: "car-sex", label: "カーセックス" },
+      { key: "scat", label: "スカトロ" },
+      { key: "yoga", label: "ヨガ" },
+      { key: "support-masturbation", label: "オナサポ" },
     ],
   },
 
@@ -240,6 +271,10 @@ export const GENRE_GROUPS: GenreGroup[] = [
       { key: "4k", label: "4K" },
       { key: "3d", label: "3D" },
       { key: "other", label: "その他" },
+
+      // ✅ FANZA一覧から追加（未収録のみ）
+      { key: "vr-only", label: "VR専用" },
+      { key: "vertical-video", label: "縦動画" },
     ],
   },
 ];
