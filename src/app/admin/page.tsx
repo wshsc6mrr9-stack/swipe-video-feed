@@ -165,19 +165,175 @@ export default function AdminPage() {
     return map;
   }, []);
 
-  /** ✅ 日本語タグ→あなたのGenreKeyへ寄せる（必要なら増やせる） */
+  /** ✅ 日本語タグ→あなたのGenreKeyへ寄せる（FANZA向け強化版） */
   const jpToKey = useMemo(() => {
     const dict: Array<[GenreKey, string[]]> = [
-      ["debut", ["デビュー", "新人", "初av", "初AV", "初出演", "初登場", "初解禁"]],
-      ["facial", ["顔射", "ぶっかけ"]],
-      ["office-mix", ["ol", "ＯＬ", "オフィス", "女上司", "部下", "秘書", "社内", "人事"]],
-      ["bishoujo", ["美少女", "ロリ", "かわいい", "清純", "美形"]],
+      // --- 作品系（ジャンル）
+      ["debut", ["デビュー", "新人", "初av", "初av作品", "初AV", "初出演", "初登場", "初解禁"]],
       ["solo", ["単体", "単体作品", "単体作", "ソロ", "1人", "一人"]],
-      ["4k", ["4k", "４ｋ", "高画質", "uhd", "UHD"]],
-      ["hospital-clinic", ["病院", "クリニック", "医師", "看護", "ナース", "診察"]],
-      ["college-student", ["大学生", "女子大生", "学生", "大学"]],
-      ["massage-play", ["マッサージ", "エステ", "施術", "リフレ", "オイル"]],
+      ["best-compilation", ["ベスト", "総集編", "ベスト・総集編", "女優ベスト", "ベスト盤"]],
+      ["amateur", ["素人", "素人系"]],
+      ["planning", ["企画"]],
+      ["documentary", ["ドキュメンタリー", "ドキュメント", "ドキュメント系"]],
+      ["anime", ["アニメ"]],
+      ["classic", ["クラシック"]],
+      ["sm", ["sm", "ＳＭ", "SM"]],
+      ["gag-comedy", ["ギャグ", "コメディ", "ギャグ・コメディ"]],
+      ["school-adult", ["学園", "学園もの", "学園モノ"]],
+      ["romance", ["恋愛", "ラブコメ"]],
+      ["story-drama", ["ドラマ"]],
+      ["ntr", ["ntr", "ＮＴＲ", "NTR", "寝取り", "寝取られ", "寝取り・寝取られ", "寝取り・寝取られ・NTR"]],
+      ["pickup", ["ナンパ", "逆ナン"]],
+      ["instant", ["即ハメ", "即ハメ系"]],
+      ["affair", ["不倫"]],
+      ["incest-taboo", ["近親相姦"]],
+      ["harem", ["ハーレム"]],
+      ["seductress", ["痴女"]],
+      ["obscene-talk", ["淫語"]],
+      ["promiscuous", ["淫乱"]],
+      ["hardcore", ["ハード", "淫乱・ハード系"]],
+      ["lesbian", ["レズ", "レズビアン", "レズキス"]],
+      ["fetish", ["フェチ"]],
+      ["other-fetish", ["その他フェチ"]],
+
+      // ✅ FANZA一覧で増やしたキー
+      ["bl", ["bl", "ＢＬ", "BL", "ボーイズラブ", "ボーイズ・ラブ", "ボーイズLOVE"]],
+      ["otaku", ["オタク"]],
+      ["princess", ["お姫様"]],
+      ["giri-mosaic", ["ギリモザ"]],
+      ["companion", ["コンパニオン"]],
+      ["celebrity", ["セレブ"]],
+      ["voyeur", ["盗撮", "のぞき", "盗撮・のぞき"]],
+      ["multiple-episodes", ["複数話", "複数エピソード"]],
+      ["hands-off", ["放置"]],
+      ["bitch", ["ビッチ"]],
+      ["tentacle", ["触手"]],
+      ["time-stop", ["時間停止"]],
+
+      // --- 職業/シチュ（職業いろいろ）
+      ["office-mix", ["ol", "ＯＬ", "OL", "オフィス", "社内", "人事", "職業色々"]],
+      ["boss", ["上司", "女上司"]],
+      ["subordinate-colleague", ["部下", "同僚", "部下・同僚"]],
+      ["secretary", ["秘書"]],
+      ["doctor", ["医者", "医師", "ドクター"]],
+      ["nurse", ["看護", "看護師", "ナース", "看護婦"]],
+      ["teacher", ["教師", "先生"]],
+      ["teacher-adult", ["女教師"]],
+      ["college-student", ["女子大生", "大学生", "学生", "大学"]],
+      ["student-adult", ["女子校生", "女子高生", "jk", "ＪＫ", "JK"]],
+      ["housewife", ["主婦"]],
+      ["married-woman", ["人妻"]],
+      ["milf", ["熟女"]],
+      ["stepmother", ["義母"]],
+      ["mature-mother", ["お母さん", "母", "ママ"]],
+      ["mom-friend", ["ママ友"]],
+      ["cabin-attendant", ["ca", "ＣＡ", "CA", "キャビンアテンダント"]],
+      ["hotel", ["ホテル"]],
+      ["hot-spring", ["温泉"]],
+      ["bath", ["お風呂"]],
+      ["outdoor", ["野外", "露出", "野外・露出", "野外・屋外"]],
+      ["travel", ["旅行"]],
+      ["date", ["デート"]],
+      ["drinking-party", ["飲み会", "合コン", "飲み会・合コン"]],
+      ["couple", ["カップル"]],
+
+      // --- タイプ/属性（タイプ）
+      ["bishoujo", ["美少女", "清純", "美形"]],
+      ["slender", ["スレンダー"]],
+      ["chubby", ["ぽっちゃり"]],
+      ["big-breasts", ["巨乳"]],
+      ["small-breasts", ["貧乳", "微乳", "微乳・貧乳"]],
+      ["huge-breasts", ["超乳"]],
+      ["big-butt", ["巨尻"]],
+      ["butt-fetish", ["尻フェチ"]],
+      ["leg-foot-fetish", ["脚フェチ", "足フェチ", "脚・足フェチ", "足コキ"]],
+      ["shaved", ["パイパン"]],
+      ["mini", ["ミニ系"]],
+      ["pov", ["主観"]],
+      ["sweaty", ["汗だく"]],
+      ["fair-skin", ["色白"]],
+      ["beautiful-style", ["美乳"]],
+
+      // --- コス（コスチューム）
+      ["cosplay", ["コスプレ"]],
+      ["uniform", ["制服"]],
+      ["sailor-uniform", ["セーラー服"]],
+      ["student-uniform-adult", ["学生服"]],
+      ["swimsuit", ["水着"]],
+      ["school-swimsuit", ["競泳", "スクール水着", "競泳・スクール水着"]],
+      ["bodycon", ["ボディコン"]],
+      ["lingerie", ["ランジェリー"]],
+      ["apron", ["エプロン"]],
+      ["naked-apron", ["裸エプロン"]],
+      ["bunny", ["バニー", "バニーガール"]],
+      ["mask", ["覆面", "マスク", "覆面・マスク"]],
+      ["glasses", ["めがね", "メガネ"]],
+      ["pantyhose", ["パンスト", "タイツ", "パンスト・タイツ"]],
+      ["knee-socks", ["ニーソックス"]],
+      ["loose-socks", ["ルーズソックス"]],
+      ["leotard", ["レオタード"]],
+      ["kimono", ["和服", "浴衣", "和服・浴衣"]],
+      ["gym-uniform", ["体操着"]],
+      ["bloomers", ["ブルマ", "体操着・ブルマ"]],
+      ["business-suit", ["ビジネススーツ"]],
+      ["china-dress", ["チャイナドレス"]],
+      ["race-queen", ["レースクィーン"]],
+      ["cheerleader", ["チアガール"]],
+      ["crossdress", ["女装", "男の娘", "女装・男の娘"]],
+      ["stewardess", ["スチュワーデス"]],
+
+      // --- プレイ（プレイ）
+      ["kiss", ["キス", "接吻"]],
+      ["massage-play", ["マッサージ", "施術", "エステ", "リフレ", "オイル"]],
+      ["toys", ["おもちゃ"]],
+      ["3p", ["3p", "３ｐ", "3P"]],
+      ["4p", ["4p", "４ｐ", "4P"]],
+      ["multiple-play", ["複数プレイ", "3P・4P"]],
+      ["lotion", ["ローション"]],
+      ["oil-play", ["オイル"]],
+      ["dirty-talk", ["言葉責め"]],
+      ["obscene-talk", ["淫語"]], // 重複OK（genre側も拾える）
+      ["blowjob", ["フェラ"]],
+      ["titjob", ["パイズリ"]],
+      ["handjob", ["手コキ"]],
+      ["cunnilingus", ["クンニ"]],
+      ["masturbation", ["オナニー"]],
+      ["sixty-nine", ["シックスナイン", "69"]],
       ["anal-sex", ["アナル", "肛門", "アナルセックス"]],
+      ["iramachio", ["イラマチオ"]],
+      ["irrumatio", ["イマラチオ"]],
+      ["creampie", ["中出し"]],
+      ["facial", ["顔射", "ぶっかけ"]],
+      ["bondage", ["縛り", "緊縛", "縛り・緊縛"]],
+      ["restraint", ["拘束"]],
+      ["cowgirl", ["騎乗位"]],
+      ["squirting", ["潮吹き"]],
+      ["urination", ["放尿", "お漏らし", "放尿・お漏らし"]],
+      ["drink-urine", ["飲尿"]],
+      ["humiliation", ["羞恥"]],
+      ["big-dick", ["デカチン", "巨根", "デカチン・巨根"]],
+      ["finish", ["ぶっかけ"]],
+
+      // ✅ FANZA一覧で増やしたキー（プレイ）
+      ["panty-shot", ["パンチラ"]],
+      ["boob-slip", ["胸チラ"]],
+      ["spanking", ["スパンキング"]],
+      ["car-sex", ["カーセックス"]],
+      ["scat", ["スカトロ"]],
+      ["yoga", ["ヨガ"]],
+      ["support-masturbation", ["オナサポ"]],
+
+      // --- その他（フォーマット）
+      ["vr", ["vr", "ＶＲ", "VR"]],
+      ["vr-only", ["vr専用", "VR専用", "特化vr", "特化VR"]],
+      ["high-quality-vr", ["ハイクオリティvr", "ハイクオリティVR"]],
+      ["4k", ["4k", "４ｋ", "高画質", "uhd", "UHD"]],
+      ["3d", ["3d", "３ｄ"]],
+      ["vertical-video", ["縦動画", "スマホ推奨縦動画"]],
+      ["mobile-recommended", ["スマホ推奨", "スマホおすすめ"]],
+      ["exclusive", ["独占配信"]],
+      ["fanza-exclusive", ["fanza配信限定", "FANZA配信限定"]],
+      ["ai-generated", ["ai生成", "AI生成", "AI生成作品"]],
     ];
     return dict;
   }, []);
@@ -296,7 +452,7 @@ export default function AdminPage() {
 
     // ✅ ここがポイント：ブックマークレット側で「ナビ/サイドバー」まで拾うケースがあるので強めに除外
     const noiseRe =
-      /(キャンペーン|セール|おすすめ順|人気順|売上|評価|お気に入り|新着|予約|最新作|準新作|ポイント|ログアウト|購入済み|月額|レンタル|リスト|ブランドストア|FANZA\s*トップ|FANZA\s*TV|みんなのおすすめ|ライブチャット|キャラチャット|出会い|オンラインゲーム|PCゲーム|ゲーム|動画(?!作品)|検索|ジャンルから探す|商品リストから探す)/i;
+      /(キャンペーン|セール|おすすめ順|人気順|売上|評価|お気に入り|新着|予約|最新作|準新作|ポイント|ログアウト|購入済み|月額|レンタル|リスト|ブランドストア|FANZA\s*トップ|FANZA\s*TV|みんなのおすすめ|ライブチャット|キャラチャット|出会い|オンラインゲーム|PCゲーム|ゲーム|動画(?!作品)|検索|ジャンルから探す|商品リストから探す|会員規約|会社概要|お問い合わせ|特定商取引法|個人情報保護)/i;
 
     // 「#タグ」っぽいのは優先したいので、まず raw を温存
     const rawTokens = tokens.slice();
@@ -329,7 +485,7 @@ export default function AdminPage() {
       if (k) matched.push(k);
     }
 
-    // 2) 文字列全体に「ラベル/キー」が含まれるか（ここを強化：keyだけじゃなくlabel側も見たい）
+    // 2) 文字列全体に「ラベル/キー」が含まれるか
     if (joinedN) {
       for (const { norm, key } of genreIndex.allNorms) {
         if (norm && joinedN.includes(norm)) matched.push(key);
@@ -355,7 +511,7 @@ export default function AdminPage() {
           : picked;
       setGenres(next as GenreKey[]);
     } else {
-      // ✅ 何も一致しない時は other のまま（= 0件に見えても正常）
+      // ✅ 何も一致しない時は other のまま
       setGenres(["other"]);
     }
 
