@@ -105,6 +105,9 @@ export default function AdminPage() {
   const [affUrl, setAffUrl] = useState("");
   const [affLabel, setAffLabel] = useState("");
 
+  // ✅ import元（作品ページ）へ戻る用
+  const [sourcePageUrl, setSourcePageUrl] = useState("");
+
   // ✅ JSON貼り付け欄
   const [fanzaJson, setFanzaJson] = useState("");
   const fanzaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -168,7 +171,6 @@ export default function AdminPage() {
   /** ✅ 日本語タグ→あなたのGenreKeyへ寄せる（FANZA向け強化版） */
   const jpToKey = useMemo(() => {
     const dict: Array<[GenreKey, string[]]> = [
-      // --- 作品系（ジャンル）
       ["debut", ["デビュー", "新人", "初av", "初av作品", "初AV", "初出演", "初登場", "初解禁"]],
       ["solo", ["単体", "単体作品", "単体作", "ソロ", "1人", "一人"]],
       ["best-compilation", ["ベスト", "総集編", "ベスト・総集編", "女優ベスト", "ベスト盤"]],
@@ -195,8 +197,6 @@ export default function AdminPage() {
       ["lesbian", ["レズ", "レズビアン", "レズキス"]],
       ["fetish", ["フェチ"]],
       ["other-fetish", ["その他フェチ"]],
-
-      // ✅ FANZA一覧で増やしたキー
       ["bl", ["bl", "ＢＬ", "BL", "ボーイズラブ", "ボーイズ・ラブ", "ボーイズLOVE"]],
       ["otaku", ["オタク"]],
       ["princess", ["お姫様"]],
@@ -209,8 +209,6 @@ export default function AdminPage() {
       ["bitch", ["ビッチ"]],
       ["tentacle", ["触手"]],
       ["time-stop", ["時間停止"]],
-
-      // --- 職業/シチュ（職業いろいろ）
       ["office-mix", ["ol", "ＯＬ", "OL", "オフィス", "社内", "人事", "職業色々"]],
       ["boss", ["上司", "女上司"]],
       ["subordinate-colleague", ["部下", "同僚", "部下・同僚"]],
@@ -236,8 +234,6 @@ export default function AdminPage() {
       ["date", ["デート"]],
       ["drinking-party", ["飲み会", "合コン", "飲み会・合コン"]],
       ["couple", ["カップル"]],
-
-      // --- タイプ/属性（タイプ）
       ["bishoujo", ["美少女", "清純", "美形"]],
       ["slender", ["スレンダー"]],
       ["chubby", ["ぽっちゃり"]],
@@ -253,8 +249,6 @@ export default function AdminPage() {
       ["sweaty", ["汗だく"]],
       ["fair-skin", ["色白"]],
       ["beautiful-style", ["美乳"]],
-
-      // --- コス（コスチューム）
       ["cosplay", ["コスプレ"]],
       ["uniform", ["制服"]],
       ["sailor-uniform", ["セーラー服"]],
@@ -281,8 +275,6 @@ export default function AdminPage() {
       ["cheerleader", ["チアガール"]],
       ["crossdress", ["女装", "男の娘", "女装・男の娘"]],
       ["stewardess", ["スチュワーデス"]],
-
-      // --- プレイ（プレイ）
       ["kiss", ["キス", "接吻"]],
       ["massage-play", ["マッサージ", "施術", "エステ", "リフレ", "オイル"]],
       ["toys", ["おもちゃ"]],
@@ -292,7 +284,6 @@ export default function AdminPage() {
       ["lotion", ["ローション"]],
       ["oil-play", ["オイル"]],
       ["dirty-talk", ["言葉責め"]],
-      ["obscene-talk", ["淫語"]], // 重複OK（genre側も拾える）
       ["blowjob", ["フェラ"]],
       ["titjob", ["パイズリ"]],
       ["handjob", ["手コキ"]],
@@ -313,8 +304,6 @@ export default function AdminPage() {
       ["humiliation", ["羞恥"]],
       ["big-dick", ["デカチン", "巨根", "デカチン・巨根"]],
       ["finish", ["ぶっかけ"]],
-
-      // ✅ FANZA一覧で増やしたキー（プレイ）
       ["panty-shot", ["パンチラ"]],
       ["boob-slip", ["胸チラ"]],
       ["spanking", ["スパンキング"]],
@@ -322,8 +311,6 @@ export default function AdminPage() {
       ["scat", ["スカトロ"]],
       ["yoga", ["ヨガ"]],
       ["support-masturbation", ["オナサポ"]],
-
-      // --- その他（フォーマット）
       ["vr", ["vr", "ＶＲ", "VR"]],
       ["vr-only", ["vr専用", "VR専用", "特化vr", "特化VR"]],
       ["high-quality-vr", ["ハイクオリティvr", "ハイクオリティVR"]],
@@ -420,6 +407,10 @@ export default function AdminPage() {
     const au = normalizeUrl(obj.affUrl ?? obj.affiliateUrl ?? obj.pageUrl ?? obj.sourceUrl ?? "");
     if (au) setAffUrl(au);
 
+    // ✅ 戻り先（作品ページURL）
+    const back = normalizeUrl(obj.pageUrl ?? obj.sourceUrl ?? "");
+    if (back) setSourcePageUrl(back);
+
     // ---- affLabel（未入力ならデフォ入れてもOK）
     const al = normalizeText(obj.affLabel ?? obj.affiliateLabel ?? "");
     if (al) {
@@ -450,18 +441,15 @@ export default function AdminPage() {
         .filter(Boolean);
     }
 
-    // ✅ ここがポイント：ブックマークレット側で「ナビ/サイドバー」まで拾うケースがあるので強めに除外
     const noiseRe =
       /(キャンペーン|セール|おすすめ順|人気順|売上|評価|お気に入り|新着|予約|最新作|準新作|ポイント|ログアウト|購入済み|月額|レンタル|リスト|ブランドストア|FANZA\s*トップ|FANZA\s*TV|みんなのおすすめ|ライブチャット|キャラチャット|出会い|オンラインゲーム|PCゲーム|ゲーム|動画(?!作品)|検索|ジャンルから探す|商品リストから探す|会員規約|会社概要|お問い合わせ|特定商取引法|個人情報保護)/i;
 
-    // 「#タグ」っぽいのは優先したいので、まず raw を温存
     const rawTokens = tokens.slice();
 
     const cleanTokens = tokens.filter((x) => !noiseRe.test(x));
     const words = uniq(cleanTokens.flatMap(splitWords));
     const cleanWords = words.filter((x) => !noiseRe.test(x));
 
-    // もし clean がほぼ消えた場合は、raw からも "タグっぽい短語" だけ救済
     let rescued: string[] = [];
     if (cleanTokens.length === 0) {
       rescued = uniq(
@@ -470,7 +458,7 @@ export default function AdminPage() {
           .map((x) => normalizeText(x))
           .filter(Boolean)
           .filter((x) => !noiseRe.test(x))
-          .filter((x) => x.length <= 20) // 短いタグっぽいものだけ
+          .filter((x) => x.length <= 20)
       );
     }
 
@@ -479,20 +467,17 @@ export default function AdminPage() {
 
     const matched: GenreKey[] = [];
 
-    // 1) 1語ずつ完全一致（label/key の両方を map に入れてる）
     for (const tok of [...cleanTokens, ...cleanWords, ...rescued]) {
       const k = genreIndex.map.get(normalizeKey(tok));
       if (k) matched.push(k);
     }
 
-    // 2) 文字列全体に「ラベル/キー」が含まれるか
     if (joinedN) {
       for (const { norm, key } of genreIndex.allNorms) {
         if (norm && joinedN.includes(norm)) matched.push(key);
       }
     }
 
-    // 3) 日本語の同義語辞書（タイトルやタグに入ってることが多い）
     const lower = joinedRaw.toLowerCase();
     for (const [k, ws] of jpToKey) {
       for (const w of ws) {
@@ -511,14 +496,16 @@ export default function AdminPage() {
           : picked;
       setGenres(next as GenreKey[]);
     } else {
-      // ✅ 何も一致しない時は other のまま
       setGenres(["other"]);
     }
 
     setGenreQuery("");
   }
 
-  /** ✅ 追加：URLクエリ/ハッシュで受け取って自動反映（クリップボード不要） */
+  // ✅ 「importが来た = 自動追加していい」のフラグ（ブクマを変えないため）
+  const autoWantedRef = useRef(false);
+
+  /** ✅ URLクエリ/ハッシュで受け取って自動反映（クリップボード不要） */
   useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search);
@@ -527,15 +514,22 @@ export default function AdminPage() {
       let enc = sp.get("fanza") || sp.get("import");
 
       // 2) hash fallback (#import=...)
+      let fromHash = false;
       if (!enc) {
         const h = window.location.hash || "";
         const m = h.match(/(?:^|[#&])import=([^&]+)/);
-        if (m?.[1]) enc = m[1];
+        if (m?.[1]) {
+          enc = m[1];
+          fromHash = true;
+        }
       }
 
       if (!enc) return;
 
-      // URLSearchParams は既にデコード済みの場合があるので安全に扱う
+      // ✅ ブクマは #import なので、これを auto 扱いにする（=ブクマを一切変えない）
+      const autoByQuery = sp.get("auto") === "1";
+      autoWantedRef.current = autoByQuery || fromHash;
+
       let json = enc;
       try {
         json = decodeURIComponent(enc);
@@ -603,6 +597,59 @@ export default function AdminPage() {
     }
   }
 
+  // ✅ 自動追加（importで反映後、title/urlが揃ったら1回だけPOST → 元ページへ戻る）
+  const autoRanRef = useRef(false);
+  useEffect(() => {
+    if (!autoWantedRef.current) return;
+    if (autoRanRef.current) return;
+
+    const t = normalizeText(title);
+    const u = normalizeUrl(url);
+    if (!t || !u) return; // 反映待ち
+
+    autoRanRef.current = true;
+
+    (async () => {
+      setErr(null);
+      setBusy(true);
+      try {
+        const payloadGenres = (
+          normalizedSelected.length ? normalizedSelected : (["other"] as GenreKey[])
+        ).filter((g) => g !== ("ALL" as any));
+
+        const r = await fetch("/api/videos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: t,
+            url: u,
+            poster: normalizeUrl(poster) || undefined,
+            affUrl: normalizeUrl(affUrl) || undefined,
+            affLabel: normalizeText(affLabel) || undefined,
+            genres: payloadGenres,
+          }),
+        });
+
+        const j = await r.json().catch(() => null);
+        if (!r.ok || !j?.ok) {
+          setErr(j?.error ?? `auto add failed (${r.status})`);
+          // 失敗時は止める（手で修正できるように戻らない）
+          return;
+        }
+
+        showToast("自動追加OK");
+
+        const back = normalizeUrl(sourcePageUrl) || "/";
+        window.setTimeout(() => {
+          window.location.href = back;
+        }, 450);
+      } finally {
+        setBusy(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, url]);
+
   const query = genreQuery.trim().toLowerCase();
   const filteredGroups = useMemo(() => {
     if (!query) return GENRE_GROUPS;
@@ -622,7 +669,6 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-black text-white p-6 space-y-6">
-      {/* ✅ トースト */}
       {toast ? (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50">
           <div className="px-4 py-2 rounded-full bg-black/80 border border-white/10 text-white text-sm">
@@ -655,7 +701,6 @@ export default function AdminPage() {
       <section className="rounded-2xl bg-neutral-900 p-4">
         <h2 className="font-bold mb-3">動画追加</h2>
 
-        {/* ✅ FANZA抽出（JSON貼り付け） */}
         <div className="rounded-2xl bg-neutral-800 p-3 mb-3">
           <div className="flex items-center justify-between gap-3">
             <div className="text-sm font-semibold">FANZA抽出（JSON貼り付け）</div>
@@ -705,7 +750,6 @@ export default function AdminPage() {
             onChange={(e) => setUrl(e.target.value)}
           />
 
-          {/* ✅ ジャンル：開閉式 */}
           <div className="rounded-2xl bg-neutral-800 p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-semibold">ジャンル（複数選択）</div>
@@ -729,7 +773,6 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* ✅ 選択済みを日本語ラベルで表示 */}
             <div className="mt-3 flex flex-wrap gap-2">
               {normalizedSelected.map((g) => (
                 <span
@@ -798,7 +841,6 @@ export default function AdminPage() {
             onChange={(e) => setPoster(e.target.value)}
           />
 
-          {/* ✅ posterプレビュー（入ってれば見える） */}
           {posterPreview ? (
             <div className="rounded-2xl bg-neutral-800 p-3">
               <div className="text-xs text-white/70 mb-2">poster プレビュー</div>
