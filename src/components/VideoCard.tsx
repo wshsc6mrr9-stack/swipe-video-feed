@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import VideoPlayer from "@/components/VideoPlayer";
 
 type VideoItem = {
@@ -29,8 +29,26 @@ export default function VideoCard({ video, isActive }: Props) {
   const affLabel =
     (video.affLabel ?? video.affiliateLabel ?? "商品を見る")?.trim() || "商品を見る";
 
+  // ✅ VideoPlayer に渡すオブジェクトを安定化（レンダー毎に無駄な差分を減らす）
+  const playerVideo = useMemo(() => {
+    return {
+      ...video,
+      url: src,
+      src,
+      affUrl,
+      affLabel,
+      poster: video.poster,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video.id, video.title, src, affUrl, affLabel, video.poster]);
+
   return (
-    <div className="relative w-full bg-black" style={{ height: "100svh" }}>
+    <div
+      className="relative w-full bg-black overflow-hidden"
+      style={{
+        height: "100svh",
+      }}
+    >
       {/* ✅ safe-area を VideoPlayer 側のUIレイヤーで使えるようにする */}
       <div
         className="absolute inset-0"
@@ -42,9 +60,8 @@ export default function VideoCard({ video, isActive }: Props) {
         }}
       >
         <VideoPlayer
-          // VideoPlayer は video.url / video.src どっちでも読むが、両方入れとくと安全
           // @ts-ignore
-          video={{ ...video, url: src, src, affUrl, affLabel }}
+          video={playerVideo}
           isActive={isActive}
         />
       </div>
