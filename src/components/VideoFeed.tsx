@@ -73,12 +73,14 @@ function normalizeText(s: string) {
 type Props = {
   initialGenre?: GenreKey;
   hideGenreMenu?: boolean;
-
-  // ✅ /video/[id] で「最初に表示したい動画」
-  startId?: string;
+  startId?: string; // ✅ /video/[id] で最初に表示したい動画
 };
 
-export default function VideoFeed({ initialGenre, hideGenreMenu, startId }: Props = {}) {
+export default function VideoFeed({
+  initialGenre,
+  hideGenreMenu,
+  startId,
+}: Props = {}) {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
   const [vh, setVh] = useState<number>(() =>
@@ -108,8 +110,14 @@ export default function VideoFeed({ initialGenre, hideGenreMenu, startId }: Prop
   const startTimeRef = useRef(0);
   const pointerIdRef = useRef<number | null>(null);
 
-  // ✅ startId を「最初に1回だけ」適用するためのフラグ
+  // ✅ startId を「最初に1回だけ」適用
   const appliedStartIdRef = useRef<string>("");
+
+  // ✅ 非同期参照用（timeout内など）
+  const indexRef = useRef(index);
+  useEffect(() => {
+    indexRef.current = index;
+  }, [index]);
 
   // ===== 高さ追従（ドラッグ中は無視） =====
   useEffect(() => {
@@ -130,7 +138,6 @@ export default function VideoFeed({ initialGenre, hideGenreMenu, startId }: Prop
 
   // ===== initialGenre 追従 =====
   useEffect(() => {
-    // ✅ /video/[id] の startId がある時は、ここで index=0 に戻すとズレる原因になる
     if (startId) return;
 
     if (initialGenre) {
@@ -161,7 +168,9 @@ export default function VideoFeed({ initialGenre, hideGenreMenu, startId }: Prop
         const normalized: VideoItem[] = list
           .map((v) => {
             const affUrl = (v?.affUrl ?? v?.affiliateUrl) as string | undefined;
-            const affLabel = (v?.affLabel ?? v?.affiliateLabel) as string | undefined;
+            const affLabel = (v?.affLabel ?? v?.affiliateLabel) as
+              | string
+              | undefined;
 
             return {
               id: String(v.id ?? ""),
@@ -217,7 +226,9 @@ export default function VideoFeed({ initialGenre, hideGenreMenu, startId }: Prop
       if (!videoId || !Number.isFinite(count)) return;
 
       setItems((prev) =>
-        prev.map((v) => (v.id === videoId ? { ...v, likeCount: Number(count) } : v))
+        prev.map((v) =>
+          v.id === videoId ? { ...v, likeCount: Number(count) } : v
+        )
       );
     };
 
@@ -228,15 +239,16 @@ export default function VideoFeed({ initialGenre, hideGenreMenu, startId }: Prop
   // ===== フィルタ + 検索 =====
   const viewItems = useMemo(() => {
     const sel = Array.isArray(genres) ? genres : [GENRE_ALL];
-
     let base: VideoItem[] = items;
 
     if (sel.length === 1 && sel[0] === GENRE_LIKES) {
       base = items
         .slice()
         .sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
-    } else if (sel.length === 0 || (sel.length === 1 && sel[0] === GENRE_ALL)) {
-      // ✅ startId の時もシャッフルはしてOK（ただし最初に startId を合わせる）
+    } else if (
+      sel.length === 0 ||
+      (sel.length === 1 && sel[0] === GENRE_ALL)
+    ) {
       base = shuffleWithSeed(items, shuffleSeed);
     } else {
       const want = new Set(sel.map(String));
@@ -261,13 +273,11 @@ export default function VideoFeed({ initialGenre, hideGenreMenu, startId }: Prop
     });
   }, [items, genres, shuffleSeed, query]);
 
-  // ✅ startId を「最初に1回だけ」反映して、必ずその動画を表示する
+  // ✅ startId を最初に1回だけ反映
   useEffect(() => {
     const sid = String(startId ?? "").trim();
     if (!sid) return;
     if (!viewItems.length) return;
-
-    // もう適用済みなら何もしない
     if (appliedStartIdRef.current === sid) return;
 
     const i = viewItems.findIndex((v) => String(v.id) === sid);
@@ -290,16 +300,18 @@ export default function VideoFeed({ initialGenre, hideGenreMenu, startId }: Prop
   const PEEK = 14;
   const cardH = Math.max(0, h - PEEK * 2);
 
-  // prev/current/next だけ描画
+  // prev/current/next
   const windowItems = useMemo(() => {
     const cur = viewItems[index];
     const prevItem = index > 0 ? viewItems[index - 1] : undefined;
-    const nextItem = index + 1 < viewItems.length ? viewItems[index + 1] : undefined;
+    const nextItem =
+      index + 1 < viewItems.length ? viewItems[index + 1] : undefined;
 
-    const out: Array<{ item: VideoItem; pos: -1 | 0 | 1 }> = [];
-    if (prevItem) out.push({ item: prevItem, pos: -1 });
-    if (cur) out.push({ item: cur, pos: 0 });
-    if (nextItem) out.push({ item: nextItem, pos: 1 });
+    const out: Array<{ item: VideoItem; pos: -1 | 0 | 1; absIndex: number }> =
+      [];
+    if (prevItem) out.push({ item: prevItem, pos: -1, absIndex: index - 1 });
+    if (cur) out.push({ item: cur, pos: 0, absIndex: index });
+    if (nextItem) out.push({ item: nextItem, pos: 1, absIndex: index + 1 });
     return out;
   }, [viewItems, index]);
 
@@ -323,10 +335,15 @@ export default function VideoFeed({ initialGenre, hideGenreMenu, startId }: Prop
       setTranslate(dir * h, `transform ${dur}ms ${easing}`);
 
       window.setTimeout(() => {
-        setIndex((cur) => clampIndex(cur + (dir === -1 ? 1 : -1)));
+        setIndex((cur) => {
+          const next = clampIndex(cur + (dir === -1 ? 1 : -1));
+          indexRef.current = next; // ✅ 非同期参照も即更新
+          return next;
+        });
 
         requestAnimationFrame(() => {
           setTranslate(0, "none");
+          window.setTimeout(() => setTranslate(0, "none"), 0);
           animatingRef.current = false;
         });
       }, dur);
@@ -483,6 +500,18 @@ export default function VideoFeed({ initialGenre, hideGenreMenu, startId }: Prop
         <MoreMenu />
       </div>
 
+      {/* ✅ Loading中もスワイプできる案内（スワイプを邪魔しない） */}
+      {!viewItems.length && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center text-white/80 text-sm"
+          style={{ pointerEvents: "none" }}
+        >
+          <div className="mb-4 text-base">Loading...</div>
+          <div>上にスワイプ：次の動画へ</div>
+          <div>下にスワイプ：前の動画へ</div>
+        </div>
+      )}
+
       <div
         ref={trackRef}
         style={{
@@ -492,39 +521,38 @@ export default function VideoFeed({ initialGenre, hideGenreMenu, startId }: Prop
           willChange: "transform",
         }}
       >
-        {windowItems.map(({ item, pos }) => (
-          <div
-            key={item.id}
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              top: h ? `${pos * h + PEEK}px` : `${PEEK}px`,
-              height: `${cardH}px`,
-            }}
-          >
-            <VideoCard
-              // @ts-ignore
-              video={item}
-              // @ts-ignore
-              isActive={pos === 0}
-              // @ts-ignore
-              onNext={() => {
-                if (!animatingRef.current && index < count - 1) finishSlide(-1);
-              }}
-              // @ts-ignore
-              onPrev={() => {
-                if (!animatingRef.current && index > 0) finishSlide(1);
-              }}
-            />
-          </div>
-        ))}
+        {windowItems.map(({ item, pos, absIndex }) => {
+          // ✅ isActive は state(index) で判定する（refを使うと1フレームずれて前がactiveになる）
+          const active = absIndex === index;
 
-        {!viewItems.length && (
-          <div className="grid place-items-center text-white h-[100svh]">
-            Loading...
-          </div>
-        )}
+          return (
+            <div
+              key={`${item.id}:${absIndex}`}
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: h ? `${pos * h + PEEK}px` : `${PEEK}px`,
+                height: `${cardH}px`,
+              }}
+            >
+              <VideoCard
+                // @ts-ignore
+                video={item}
+                // @ts-ignore
+                isActive={active}
+                // @ts-ignore
+                onNext={() => {
+                  if (!animatingRef.current && index < count - 1) finishSlide(-1);
+                }}
+                // @ts-ignore
+                onPrev={() => {
+                  if (!animatingRef.current && index > 0) finishSlide(1);
+                }}
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );
