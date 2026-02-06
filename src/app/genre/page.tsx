@@ -1,14 +1,14 @@
 // src/app/genre/page.tsx
+"use client";
+
+import { useEffect } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { GENRE_GROUPS } from "@/lib/genres";
 
-export const metadata: Metadata = {
-  title: "ジャンル一覧｜アダルトショート動画",
-  description:
-    "アダルトショート動画をジャンル別に一覧表示。縦スワイプで見やすい短尺動画をスマホでサクサク視聴できます。",
-  alternates: { canonical: "/genre" },
-};
+// ✅ metadata は Server Component 専用なので、Client Componentでは export しない
+// 必要なら src/app/genre/layout.tsx に metadata を移すのが正解
+// （いったんスクロール復活を最優先）
 
 type GenreItemLike = {
   key?: string;
@@ -39,6 +39,20 @@ function toEntries(x: unknown): Array<[string, GroupLike]> {
 export default function GenreIndexPage() {
   const entries = toEntries(GENRE_GROUPS);
 
+  // ✅ VideoFeed用に scroll lock してる場合があるので、このページだけ解除
+  useEffect(() => {
+    const prevHtml = document.documentElement.style.overflow;
+    const prevBody = document.body.style.overflow;
+
+    document.documentElement.style.overflow = "auto";
+    document.body.style.overflow = "auto";
+
+    return () => {
+      document.documentElement.style.overflow = prevHtml;
+      document.body.style.overflow = prevBody;
+    };
+  }, []);
+
   return (
     <main className="mx-auto max-w-4xl px-4 py-10 text-sm leading-relaxed text-white bg-black min-h-[100svh]">
       <h1 className="mb-4 text-2xl font-bold">ジャンル一覧（アダルトショート動画）</h1>
@@ -63,7 +77,6 @@ export default function GenreIndexPage() {
                 {items.map((g, idx) => {
                   const slug = (g.key ?? g.slug ?? "").toString().trim();
 
-                  // ✅ ?? と || を混ぜるのでカッコ必須
                   const name = (((g.label ?? g.name ?? slug) || `genre-${idx}`))
                     .toString()
                     .trim();
