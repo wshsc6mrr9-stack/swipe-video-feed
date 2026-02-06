@@ -60,8 +60,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja">
-      {/* iPhoneで“ページごと指に付いてくる”のを止める */}
-      <body className="overflow-hidden overscroll-none">{children}</body>
+      {/* ✅ 全ページを overflow-hidden にすると /genre などがスクロール不能になるので外す */}
+      {/* ✅ “指に付いてくる”抑止は overscroll-none だけ残す */}
+      <body className="overscroll-none">{children}</body>
     </html>
   );
 }
