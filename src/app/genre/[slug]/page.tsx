@@ -16,7 +16,9 @@ export async function generateMetadata({ params }: Props) {
   const slug = norm(raw);
   const meta = GENRE_SEO_MAP[slug];
 
-  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://swipe-video-feed.vercel.app").trim();
+  const siteUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL || "https://swipe-video-feed.vercel.app"
+  ).trim();
   const canonical = `${siteUrl}/genre/${encodeURIComponent(slug)}`;
 
   // slug自体が空なら /genre 相当なので noindex
@@ -97,14 +99,18 @@ export default async function GenrePage({ params }: Props) {
 
   return (
     <AgeGateGuard>
+      {/* ✅ まず説明文（SEOの“中身”）をページ上部に出す */}
+      <main className="max-w-3xl mx-auto p-6 space-y-3">
+        <h1 className="text-2xl font-bold text-white">{meta.label}</h1>
+
+        {/* 100〜200文字が理想（meta.desc をそのまま使う） */}
+        <p className="text-sm text-neutral-300 leading-relaxed">{meta.desc}</p>
+      </main>
+
+      {/* ✅ その下にフィード（高さ100svh） */}
       <div className="h-[100svh] bg-black">
         <VideoFeedNoSSR initialGenre={meta.key as GenreKey} hideGenreMenu />
       </div>
-
-      <main className="max-w-3xl mx-auto p-6 space-y-4">
-        <h1 className="text-2xl font-bold text-white">{meta.label}</h1>
-        <p className="text-sm text-neutral-300 leading-relaxed">{meta.desc}</p>
-      </main>
     </AgeGateGuard>
   );
 }

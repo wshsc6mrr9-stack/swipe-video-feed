@@ -2,13 +2,8 @@
 "use client";
 
 import { useEffect } from "react";
-import type { Metadata } from "next";
 import Link from "next/link";
 import { GENRE_GROUPS } from "@/lib/genres";
-
-// ✅ metadata は Server Component 専用なので、Client Componentでは export しない
-// 必要なら src/app/genre/layout.tsx に metadata を移すのが正解
-// （いったんスクロール復活を最優先）
 
 type GenreItemLike = {
   key?: string;
@@ -39,7 +34,7 @@ function toEntries(x: unknown): Array<[string, GroupLike]> {
 export default function GenreIndexPage() {
   const entries = toEntries(GENRE_GROUPS);
 
-  // ✅ VideoFeed用に scroll lock してる場合があるので、このページだけ解除
+  // ✅ このページだけスクロールロック解除（VideoFeedの影響対策）
   useEffect(() => {
     const prevHtml = document.documentElement.style.overflow;
     const prevBody = document.body.style.overflow;
@@ -76,8 +71,7 @@ export default function GenreIndexPage() {
               <ul className="space-y-1">
                 {items.map((g, idx) => {
                   const slug = (g.key ?? g.slug ?? "").toString().trim();
-
-                  const name = (((g.label ?? g.name ?? slug) || `genre-${idx}`))
+                  const name = (g.label ?? g.name ?? slug ?? `genre-${idx}`)
                     .toString()
                     .trim();
 

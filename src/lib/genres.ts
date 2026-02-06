@@ -284,6 +284,13 @@ export const GENRE_LIST: GenreItem[] = [
   ...GENRE_GROUPS.flatMap((g) => g.items),
 ];
 
+// ✅ ここだけ追加：SEO説明文テンプレ（120〜180文字くらい）
+function genreDesc(label: string): string {
+  return `${label}をテーマにした短尺動画をまとめています。
+スマートフォンでの視聴に最適化された縦型動画を中心に掲載し、スワイプ操作で次々に楽しめます。
+テンポよく作品をチェックしたい方におすすめのジャンルです。`;
+}
+
 export const GENRE_SEO_MAP: Record<string, { key: GenreKey; label: string; desc: string }> =
   Object.fromEntries(
     GENRE_GROUPS.flatMap((g) =>
@@ -294,7 +301,8 @@ export const GENRE_SEO_MAP: Record<string, { key: GenreKey; label: string; desc:
           {
             key: k,
             label: it.label,
-            desc: `${it.label}の短尺動画をまとめています。スマホ向けに連続再生できます。`,
+            // ✅ ここだけ変更：desc を長文化（薄いページ対策）
+            desc: genreDesc(it.label),
           },
         ] as const;
       })
