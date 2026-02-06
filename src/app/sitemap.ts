@@ -3,10 +3,12 @@ import type { MetadataRoute } from "next";
 import { GENRE_SEO_MAP } from "@/lib/genres";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const base = "https://swipe-video-feed.vercel.app";
+  const base = (process.env.NEXT_PUBLIC_SITE_URL || "https://swipe-video-feed.vercel.app")
+    .trim()
+    .replace(/\/+$/, "");
+
   const now = new Date();
 
-  // ✅ 固定ページ
   const routes = [
     "/",
     "/adult-short-videos",
@@ -32,8 +34,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
             : 0.6,
   }));
 
-  // ✅ /genre/[slug] を全部追加
-  const genrePages: MetadataRoute.Sitemap = Object.keys(GENRE_SEO_MAP || {})
+  // ✅ GENRE_SEO_MAP が Object でも Map でも拾えるように
+  const slugs: string[] =
+    GENRE_SEO_MAP instanceof Map
+      ? Array.from(GENRE_SEO_MAP.keys()).map((s) => String(s))
+      : Object.keys(GENRE_SEO_MAP || {});
+
+  const genrePages: MetadataRoute.Sitemap = slugs
     .map((slug) => String(slug).trim().toLowerCase())
     .filter(Boolean)
     .map((slug) => ({
