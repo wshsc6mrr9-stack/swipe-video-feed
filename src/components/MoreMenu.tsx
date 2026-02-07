@@ -51,19 +51,32 @@ export default function MoreMenu() {
           <div style={panelTitle}>メニュー</div>
 
           <div style={{ display: "grid", gap: 10 }}>
+            {/* ✅ 追加：ジャンル一覧 */}
+            <Link style={itemBtn} href="/genre" onClick={() => setOpen(false)}>
+              ジャンル一覧
+            </Link>
+
             <Link style={itemBtn} href="/info" onClick={() => setOpen(false)}>
               サイト情報
             </Link>
             <Link style={itemBtn} href="/about" onClick={() => setOpen(false)}>
               運営者情報
             </Link>
-            <Link style={itemBtn} href="/privacy" onClick={() => setOpen(false)}>
+            <Link
+              style={itemBtn}
+              href="/privacy"
+              onClick={() => setOpen(false)}
+            >
               プライバシー
             </Link>
             <Link style={itemBtn} href="/terms" onClick={() => setOpen(false)}>
               利用規約
             </Link>
-            <Link style={itemBtn} href="/contact" onClick={() => setOpen(false)}>
+            <Link
+              style={itemBtn}
+              href="/contact"
+              onClick={() => setOpen(false)}
+            >
               お問い合わせ
             </Link>
 
