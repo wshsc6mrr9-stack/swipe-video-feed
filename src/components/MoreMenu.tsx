@@ -56,6 +56,15 @@ export default function MoreMenu() {
               ジャンル一覧
             </Link>
 
+            {/* ✅ 追加：adult-short-videos への導線 */}
+            <Link
+              style={itemBtn}
+              href="/adult-short-videos"
+              onClick={() => setOpen(false)}
+            >
+              アダルトショート動画
+            </Link>
+
             <Link style={itemBtn} href="/info" onClick={() => setOpen(false)}>
               サイト情報
             </Link>
