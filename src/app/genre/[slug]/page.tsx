@@ -64,7 +64,7 @@ export default async function GenrePage({ params }: Props) {
   const raw = String(p?.slug ?? "");
   const slug = norm(raw);
 
-  // slugが空なら「/genre/」扱いなので404にする（変なURL対策）
+  // slugが空なら「/genre/」扱いなので404（変なURL対策）
   if (!slug) notFound();
 
   const meta = GENRE_SEO_MAP[slug];
@@ -104,12 +104,17 @@ export default async function GenrePage({ params }: Props) {
         <h1 className="text-2xl font-bold text-white">{meta.label}</h1>
 
         {/* 100〜200文字が理想（meta.desc をそのまま使う） */}
-        <p className="text-sm text-neutral-300 leading-relaxed">{meta.desc}</p>
+        <p className="text-sm text-neutral-300 leading-relaxed">
+          {meta.desc}
+        </p>
       </main>
 
       {/* ✅ その下にフィード（高さ100svh） */}
       <div className="h-[100svh] bg-black">
-        <VideoFeedNoSSR initialGenre={meta.key as GenreKey} hideGenreMenu />
+        <VideoFeedNoSSR
+          initialGenre={meta.key as GenreKey}
+          hideGenreMenu
+        />
       </div>
     </AgeGateGuard>
   );

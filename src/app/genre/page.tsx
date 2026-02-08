@@ -50,15 +50,19 @@ export default function GenreIndexPage() {
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-10 text-sm leading-relaxed text-white bg-black min-h-[100svh]">
-      <h1 className="mb-4 text-2xl font-bold">ジャンル一覧（アダルトショート動画）</h1>
+      <h1 className="mb-4 text-2xl font-bold">
+        ジャンル一覧（アダルトショート動画）
+      </h1>
 
       <p className="mb-8 text-white/80">
-        アダルトショート動画をジャンル別にまとめています。縦スワイプで見やすい短尺動画を、好みのジャンルから探せます。
+        アダルトショート動画をジャンル別にまとめています。
+        縦スワイプで見やすい短尺動画を、好みのジャンルから探せます。
       </p>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         {entries.map(([groupKey, group]) => {
-          const title = group?.label ?? group?.title ?? group?.name ?? groupKey;
+          const title =
+            group?.label ?? group?.title ?? group?.name ?? groupKey;
           const items = Array.isArray(group?.items) ? group.items : [];
 
           return (
@@ -71,7 +75,12 @@ export default function GenreIndexPage() {
               <ul className="space-y-1">
                 {items.map((g, idx) => {
                   const slug = (g.key ?? g.slug ?? "").toString().trim();
-                  const name = (g.label ?? g.name ?? slug ?? `genre-${idx}`)
+                  const name = (
+                    g.label ??
+                    g.name ??
+                    slug ??
+                    `genre-${idx}`
+                  )
                     .toString()
                     .trim();
 
@@ -81,7 +90,7 @@ export default function GenreIndexPage() {
                     <li key={`${slug}-${idx}`}>
                       <Link
                         href={`/genre/${encodeURIComponent(slug)}`}
-                        className="hover:underline text-white/90 hover:text-white"
+                        className="text-white/90 hover:text-white hover:underline"
                         prefetch={false}
                       >
                         {name}
