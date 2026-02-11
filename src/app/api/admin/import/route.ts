@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/upstash"; // ご自身のUpstash設定に合わせてください
 import { nanoid } from "nanoid";
+import { revalidatePath } from "next/cache"; // 👈 キャッシュクリア用の魔法を追加
 
 export const runtime = "nodejs";
 
@@ -35,6 +36,10 @@ export async function POST(req: Request) {
       score: newVideo.createdAt,
       member: JSON.stringify(newVideo)
     });
+
+    // 💡 キャッシュを破棄して最新状態を画面に反映させる
+    revalidatePath("/");
+    revalidatePath("/admin");
 
     // 5. ✅ 成功レスポンス
     return NextResponse.json({ ok: true, inserted: 1, videoId: newVideo.id });
