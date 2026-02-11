@@ -1,4 +1,6 @@
-// src/app/api/videos/route.ts
+// 魔法の設定：このAPIは絶対にキャッシュ（保存）せず、毎回必ずRedisから最新を取得する！
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
 import { addVideo, deleteVideoById, listVideos } from "@/lib/videosStore";
 
