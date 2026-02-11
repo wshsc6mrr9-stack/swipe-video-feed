@@ -1,6 +1,7 @@
 import { Redis } from "@upstash/redis";
 
-const redis = new Redis({
+// 👇 ここに export を追加しました！これで外部ファイルから redis を直接呼び出せます。
+export const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL!,
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
