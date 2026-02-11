@@ -1,4 +1,7 @@
-// src/app/page.tsx
+// 魔法の設定：このページは絶対にキャッシュ（保存）せず、常に最新のデータを取得する！
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import VideoFeedNoSSR from "@/app/VideoFeedNoSSR";
 
 type SearchParamsPromise = Promise<Record<string, string | string[] | undefined>>;
