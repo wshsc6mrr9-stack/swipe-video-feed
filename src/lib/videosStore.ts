@@ -4,36 +4,61 @@ const KEY = "videos";
 
 export type VideoItem = {
   id: string;
-  title?: string;
-  url?: string;
+  title: string;
+  url: string;
   poster?: string;
+  affUrl?: string;
+  affLabel?: string;
+  genres?: string[];
+  createdAt: number;
   [key: string]: any;
 };
 
-export async function addVideo(video: any): Promise<VideoItem> {
-  // 🔒 必ず「プレーンな object → JSON文字列」にする
-  const normalized: VideoItem = {
-    id: String(video.id ?? crypto.randomUUID()),
-    title: video.title ?? "",
-    url: video.url ?? "",
-    poster: video.poster ?? "",
-    ...video,
-  };
+/** ✅ 動画を追加する */
+export async function addVideo(video: any): Promise<VideoItem | null> {
+  try {
+    const normalized: VideoItem = {
+      id: String(video.id ?? crypto.randomUUID()),
+      title: String(video.title || ""),
+      url: String(video.url || ""),
+      poster: String(video.poster || ""),
+      affUrl: String(video.affUrl || ""),
+      affLabel: String(video.affLabel || "商品を見る"),
+      genres: Array.isArray(video.genres) ? video.genres : ["other"],
+      createdAt: Date.now(),
+    };
 
-  await redis.lpush(KEY, JSON.stringify(normalized));
-  return normalized;
+    // LPUSH で Redis のリストの先頭に追加
+    await redis.lpush(KEY, JSON.stringify(normalized));
+    return normalized;
+  } catch (e) {
+    console.error("Redis Add Error:", e);
+    return null;
+  }
 }
 
+/** ✅ 動画一覧を取得する */
 export async function listVideos(): Promise<VideoItem[]> {
-  const rows = await redis.lrange(KEY, 0, -1);
+  try {
+    const rows = await redis.lrange(KEY, 0, -1);
+    if (!rows) return [];
 
-  return rows
-    .map((r) => {
-      try {
-        return JSON.parse(r);
-      } catch {
-        return null; // 💥 壊れたデータは無視
-      }
-    })
-    .filter(Boolean) as VideoItem[];
+    return rows
+      .map((r) => {
+        try {
+          return typeof r === "string" ? JSON.parse(r) : r;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean) as VideoItem[];
+  } catch (e) {
+    console.error("Redis List Error:", e);
+    return [];
+  }
+}
+
+/** ✅ 全削除（必要であれば） */
+export async function clearAllVideos(): Promise<void> {
+  await redis.del(KEY);
 }
