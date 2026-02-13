@@ -1,9 +1,10 @@
 import { Redis } from "@upstash/redis";
+import { nanoid } from "nanoid";
 
 export type VideoItem = {
   id: string;
   title: string;
-  url: string; 
+  url: string;
   poster?: string;
   affUrl?: string;
   affLabel?: string;
@@ -13,29 +14,52 @@ export type VideoItem = {
 };
 
 const redis = Redis.fromEnv();
-const KEY = "videos:all";
 
-async function readAll(): Promise<VideoItem[]> {
-  const data = await redis.get<VideoItem[]>(KEY);
-  return Array.isArray(data) ? data : [];
+// 🔑 Redis keys
+const LIST_KEY = "videos:list";       // ID のみを積む
+const ITEM_PREFIX = "videos:item:";   // 実体
+
+/* =======================
+   一覧取得（ページング対応）
+======================= */
+export async function listVideos(
+  page = 1,
+  limit = 50
+): Promise<{ items: VideoItem[]; total: number }> {
+  const start = (page - 1) * limit;
+  const end = start + limit - 1;
+
+  const [ids, total] = await Promise.all([
+    redis.lrange<string>(LIST_KEY, start, end),
+    redis.llen(LIST_KEY),
+  ]);
+
+  if (!ids.length) {
+    return { items: [], total };
+  }
+
+  const keys = ids.map((id) => ITEM_PREFIX + id);
+  const items = (await redis.mget<VideoItem[]>(...keys))
+    .filter(Boolean) as VideoItem[];
+
+  return { items, total };
 }
 
-async function writeAll(items: VideoItem[]) {
-  await redis.set(KEY, items);
-}
-
-export async function listVideos(): Promise<VideoItem[]> {
-  const items = await readAll();
-  return items.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
-}
-
+/* =======================
+   🔥 強制追加（重複無視）
+======================= */
 export async function addVideo(input: any): Promise<VideoItem> {
-  const items = await readAll();
-  
+  if (!input?.videoUrl && !input?.url) {
+    throw new Error("INVALID_PAYLOAD");
+  }
+
+  const id = "v_" + nanoid(12);
+  const itemKey = ITEM_PREFIX + id;
+
   const item: VideoItem = {
-    id: `v_${Date.now()}`,
+    id,
     title: input.title || "無題",
-    url: input.videoUrl || input.url || "", // 両方のキーに対応
+    url: input.videoUrl || input.url,
     poster: input.poster || "",
     affUrl: input.affUrl || "",
     affLabel: input.affLabel || "商品を見る",
@@ -44,15 +68,29 @@ export async function addVideo(input: any): Promise<VideoItem> {
     createdAt: Date.now(),
   };
 
-  items.push(item);
-  await writeAll(items);
+  // 実体保存
+  await redis.set(itemKey, item);
+
+  // 🔥 一覧に必ず追加（先頭）
+  await redis.lpush(LIST_KEY, id);
+
+  console.log("[ADD_VIDEO_OK]", id, item.title);
+
   return item;
 }
 
-export async function deleteVideoById(id: string): Promise<{ removed: number }> {
-  const items = await readAll();
-  const next = items.filter((v) => v.id !== id);
-  const removed = items.length - next.length;
-  await writeAll(next);
-  return { removed };
+/* =======================
+   削除
+======================= */
+export async function deleteVideoById(
+  id: string
+): Promise<{ removed: number }> {
+  const itemKey = ITEM_PREFIX + id;
+
+  await Promise.all([
+    redis.del(itemKey),
+    redis.lrem(LIST_KEY, 0, id),
+  ]);
+
+  return { removed: 1 };
 }
