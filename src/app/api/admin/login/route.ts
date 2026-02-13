@@ -1,33 +1,29 @@
-// src/app/api/admin/login/route.ts
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => null);
-  const password = typeof body?.password === "string" ? body.password : "";
+  try {
+    const { password } = await req.json();
 
-  const adminPassword = process.env.ADMIN_PASSWORD;
-  if (!adminPassword) {
+    if (password !== process.env.ADMIN_PASSWORD) {
+      return NextResponse.json(
+        { ok: false, error: "invalid password" },
+        { status: 401 }
+      );
+    }
+
+    const cookieStore = await cookies();
+    cookieStore.set("admin", "1", {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+    });
+
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
     return NextResponse.json(
-      { ok: false, error: "ADMIN_PASSWORD is not set on server" },
+      { ok: false, error: e?.message ?? "login failed" },
       { status: 500 }
     );
   }
-
-  if (password !== adminPassword) {
-    return NextResponse.json({ ok: false, error: "invalid password" }, { status: 401 });
-  }
-
-  const res = NextResponse.json({ ok: true });
-
-  res.cookies.set({
-    name: "admin_auth",
-    value: "1",
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7, // 7日
-  });
-
-  return res;
 }
