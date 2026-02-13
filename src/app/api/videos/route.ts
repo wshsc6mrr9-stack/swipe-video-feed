@@ -1,19 +1,24 @@
-import { redis } from "@/lib/redis";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-const KEY = "videos"; // ← 絶対これ一択にする
+import { NextResponse } from "next/server";
+import { listVideos } from "@/lib/videosStore";
 
-export async function addVideo(video: any) {
-  const item = {
-    id: crypto.randomUUID(),
-    ...video,
-    createdAt: Date.now(),
-  };
-
-  await redis.lpush(KEY, JSON.stringify(item));
-  return item;
-}
-
-export async function listVideos() {
-  const rows = await redis.lrange(KEY, 0, -1);
-  return rows.map((r) => JSON.parse(r));
+export async function GET() {
+  try {
+    const items = await listVideos();
+    return NextResponse.json(
+      { ok: true, items },
+      {
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      }
+    );
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: e?.message || "LIST_FAILED" },
+      { status: 500 }
+    );
+  }
 }
