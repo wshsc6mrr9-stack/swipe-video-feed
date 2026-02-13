@@ -21,8 +21,9 @@ function absUrl(pathOrUrl: string) {
 export default async function Head({ params }: Props) {
   const id = params.id;
 
-  const videos = await listVideos();
-  const v = videos.find((x) => String(x.id) === String(id));
+  // ✅ items を必ず取り出す
+  const { items } = await listVideos();
+  const v = items.find((x) => String(x.id) === String(id));
 
   const base =
     process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
@@ -34,13 +35,12 @@ export default async function Head({ params }: Props) {
   const title = (v?.title || "").trim() || "Video";
   const desc = title;
 
-  // ✅ 動画URL（mp4推奨）
+  // 動画URL（mp4）
   const videoUrl = absUrl((v?.url || "").trim());
 
-  // ✅ サムネ（動画ごとが理想。無い場合は /og.png にフォールバック）
-  const poster = absUrl(((v?.poster as string) || "/og.png").trim());
+  // サムネ（なければ og.png）
+  const poster = absUrl((v?.poster || "/og.png").trim());
 
-  // サイズ（X用）
   const w = "1280";
   const h = "720";
 
@@ -70,12 +70,14 @@ export default async function Head({ params }: Props) {
       <meta name="twitter:title" content={title} />
       <meta name="twitter:description" content={desc} />
       <meta name="twitter:image" content={poster} />
-
       <meta name="twitter:player" content={embedUrl} />
       <meta name="twitter:player:width" content={w} />
       <meta name="twitter:player:height" content={h} />
       <meta name="twitter:player:stream" content={videoUrl} />
-      <meta name="twitter:player:stream:content_type" content="video/mp4" />
+      <meta
+        name="twitter:player:stream:content_type"
+        content="video/mp4"
+      />
     </>
   );
 }
