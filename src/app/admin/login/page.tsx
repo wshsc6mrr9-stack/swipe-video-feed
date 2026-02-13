@@ -1,68 +1,33 @@
-// src/app/admin/login/page.tsx
-"use client";
+import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
+import { addVideo } from "@/lib/videosStore";
+import { revalidatePath } from "next/cache";
 
-import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+export async function POST(req: Request) {
+  try {
+    // ✅ cookies() は async
+    const cookieStore = await cookies();
+    const admin = cookieStore.get("admin");
 
-export default function AdminLoginPage() {
-  const router = useRouter();
-  const [password, setPassword] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setErr(null);
-    setLoading(true);
-
-    try {
-      const r = await fetch("/api/admin/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
-        credentials: "include",
-      });
-
-      const j = await r.json().catch(() => null);
-
-      if (!r.ok || !j?.ok) {
-        setErr(j?.error ?? `login failed (${r.status})`);
-        setLoading(false);
-        return;
-      }
-
-      router.replace("/admin");
-      router.refresh();
-    } catch (e: any) {
-      setErr(e?.message ?? "network error");
-    } finally {
-      setLoading(false);
+    if (!admin || admin.value !== "1") {
+      return NextResponse.json(
+        { ok: false, error: "Unauthorized" },
+        { status: 401 }
+      );
     }
+
+    const body = await req.json();
+
+    await addVideo(body);
+
+    revalidatePath("/");
+    revalidatePath("/admin");
+
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "add failed" },
+      { status: 500 }
+    );
   }
-
-  return (
-    <main className="min-h-screen bg-black text-white flex items-center justify-center p-6">
-      <form onSubmit={onSubmit} className="w-full max-w-md space-y-4">
-        <h1 className="text-2xl font-bold">Admin Login</h1>
-
-        <input
-          className="w-full px-4 py-3 rounded bg-neutral-800 outline-none"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="password"
-        />
-
-        <button
-          className="w-full px-4 py-3 rounded bg-white text-black font-bold disabled:opacity-60"
-          disabled={loading}
-          type="submit"
-        >
-          {loading ? "..." : "ログイン"}
-        </button>
-
-        {err ? <p className="text-red-400 text-sm">{err}</p> : null}
-      </form>
-    </main>
-  );
 }
