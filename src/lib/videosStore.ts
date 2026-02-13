@@ -4,34 +4,36 @@ const KEY = "videos";
 
 export type VideoItem = {
   id: string;
-  title: string;
-  url: string;
+  title?: string;
+  url?: string;
   poster?: string;
-  affUrl?: string;
-  affLabel?: string;
-  genres?: string[];
-  genre?: string;
-  createdAt: number;
+  [key: string]: any;
 };
 
-export async function addVideo(input: any): Promise<VideoItem> {
-  const video: VideoItem = {
-    id: crypto.randomUUID(),
-    title: String(input.title || "").trim() || "Untitled",
-    url: String(input.url || "").trim(),
-    poster: String(input.poster || "").trim(),
-    affUrl: String(input.affUrl || "").trim(),
-    affLabel: String(input.affLabel || "").trim(),
-    genres: Array.isArray(input.genres) ? input.genres : [],
-    genre: String(input.genre || "other"),
-    createdAt: Date.now(),
+export async function addVideo(video: any): Promise<VideoItem> {
+  // 🔒 必ず「プレーンな object → JSON文字列」にする
+  const normalized: VideoItem = {
+    id: String(video.id ?? crypto.randomUUID()),
+    title: video.title ?? "",
+    url: video.url ?? "",
+    poster: video.poster ?? "",
+    ...video,
   };
 
-  await redis.lpush(KEY, JSON.stringify(video));
-  return video;
+  await redis.lpush(KEY, JSON.stringify(normalized));
+  return normalized;
 }
 
 export async function listVideos(): Promise<VideoItem[]> {
   const rows = await redis.lrange(KEY, 0, -1);
-  return rows.map((r) => JSON.parse(r));
+
+  return rows
+    .map((r) => {
+      try {
+        return JSON.parse(r);
+      } catch {
+        return null; // 💥 壊れたデータは無視
+      }
+    })
+    .filter(Boolean) as VideoItem[];
 }
