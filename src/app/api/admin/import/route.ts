@@ -22,6 +22,7 @@ export async function POST(req: Request) {
 
     revalidatePath("/");
     revalidatePath("/api/videos");
+    revalidatePath("/admin");
 
     return NextResponse.json({
       ok: true,
