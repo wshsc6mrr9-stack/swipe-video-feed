@@ -8,7 +8,7 @@ type VideoItem = {
   title: string;
   url: string;
   poster?: string;
-  affUrl?: string;
+  affUrl?: string; // アフィURL
   affLabel?: string;
   createdAt: number;
   genres?: string[];
@@ -38,8 +38,6 @@ export default function AdminManagePage() {
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(50);
-
-  // ✅ 複数選択用のState
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   async function load() {
@@ -55,7 +53,7 @@ export default function AdminManagePage() {
       const list = Array.isArray(j.items) ? j.items : [];
       setItems(list);
       setLimit(50);
-      setSelectedIds([]); // リロード時に選択解除
+      setSelectedIds([]);
     } finally {
       setBusy(false);
     }
@@ -65,7 +63,6 @@ export default function AdminManagePage() {
     load();
   }, []);
 
-  // ✅ 単一削除
   async function onDelete(id: string) {
     if (!confirm("この動画を削除する？")) return;
     setErr(null);
@@ -82,7 +79,6 @@ export default function AdminManagePage() {
     }
   }
 
-  // ✅ 一括削除
   async function onBulkDelete() {
     const count = selectedIds.length;
     if (count === 0) return;
@@ -117,7 +113,6 @@ export default function AdminManagePage() {
 
   const shown = useMemo(() => filtered.slice(0, limit), [filtered, limit]);
 
-  // ✅ 全選択ロジック
   const isAllSelected = shown.length > 0 && shown.every(v => selectedIds.includes(v.id));
   const toggleSelectAll = () => {
     if (isAllSelected) {
@@ -214,13 +209,25 @@ export default function AdminManagePage() {
 
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="font-bold break-words text-lg">{v.title}</div>
-                  <div className="text-xs text-blue-400 break-all hover:underline"><a href={v.url} target="_blank" rel="noreferrer">{v.url}</a></div>
+                  <div className="text-xs text-blue-400 break-all hover:underline mb-1">
+                    <a href={v.url} target="_blank" rel="noreferrer">動画URL: {v.url}</a>
+                  </div>
+                  {/* ★アフィリエイトURLの表示を追加 */}
+                  {v.affUrl && (
+                    <div className="text-xs text-green-400 break-all hover:underline mb-1">
+                      <a href={v.affUrl} target="_blank" rel="noreferrer">アフィURL: {v.affUrl}</a>
+                    </div>
+                  )}
                   <div className="text-xs text-neutral-400 italic">ID: {v.id} / {fmtDate(v.createdAt)}</div>
                   <div className="text-xs text-neutral-500">Genres: <span className="text-neutral-300">{getGenres(v).join(", ")}</span></div>
                   
                   <div className="flex flex-wrap gap-2 pt-3">
                     <button className="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-white text-xs" onClick={() => navigator.clipboard.writeText(v.id)}>IDコピー</button>
-                    <button className="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-white text-xs" onClick={() => navigator.clipboard.writeText(v.url)}>URLコピー</button>
+                    <button className="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-white text-xs" onClick={() => navigator.clipboard.writeText(v.url)}>動画URLコピー</button>
+                    {/* ★アフィURLコピーボタンの追加 */}
+                    {v.affUrl && (
+                      <button className="px-3 py-1.5 rounded bg-green-600/20 hover:bg-green-600/30 text-green-400 text-xs border border-green-500/30" onClick={() => navigator.clipboard.writeText(v.affUrl!)}>アフィURLコピー</button>
+                    )}
                   </div>
                 </div>
 
