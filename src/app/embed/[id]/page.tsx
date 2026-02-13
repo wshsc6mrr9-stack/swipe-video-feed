@@ -9,8 +9,10 @@ type Props = {
 export default async function EmbedPage({ params }: Props) {
   const id = params.id;
 
-  const videos = await listVideos();
-  const v = videos.find((x) => String(x.id) === String(id));
+  // ✅ listVideos は { items, total }
+  const { items } = await listVideos();
+
+  const v = items.find((x) => String(x.id) === String(id));
   if (!v) return notFound();
 
   const title = (v.title || "").trim() || "Video";
@@ -23,9 +25,25 @@ export default async function EmbedPage({ params }: Props) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{title}</title>
         <style>{`
-          html, body { margin:0; padding:0; background:#000; height:100%; }
-          .wrap { width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
-          video { width:100%; height:100%; object-fit:contain; background:#000; }
+          html, body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            height: 100%;
+          }
+          .wrap {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+          video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+          }
         `}</style>
       </head>
       <body>
