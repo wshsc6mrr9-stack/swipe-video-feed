@@ -17,20 +17,21 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
+
     const newVideo = await addVideo(body);
 
     revalidatePath("/");
-    revalidatePath("/api/videos");
     revalidatePath("/admin");
+    revalidatePath("/api/videos");
 
     return NextResponse.json({
       ok: true,
       inserted: newVideo ? 1 : 0,
       video: newVideo,
     });
-  } catch (error: any) {
+  } catch (e: any) {
     return NextResponse.json(
-      { ok: false, error: error?.message || "UNKNOWN_ERROR" },
+      { ok: false, error: e?.message || "UNKNOWN_ERROR" },
       { status: 500 }
     );
   }
