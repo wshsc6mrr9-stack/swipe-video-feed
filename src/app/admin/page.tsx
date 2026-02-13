@@ -1,4 +1,3 @@
-// ===== src/app/admin/page.tsx =====
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -121,6 +120,10 @@ export default function AdminPage() {
 
   // ✅ トースト（ダイアログは出さない）
   const [toast, setToast] = useState<string | null>(null);
+
+  // ✅ あなたのパスワード（Bearerトークンとして使用）
+  const AUTH_TOKEN = "mdoskldmnvopdkmfjsps6hd9hs9hd0d";
+
   function showToast(msg: string) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 1200);
@@ -563,7 +566,10 @@ export default function AdminPage() {
 
       const r = await fetch("/api/videos", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${AUTH_TOKEN}` // ✅ ヘッダー追加
+        },
         body: JSON.stringify({
           title: normalizeText(title),
           url: normalizeUrl(url),
@@ -619,7 +625,10 @@ export default function AdminPage() {
 
         const r = await fetch("/api/videos", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${AUTH_TOKEN}` // ✅ ヘッダー追加
+          },
           body: JSON.stringify({
             title: t,
             url: u,
