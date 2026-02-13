@@ -1,3 +1,4 @@
+// ===== src/app/admin/page.tsx =====
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -32,6 +33,16 @@ function normalizeKey(v: any) {
     .replace(/_/g, "-")
     .replace(/\s+/g, "-")
     .replace(/^#/, "");
+}
+
+function splitWords(s: string) {
+  const t = normalizeText(s);
+  if (!t) return [];
+  return t
+    .replace(/[“”"']/g, "")
+    .split(/[\s#＃/／｜|・,、:：()（）【】\[\]{}「」<>]+/g)
+    .map((x) => normalizeText(x))
+    .filter(Boolean);
 }
 
 function sanitizeTitle(raw: string) {
@@ -74,12 +85,15 @@ export default function AdminPage() {
   const [affLabel, setAffLabel] = useState("");
   const [sourcePageUrl, setSourcePageUrl] = useState("");
   const [fanzaJson, setFanzaJson] = useState("");
+  const fanzaRef = useRef<HTMLTextAreaElement | null>(null);
   const [genres, setGenres] = useState<GenreKey[]>(["other"]);
+  const [genreQuery, setGenreQuery] = useState("");
   const [genreOpen, setGenreOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  // あなたのパスワード（Bearerトークンとして使用）
   const AUTH_TOKEN = "mdoskldmnvopdkmfjsps6hd9hs9hd0d";
 
   function showToast(msg: string) {
@@ -89,14 +103,20 @@ export default function AdminPage() {
 
   const genreIndex = useMemo(() => {
     const map = new Map<string, GenreKey>();
+    const allKeys: GenreKey[] = [];
+    const allNorms: Array<{ norm: string; key: GenreKey }> = [];
     for (const g of GENRE_GROUPS) {
       for (const it of g.items) {
         const k = it.key as GenreKey;
-        map.set(normalizeKey(it.key), k);
-        map.set(normalizeKey(it.label), k);
+        allKeys.push(k);
+        const kn = normalizeKey(it.key);
+        const ln = normalizeKey(it.label);
+        if (kn) { map.set(kn, k); allNorms.push({ norm: kn, key: k }); }
+        if (ln) { map.set(ln, k); allNorms.push({ norm: ln, key: k }); }
       }
     }
-    return map;
+    allNorms.sort((a, b) => b.norm.length - a.norm.length);
+    return { map, allKeys: uniq(allKeys), allNorms };
   }, []);
 
   const keyToLabel = useMemo(() => {
@@ -105,6 +125,22 @@ export default function AdminPage() {
       for (const it of g.items) { map.set(String(it.key), String(it.label)); }
     }
     return map;
+  }, []);
+
+  const jpToKey = useMemo(() => {
+    const dict: Array<[GenreKey, string[]]> = [
+      ["debut", ["デビュー", "新人", "初av", "初AV", "初出演"]],
+      ["solo", ["単体", "ソロ", "1人"]],
+      ["amateur", ["素人"]],
+      ["exclusive", ["独占配信", "FANZA限定"]],
+      ["kiss", ["キス", "接吻"]],
+      ["blowjob", ["フェラ"]],
+      ["creampie", ["中出し"]],
+      ["vertical-video", ["縦動画", "スマホ推奨縦動画"]],
+      ["slender", ["スレンダー"]],
+      ["cosplay", ["コスプレ"]],
+    ];
+    return dict;
   }, []);
 
   const normalizedSelected = useMemo(() => {
@@ -118,15 +154,18 @@ export default function AdminPage() {
       const exists = cur.includes(key);
       let next = exists ? cur.filter((x) => x !== key) : [...cur, key];
       if (next.length === 0) next = ["other"];
+      if (next.length >= 2 && next.includes("other")) next = next.filter((x) => x !== "other");
       return uniq(next) as GenreKey[];
     });
+    setGenreQuery("");
   }
 
   async function load() {
     setErr(null);
     const r = await fetch("/api/videos", { cache: "no-store" });
     const j = await r.json().catch(() => null);
-    if (r.ok && j?.items) setItems(j.items);
+    if (!r.ok || !j?.ok) { setErr(j?.error ?? "load failed"); return; }
+    setItems(Array.isArray(j.items) ? j.items : []);
   }
 
   useEffect(() => { load(); }, []);
@@ -149,24 +188,32 @@ export default function AdminPage() {
     let tokens = Array.isArray(source) ? source.map(x => normalizeText(x)) : String(source).split(/[,\n]/g).map(x => normalizeText(x));
     const matched: GenreKey[] = [];
     for (const tok of tokens) {
-      const k = genreIndex.get(normalizeKey(tok));
+      const k = genreIndex.map.get(normalizeKey(tok));
       if (k) matched.push(k);
     }
-    setGenres(matched.length > 0 ? uniq(matched) : ["other"]);
+    const picked = uniq(matched);
+    setGenres(picked.length > 0 ? (picked as GenreKey[]) : ["other"]);
   }
 
+  const autoWantedRef = useRef(false);
   useEffect(() => {
-    const h = window.location.hash || "";
-    const m = h.match(/(?:^|[#&])import=([^&]+)/);
-    if (m?.[1]) {
-      try {
-        const json = decodeURIComponent(m[1]);
-        setFanzaJson(json);
-        applyPasteText(json);
-        showToast("取り込みOK");
-        window.history.replaceState({}, "", window.location.pathname);
-      } catch {}
+    const sp = new URLSearchParams(window.location.search);
+    let enc = sp.get("fanza") || sp.get("import");
+    let fromHash = false;
+    if (!enc) {
+      const h = window.location.hash || "";
+      const m = h.match(/(?:^|[#&])import=([^&]+)/);
+      if (m?.[1]) { enc = m[1]; fromHash = true; }
     }
+    if (!enc) return;
+    autoWantedRef.current = fromHash || sp.get("auto") === "1";
+    try {
+      const json = decodeURIComponent(enc);
+      setFanzaJson(json);
+      applyPasteText(json);
+      showToast("取り込みOK");
+      window.history.replaceState({}, "", window.location.pathname);
+    } catch {}
   }, []);
 
   async function onAdd(e: React.FormEvent) {
@@ -178,98 +225,96 @@ export default function AdminPage() {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${AUTH_TOKEN}`
+          "Authorization": `Bearer ${AUTH_TOKEN}` // ✅ 認証追加
         },
         body: JSON.stringify({
           title, url, poster, affUrl, affLabel,
           genres: normalizedSelected.length ? normalizedSelected : ["other"]
         }),
       });
-      if (r.ok) {
-        setTitle(""); setUrl(""); setPoster(""); setAffUrl(""); setAffLabel("");
-        setGenres(["other"]); setFanzaJson("");
-        showToast("追加OK");
-        load();
-      } else {
-        setErr("追加失敗");
-      }
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) { setErr(j?.error ?? `add failed (${r.status})`); return; }
+      setTitle(""); setUrl(""); setPoster(""); setAffUrl(""); setAffLabel("");
+      setGenres(["other"]); setFanzaJson("");
+      await load();
+      showToast("追加OK");
     } finally { setBusy(false); }
   }
+
+  const autoRanRef = useRef(false);
+  useEffect(() => {
+    if (!autoWantedRef.current || autoRanRef.current) return;
+    const t = normalizeText(title), u = normalizeUrl(url);
+    if (!t || !u) return;
+    autoRanRef.current = true;
+    (async () => {
+      setBusy(true);
+      try {
+        const r = await fetch("/api/videos", {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${AUTH_TOKEN}` // ✅ 認証追加
+          },
+          body: JSON.stringify({
+            title: t, url: u, poster, affUrl, affLabel,
+            genres: normalizedSelected.length ? normalizedSelected : ["other"]
+          }),
+        });
+        if (r.ok) {
+          showToast("自動追加OK");
+          window.setTimeout(() => { window.location.href = sourcePageUrl || "/"; }, 450);
+        } else {
+          setErr("Auto add failed");
+        }
+      } finally { setBusy(false); }
+    })();
+  }, [title, url]);
 
   return (
     <main className="min-h-screen bg-black text-white p-6 space-y-6">
       {toast && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-white text-black text-sm font-bold shadow-xl">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-black/80 border border-white/10 text-sm">
           {toast}
         </div>
       )}
       <header className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Admin</h1>
         <div className="flex items-center gap-2">
-          <Link href="/admin/manage" className="px-4 py-2 rounded bg-white/10 text-white font-semibold hover:bg-white/20 transition">登録済み（管理）</Link>
-          <button className="px-4 py-2 rounded bg-white text-black font-semibold hover:bg-neutral-200 transition" onClick={() => load()} disabled={busy}>更新</button>
+          <Link href="/admin/manage" className="px-4 py-2 rounded bg-white/10 text-white font-semibold">登録済み（管理）</Link>
+          <button className="px-4 py-2 rounded bg-white text-black font-semibold" onClick={() => load()} disabled={busy}>更新</button>
         </div>
       </header>
 
-      <section className="rounded-2xl bg-neutral-900 p-4 space-y-4">
+      <section className="rounded-2xl bg-neutral-900 p-4">
         <h2 className="font-bold mb-3">動画追加</h2>
-        
-        {/* JSONインポート */}
-        <div className="rounded-2xl bg-neutral-800 p-3">
+        <div className="rounded-2xl bg-neutral-800 p-3 mb-3">
           <textarea
-            className="w-full h-24 px-3 py-2 rounded bg-neutral-900 outline-none text-xs text-neutral-400 border border-white/5 focus:border-white/20 transition"
-            placeholder="JSON貼り付け（自動で反映されます）"
+            className="w-full h-24 px-3 py-2 rounded bg-neutral-900 outline-none text-xs"
+            placeholder="JSON貼り付け"
             value={fanzaJson}
             onChange={(e) => { setFanzaJson(e.target.value); applyPasteText(e.target.value); }}
           />
         </div>
 
-        <form onSubmit={onAdd} className="grid gap-4">
-          <div className="space-y-3">
-            <input className="w-full px-4 py-3 rounded-xl bg-neutral-800 outline-none border border-transparent focus:border-white/20 transition" placeholder="タイトル" value={title} onChange={(e) => setTitle(e.target.value)} />
-            <input className="w-full px-4 py-3 rounded-xl bg-neutral-800 outline-none border border-transparent focus:border-blue-500/50 transition text-blue-400" placeholder="動画URL (.mp4)" value={url} onChange={(e) => setUrl(e.target.value)} />
-            
-            {/* ★ 復活させたアフィリエイト項目 */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <input 
-                className="sm:col-span-2 w-full px-4 py-3 rounded-xl bg-neutral-800 outline-none border border-transparent focus:border-green-500/50 transition text-green-400" 
-                placeholder="アフィリエイトURL" 
-                value={affUrl} 
-                onChange={(e) => setAffUrl(e.target.value)} 
-              />
-              <input 
-                className="w-full px-4 py-3 rounded-xl bg-neutral-800 outline-none border border-transparent focus:border-white/20 transition text-xs" 
-                placeholder="ラベル（商品を見る）" 
-                value={affLabel} 
-                onChange={(e) => setAffLabel(e.target.value)} 
-              />
-            </div>
-            
-            <input className="w-full px-4 py-2 rounded-xl bg-neutral-800 outline-none border border-transparent focus:border-white/10 transition text-xs text-neutral-500" placeholder="ポスター画像URL (任意)" value={poster} onChange={(e) => setPoster(e.target.value)} />
-          </div>
+        <form onSubmit={onAdd} className="grid gap-3">
+          <input className="w-full px-3 py-2 rounded bg-neutral-800 outline-none" placeholder="タイトル" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input className="w-full px-3 py-2 rounded bg-neutral-800 outline-none" placeholder="動画URL" value={url} onChange={(e) => setUrl(e.target.value)} />
           
-          {/* ジャンル選択セクション */}
-          <div className="rounded-2xl bg-neutral-800 p-4 space-y-3">
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-semibold text-neutral-400">選択中のジャンル</span>
-              <button type="button" className="text-xs bg-white/10 hover:bg-white/20 px-3 py-1 rounded-full transition" onClick={() => setGenreOpen(!genreOpen)}>
-                {genreOpen ? "閉じる" : "ジャンル一覧を表示"}
-              </button>
+          <div className="rounded-2xl bg-neutral-800 p-3">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-semibold">ジャンル</span>
+              <button type="button" className="text-xs bg-white/10 px-2 py-1 rounded" onClick={() => setGenreOpen(!genreOpen)}>表示切替</button>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 mb-3">
               {normalizedSelected.map(g => (
-                <span key={g} className="text-xs bg-white/20 px-3 py-1.5 rounded-full font-bold border border-white/5">{keyToLabel.get(g) || g}</span>
+                <span key={g} className="text-xs bg-white/10 px-2 py-1 rounded">{keyToLabel.get(g) || g}</span>
               ))}
             </div>
             {genreOpen && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-64 overflow-y-auto pt-3 border-t border-white/5 custom-scrollbar">
+              <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto">
                 {GENRE_GROUPS.flatMap(g => g.items).map(it => (
-                  <button 
-                    key={it.key} 
-                    type="button" 
-                    onClick={() => toggleGenre(it.key as GenreKey)} 
-                    className={`text-[11px] p-2.5 rounded-xl border transition ${normalizedSelected.includes(it.key as GenreKey) ? 'bg-white text-black font-bold' : 'bg-black/20 border-white/5 text-neutral-400 hover:border-white/20'}`}
-                  >
+                  <button key={it.key} type="button" onClick={() => toggleGenre(it.key as GenreKey)} className={`text-xs p-2 rounded border ${normalizedSelected.includes(it.key as GenreKey) ? 'bg-white text-black' : 'border-white/10'}`}>
                     {it.label}
                   </button>
                 ))}
@@ -277,11 +322,8 @@ export default function AdminPage() {
             )}
           </div>
 
-          <button className="w-full py-4 rounded-2xl bg-white text-black font-black text-lg hover:bg-neutral-200 transition shadow-xl shadow-white/5 disabled:opacity-50" disabled={busy || !url}>
-            {busy ? "追加中..." : "データベースに追加する"}
-          </button>
-          
-          {err && <p className="text-red-500 text-sm font-bold text-center bg-red-500/10 py-2 rounded-lg">{err}</p>}
+          <button className="w-full py-3 rounded bg-white text-black font-bold" disabled={busy}>追加</button>
+          {err && <p className="text-red-400 text-sm text-center">{err}</p>}
         </form>
       </section>
     </main>
