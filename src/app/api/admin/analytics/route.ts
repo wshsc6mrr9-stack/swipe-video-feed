@@ -4,13 +4,15 @@ import { listVideos } from "@/lib/videosStore";
 import { getCounts } from "@/lib/statsStore";
 
 export async function GET() {
-  const videos = await listVideos();
-  const ids = videos.map((v: any) => String(v.id));
+  // ✅ listVideos は { items, total } を返す
+  const { items } = await listVideos();
+
+  const ids = items.map((v) => String(v.id));
 
   const plays = await getCounts(ids, "play");
   const clicks = await getCounts(ids, "aff_click");
 
-  const rows = videos.map((v: any) => {
+  const rows = items.map((v) => {
     const id = String(v.id);
     const play = plays[id] ?? 0;
     const click = clicks[id] ?? 0;
@@ -34,7 +36,11 @@ export async function GET() {
 
   return NextResponse.json({
     ok: true,
-    totals: { play: totalPlay, click: totalClick, ctr: totalCtr },
+    totals: {
+      play: totalPlay,
+      click: totalClick,
+      ctr: totalCtr,
+    },
     rows,
   });
 }
