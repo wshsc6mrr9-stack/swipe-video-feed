@@ -49,11 +49,10 @@ export default function AdvancedAnalyticsPage() {
     return ["ALL", ...Array.from(set)];
   }, [data]);
 
-  // 🚀 ここが並び替えの心臓部です
+  // 🚀 強力なソートロジック
   const viewItems = useMemo(() => {
     if (!data?.rows) return [];
     
-    // 元のデータを壊さないようにコピー
     let list = [...data.rows];
 
     // ジャンルフィルタ
@@ -61,18 +60,22 @@ export default function AdvancedAnalyticsPage() {
       list = list.filter((r) => r.genres?.includes(selectedGenre));
     }
 
-    // 並び替え実行
+    // 並び替え
     list.sort((a, b) => {
       const valA = Number(a[sort] ?? 0);
       const valB = Number(b[sort] ?? 0);
-      // 大きい順に並べる
-      if (valB > valA) return 1;
-      if (valB < valA) return -1;
-      return 0;
+
+      // 1. 指定された数値で比較
+      if (valB !== valA) {
+        return valB - valA;
+      }
+      
+      // 2. 数値が同じ（0同士など）なら、名前やIDで並び替えて「変化」を出す
+      return a.title.localeCompare(b.title);
     });
 
     return list;
-  }, [data, sort, selectedGenre]); // sortが変わるたびにここが動きます
+  }, [data, sort, selectedGenre]);
 
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
@@ -83,7 +86,10 @@ export default function AdvancedAnalyticsPage() {
   return (
     <div className="min-h-screen bg-black text-white p-4 pb-20 select-none">
       <header className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-black italic tracking-tighter uppercase">Dashboard</h1>
+        <div>
+          <h1 className="text-3xl font-black italic tracking-tighter uppercase">Dashboard</h1>
+          <p className="text-[10px] text-indigo-500 font-bold tracking-widest uppercase">Sort Mode: {sort}</p>
+        </div>
         <Link href="/admin" className="rounded-2xl bg-white text-black px-5 py-2 text-xs font-black">BACK</Link>
       </header>
 
@@ -95,17 +101,17 @@ export default function AdvancedAnalyticsPage() {
 
       <div className="space-y-4 mb-6">
         <div className="flex flex-wrap gap-2">
-          {/* ✅ onClickで確実にソート状態を切り替える */}
-          <button onClick={() => setSort("play")} className={btn(sort === "play")}>再生数TOP</button>
-          <button onClick={() => setSort("click")} className={btn(sort === "click")}>クリックTOP</button>
-          <button onClick={() => setSort("ctr")} className={btn(sort === "ctr")}>効率TOP</button>
-          <button onClick={() => setSort("createdAt")} className={btn(sort === "createdAt")}>最新順</button>
+          {/* ✅ 各ボタンクリック時に確実に setSort を実行 */}
+          <button onClick={() => setSort("play")} className={btn(sort === "play")}>再生順</button>
+          <button onClick={() => setSort("click")} className={btn(sort === "click")}>クリック順</button>
+          <button onClick={() => setSort("ctr")} className={btn(sort === "ctr")}>効率順</button>
+          <button onClick={() => setSort("createdAt")} className={btn(sort === "createdAt")}>新しい順</button>
           
-          <button onClick={() => { setData(null); loadStats(); }} className="ml-auto bg-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black">REFRESH</button>
+          <button onClick={() => { setData(null); loadStats(); }} className="ml-auto bg-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black">更新</button>
         </div>
         
         <div className="flex items-center gap-4 bg-white/5 p-4 rounded-2xl border border-white/5">
-          <span className="text-[10px] text-white/40 font-black uppercase">Genre Filter:</span>
+          <span className="text-[10px] text-white/40 font-black uppercase">Genre:</span>
           <select className="flex-1 bg-transparent text-sm font-bold outline-none" value={selectedGenre} onChange={(e) => setSelectedGenre(e.target.value)}>
             {genreOptions.map((g) => <option key={g} value={g} className="bg-neutral-900">{g}</option>)}
           </select>
@@ -113,7 +119,7 @@ export default function AdvancedAnalyticsPage() {
       </div>
 
       <div className="overflow-hidden rounded-[2rem] border border-white/5 bg-neutral-900/40">
-        <div className="grid grid-cols-[1.5fr_1fr_0.6fr_0.6fr_0.6fr] gap-2 bg-white/5 px-6 py-4 text-[9px] font-black uppercase text-white/30">
+        <div className="grid grid-cols-[1.5fr_1fr_0.6fr_0.6fr_0.6fr] gap-2 bg-white/5 px-6 py-4 text-[9px] font-black uppercase text-white/30 tracking-widest">
           <div>Content</div>
           <div>Genres</div>
           <div className="text-right">Plays</div>
@@ -126,13 +132,13 @@ export default function AdvancedAnalyticsPage() {
             <div key={r.id} className="grid grid-cols-[1.5fr_1fr_0.6fr_0.6fr_0.6fr] gap-2 px-6 py-5 text-sm hover:bg-white/[0.03]">
               <div className="truncate">
                 <div className="font-bold truncate"><span className="text-[10px] text-white/20 mr-3">{i + 1}</span>{r.title}</div>
-                <div className="text-[9px] text-white/20 font-mono mt-1 uppercase">{r.id}</div>
+                <div className="text-[9px] text-white/20 font-mono mt-1 uppercase tracking-tighter">{r.id}</div>
               </div>
               <div className="flex flex-wrap gap-1 items-center overflow-hidden">
                 {r.genres?.slice(0, 2).map(g => <span key={g} className="text-[8px] bg-white/5 px-2 py-0.5 rounded-full text-white/50 border border-white/5">{g}</span>)}
               </div>
-              <div className="text-right tabular-nums">{r.play.toLocaleString()}</div>
-              <div className="text-right tabular-nums text-orange-400/80">{r.click.toLocaleString()}</div>
+              <div className="text-right tabular-nums font-medium">{r.play.toLocaleString()}</div>
+              <div className="text-right tabular-nums font-bold text-orange-400/80">{r.click.toLocaleString()}</div>
               <div className="text-right tabular-nums text-indigo-400 font-black">{pct(r.ctr)}</div>
             </div>
           ))}
@@ -144,10 +150,10 @@ export default function AdvancedAnalyticsPage() {
 
 function StatCard({ title, value, unit, highlight }: any) {
   return (
-    <div className={`rounded-[2rem] border border-white/10 p-6 ${highlight ? 'bg-indigo-600 shadow-xl shadow-indigo-600/20' : 'bg-neutral-900'}`}>
-      <div className="text-[9px] font-black uppercase text-white/40">{title}</div>
+    <div className={`rounded-[2rem] border border-white/10 p-6 ${highlight ? 'bg-indigo-600' : 'bg-neutral-900'}`}>
+      <div className="text-[9px] font-black uppercase text-white/40 tracking-widest">{title}</div>
       <div className="mt-3 flex items-baseline gap-1">
-        <span className="text-4xl font-black tabular-nums">{value}</span>
+        <span className="text-4xl font-black tracking-tighter tabular-nums">{value}</span>
         <span className="text-xs font-bold text-white/20">{unit}</span>
       </div>
     </div>
@@ -155,5 +161,5 @@ function StatCard({ title, value, unit, highlight }: any) {
 }
 
 function btn(active: boolean) {
-  return `rounded-xl px-4 py-2.5 text-[10px] font-black uppercase transition-all ${active ? "bg-white text-black" : "bg-white/5 text-white/30 hover:bg-white/10"}`;
+  return `rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-tighter transition-all ${active ? "bg-white text-black" : "bg-white/5 text-white/30 hover:bg-white/10"}`;
 }
