@@ -1,4 +1,3 @@
-// src/app/admin/analytics/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -24,13 +23,50 @@ export default function AdminAnalyticsPage() {
 
   const [sort, setSort] = useState<"click" | "ctr" | "play" | "new">("click");
   const [genre, setGenre] = useState<string>("ALL");
+  const [loading, setLoading] = useState(true);
 
+  // ---------------------------
+  // 🚀 データ取得ロジックの修正
+  // ---------------------------
   useEffect(() => {
     (async () => {
-      const res = await fetch("/api/admin/analytics", { cache: "no-store" });
-      const json = await res.json();
-      setTotals(json?.totals ?? { play: 0, click: 0, ctr: 0 });
-      setRows(Array.isArray(json?.rows) ? json.rows : []);
+      setLoading(true);
+      try {
+        // 軽量化した共通のAPI (/api/videos) を叩きに行きます
+        const res = await fetch("/api/videos", { cache: "no-store" });
+        const json = await res.json();
+        
+        // APIのレスポンス形式 { ok: true, items: [...] } に合わせる
+        const rawItems = Array.isArray(json) ? json : (json?.items ?? []);
+        
+        // Analytics表示用にデータを整形
+        const normalized: Row[] = rawItems.map((item: any) => ({
+          id: String(item.id || ""),
+          title: String(item.title || ""),
+          genres: Array.isArray(item.genres) ? item.genres : [],
+          // 現時点では再生数などの統計がRedisに未実装な場合、0をデフォルトにします
+          play: Number(item.playCount ?? 0),
+          click: Number(item.clickCount ?? 0),
+          ctr: Number(item.clickCount ?? 0) > 0 ? (item.clickCount / (item.playCount || 1)) : 0,
+          createdAt: Number(item.createdAt ?? 0),
+        }));
+
+        setRows(normalized);
+
+        // 合計の計算
+        const tPlay = normalized.reduce((acc, cur) => acc + cur.play, 0);
+        const tClick = normalized.reduce((acc, cur) => acc + cur.click, 0);
+        setTotals({
+          play: tPlay,
+          click: tClick,
+          ctr: tPlay > 0 ? tClick / tPlay : 0,
+        });
+
+      } catch (e) {
+        console.error("Analytics Load Error:", e);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, []);
 
@@ -69,19 +105,19 @@ export default function AdminAnalyticsPage() {
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-3">
-        <Card title="再生（合計）" value={String(totals.play ?? 0)} />
-        <Card title="クリック（合計）" value={String(totals.click ?? 0)} />
-        <Card title="CTR（合計）" value={pct(totals.ctr ?? 0)} />
+        <Card title="再生（最新100件）" value={String(totals.play ?? 0)} />
+        <Card title="クリック（最新100件）" value={String(totals.click ?? 0)} />
+        <Card title="CTR（平均）" value={pct(totals.ctr ?? 0)} />
       </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-2">
         <select
-          className="rounded-xl bg-white/10 px-3 py-2 text-sm"
+          className="rounded-xl bg-white/10 px-3 py-2 text-sm outline-none"
           value={genre}
           onChange={(e) => setGenre(e.target.value)}
         >
           {genreOptions.map((g) => (
-            <option key={g} value={g}>
+            <option key={g} value={g} className="bg-neutral-900">
               {g}
             </option>
           ))}
@@ -138,7 +174,9 @@ export default function AdminAnalyticsPage() {
         ))}
 
         {!view.length && (
-          <div className="p-6 text-center text-white/60">データがありません</div>
+          <div className="p-12 text-center text-white/60">
+            {loading ? "読み込み中..." : "データがありません"}
+          </div>
         )}
       </div>
     </div>
