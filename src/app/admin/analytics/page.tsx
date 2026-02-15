@@ -19,12 +19,12 @@ export default function AdvancedAnalyticsPage() {
     rows: Row[];
   } | null>(null);
 
-  // 🚨 初期ソートを 'play' に設定
+  // 🚨 初期ソートを 'play' (再生数) に設定
   const [sort, setSort] = useState<"play" | "click" | "ctr" | "createdAt">("play");
   const [selectedGenre, setSelectedGenre] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
 
-  // 🚀 データ取得関数を useCallback で安定化
+  // 🚀 パイプライン対応したAPIからデータを取得
   const loadStats = useCallback(async () => {
     setLoading(true);
     try {
@@ -44,7 +44,7 @@ export default function AdvancedAnalyticsPage() {
     loadStats();
   }, [loadStats]);
 
-  // ジャンル一覧
+  // ジャンル一覧の抽出
   const genreOptions = useMemo(() => {
     if (!data?.rows) return ["ALL"];
     const set = new Set<string>();
@@ -52,17 +52,18 @@ export default function AdvancedAnalyticsPage() {
     return ["ALL", ...Array.from(set)];
   }, [data]);
 
-  // 🚀 【重要】ここが並び替えの本番ロジック
+  // 🚀 【重要】ここがボタン連動の並び替えロジック
+  // sort ステートが変わるたびに、この中の計算が走り、画面が更新されます
   const viewItems = useMemo(() => {
     if (!data?.rows) return [];
     let list = [...data.rows];
 
-    // 1. ジャンルで絞り込み
+    // 1. ジャンルフィルタ
     if (selectedGenre !== "ALL") {
       list = list.filter((r) => r.genres?.includes(selectedGenre));
     }
 
-    // 2. 指定されたソートキーで並び替え
+    // 2. ソート実行
     list.sort((a: any, b: any) => {
       const valA = a[sort] ?? 0;
       const valB = b[sort] ?? 0;
@@ -70,12 +71,16 @@ export default function AdvancedAnalyticsPage() {
     });
 
     return list;
-  }, [data, sort, selectedGenre]); // sort や selectedGenre が変わるたびに再計算される
+  }, [data, sort, selectedGenre]);
 
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
   if (loading && !data) {
-    return <div className="min-h-screen bg-black text-white flex items-center justify-center font-bold italic tracking-widest">ANALYZING...</div>;
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center font-black italic tracking-widest">
+        ANALYZING...
+      </div>
+    );
   }
 
   return (
@@ -83,28 +88,28 @@ export default function AdvancedAnalyticsPage() {
       {/* ヘッダー */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-black italic tracking-tighter">DASHBOARD</h1>
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-            <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest">Live Performance Data</p>
+          <h1 className="text-3xl font-black italic tracking-tighter uppercase">Dashboard</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
+            <p className="text-[10px] text-white/40 font-bold uppercase tracking-[0.2em]">Realtime Stats</p>
           </div>
         </div>
-        <Link href="/admin" className="rounded-2xl bg-white text-black px-5 py-2 text-xs font-black hover:scale-105 transition">
-          EXIT
+        <Link href="/admin" className="rounded-2xl bg-white text-black px-5 py-2 text-xs font-black transition active:scale-95">
+          BACK
         </Link>
       </div>
 
-      {/* 🚀 サイト全体の数字カード */}
+      {/* 統計カード */}
       <div className="grid grid-cols-3 gap-3 mb-10">
         <StatCard title="Total Plays" value={data?.totals.play.toLocaleString() ?? "0"} unit="回" />
         <StatCard title="Total Clicks" value={data?.totals.click.toLocaleString() ?? "0"} unit="件" />
         <StatCard title="Avg. CTR" value={pct(data?.totals.ctr ?? 0)} unit="" highlight />
       </div>
 
-      {/* 🚀 操作パネル */}
+      {/* 🚀 操作パネル：ここがボタン群 */}
       <div className="space-y-4 mb-6">
         <div className="flex flex-wrap gap-2">
-          {/* ボタンクリックで setSort を実行 -> viewItems が自動で再計算される */}
+          {/* onClickでsetSortを呼ぶことで、viewItemsの再計算をトリガーします */}
           <button onClick={() => setSort("play")} className={btn(sort === "play")}>再生数TOP</button>
           <button onClick={() => setSort("click")} className={btn(sort === "click")}>クリックTOP</button>
           <button onClick={() => setSort("ctr")} className={btn(sort === "ctr")}>効率TOP</button>
@@ -112,32 +117,32 @@ export default function AdvancedAnalyticsPage() {
           
           <button 
             onClick={() => {
-              setData(null); // 一旦消して
-              loadStats();   // 再取得
+              setData(null);
+              loadStats();
             }} 
-            className="ml-auto flex items-center gap-2 bg-indigo-600 px-4 py-2 rounded-xl text-xs font-black active:scale-95 transition"
+            className="ml-auto bg-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black tracking-widest active:scale-95 transition"
           >
             REFRESH
           </button>
         </div>
         
-        <div className="flex items-center gap-4 bg-white/5 p-3 rounded-2xl border border-white/5">
-          <span className="text-[10px] text-white/40 font-black uppercase tracking-widest">Filter by Genre:</span>
+        <div className="flex items-center gap-4 bg-white/5 p-4 rounded-2xl border border-white/5">
+          <span className="text-[10px] text-white/40 font-black uppercase tracking-widest">Genre Filter:</span>
           <select
-            className="flex-1 bg-transparent text-sm font-bold outline-none cursor-pointer"
+            className="flex-1 bg-transparent text-sm font-bold outline-none appearance-none"
             value={selectedGenre}
             onChange={(e) => setSelectedGenre(e.target.value)}
           >
             {genreOptions.map((g) => (
-              <option key={g} value={g} className="bg-neutral-900">{g}</option>
+              <option key={g} value={g} className="bg-neutral-900 text-white">{g}</option>
             ))}
           </select>
         </div>
       </div>
 
-      {/* 🚀 ランキング表 */}
-      <div className="overflow-hidden rounded-[2rem] border border-white/5 bg-neutral-900/40 backdrop-blur-md">
-        <div className="grid grid-cols-[1.5fr_1fr_0.6fr_0.6fr_0.6fr] gap-2 bg-white/5 px-5 py-4 text-[9px] font-black uppercase tracking-[0.2em] text-white/30">
+      {/* リスト表示 */}
+      <div className="overflow-hidden rounded-[2rem] border border-white/5 bg-neutral-900/40">
+        <div className="grid grid-cols-[1.5fr_1fr_0.6fr_0.6fr_0.6fr] gap-2 bg-white/5 px-6 py-4 text-[9px] font-black uppercase tracking-[0.2em] text-white/30">
           <div>Content</div>
           <div>Genres</div>
           <div className="text-right">Plays</div>
@@ -147,17 +152,17 @@ export default function AdvancedAnalyticsPage() {
 
         <div className="divide-y divide-white/5">
           {viewItems.map((r, i) => (
-            <div key={r.id} className="grid grid-cols-[1.5fr_1fr_0.6fr_0.6fr_0.6fr] gap-2 px-5 py-5 text-sm hover:bg-white/[0.03] transition group">
+            <div key={r.id} className="grid grid-cols-[1.5fr_1fr_0.6fr_0.6fr_0.6fr] gap-2 px-6 py-5 text-sm hover:bg-white/[0.03] transition">
               <div className="truncate">
-                <div className="font-bold truncate group-hover:text-indigo-400 transition">
-                  <span className="text-[10px] text-white/20 mr-2 font-mono">{String(i + 1).padStart(2, '0')}</span>
-                  {r.title || "Untitled Video"}
+                <div className="font-bold truncate">
+                  <span className="text-[10px] text-white/20 mr-3 font-mono">{i + 1}</span>
+                  {r.title || "No Title"}
                 </div>
-                <div className="text-[9px] text-white/20 font-mono mt-1 uppercase tracking-tighter">{r.id}</div>
+                <div className="text-[9px] text-white/20 font-mono mt-1 uppercase">{r.id}</div>
               </div>
               <div className="flex flex-wrap gap-1 items-center overflow-hidden">
                 {r.genres?.slice(0, 2).map(g => (
-                  <span key={g} className="text-[8px] border border-white/10 px-2 py-0.5 rounded-full text-white/40 font-bold whitespace-nowrap">{g}</span>
+                  <span key={g} className="text-[8px] bg-white/5 px-2 py-0.5 rounded-full text-white/50 font-bold border border-white/5">{g}</span>
                 ))}
               </div>
               <div className="text-right tabular-nums font-medium">{r.play.toLocaleString()}</div>
@@ -168,8 +173,8 @@ export default function AdvancedAnalyticsPage() {
         </div>
 
         {viewItems.length === 0 && (
-          <div className="p-24 text-center">
-            <p className="text-white/20 font-black italic tracking-widest text-sm uppercase">No Data Available</p>
+          <div className="p-24 text-center text-white/20 font-black italic tracking-widest text-sm uppercase">
+            No Data Found
           </div>
         )}
       </div>
@@ -179,7 +184,7 @@ export default function AdvancedAnalyticsPage() {
 
 function StatCard({ title, value, unit, highlight }: any) {
   return (
-    <div className={`rounded-[2rem] border border-white/10 p-6 transition-transform hover:scale-[1.02] ${highlight ? 'bg-indigo-600 shadow-2xl shadow-indigo-600/20' : 'bg-neutral-900'}`}>
+    <div className={`rounded-[2rem] border border-white/10 p-6 ${highlight ? 'bg-indigo-600 shadow-xl shadow-indigo-600/20' : 'bg-neutral-900'}`}>
       <div className="text-[9px] font-black uppercase tracking-[0.2em] text-white/40">{title}</div>
       <div className="mt-3 flex items-baseline gap-1">
         <span className="text-4xl font-black tracking-tighter tabular-nums">{value}</span>
@@ -190,7 +195,7 @@ function StatCard({ title, value, unit, highlight }: any) {
 }
 
 function btn(active: boolean) {
-  return `rounded-xl px-4 py-2.5 text-[10px] font-black tracking-widest uppercase transition-all active:scale-95 ${
-    active ? "bg-white text-black shadow-xl shadow-white/5" : "bg-white/5 text-white/30 hover:bg-white/10"
+  return `rounded-xl px-4 py-2.5 text-[10px] font-black tracking-widest uppercase transition-all ${
+    active ? "bg-white text-black shadow-lg" : "bg-white/5 text-white/30 hover:bg-white/10"
   }`;
 }
