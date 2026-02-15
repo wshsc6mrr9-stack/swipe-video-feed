@@ -5,22 +5,19 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    // 1. 全体合計
     const global = (await redis.hgetall("stats:global")) as Record<string, string> | null;
-    
-    // 2. 動画リスト取得
     const rows = await redis.lrange("videos", 0, 199);
+    
     if (!rows || rows.length === 0) {
       return NextResponse.json({ ok: true, totals: { play: 0, click: 0, ctr: 0 }, rows: [] });
     }
 
     const videoList = rows.map((r) => (typeof r === "string" ? JSON.parse(r) : r));
-    
-    // 🚀 パイプラインで一括取得
     const pipeline = redis.pipeline();
+
     videoList.forEach((v: any) => {
-      // 🚨 計測時と同じルール（小文字・空白なし）でIDを検索
-      const cleanId = String(v.id).trim().toLowerCase();
+      // 🚨 track側と完全に一致させるために、純粋な文字列としてIDを扱う
+      const cleanId = String(v.id).trim();
       pipeline.hgetall(`stats:video:${cleanId}`);
     });
 
@@ -28,9 +25,10 @@ export async function GET() {
 
     const statsData = videoList.map((v: any, index: number) => {
       const s = allStats[index] as Record<string, string> | null;
-      const p = Number(s?.play || 0);
-      const c = Number(s?.click || 0);
-      
+      // 🚨 保存名に関わらず、play, click どちらかに入っていれば吸い出す
+      const p = Number(s?.play || s?.playCount || 0);
+      const c = Number(s?.click || s?.clickCount || 0);
+
       return {
         id: v.id,
         title: v.title || "Untitled",
@@ -38,7 +36,7 @@ export async function GET() {
         play: p,
         click: c,
         ctr: p > 0 ? (c / p) : 0,
-        createdAt: Number(v.createdAt || 0)
+        createdAt: v.createdAt || 0
       };
     });
 

@@ -6,13 +6,12 @@ export async function POST(req: Request) {
     const { videoId, type } = await req.json();
     if (!videoId || !type) return NextResponse.json({ ok: false }, { status: 400 });
 
-    // 🚨 IDを文字列化し、前後空白を消し、小文字に統一して「ズレ」をゼロにする
-    const cleanId = String(videoId).trim().toLowerCase();
+    // 🚨 どんな型で送られてきても「純粋な文字列」に強制変換して保存
+    const cleanId = String(videoId).trim();
 
-    // 1. 個別動画のカウントアップ
+    // 個別カウント
     await redis.hincrby(`stats:video:${cleanId}`, type, 1);
-    
-    // 2. 全体の合計カウントアップ
+    // 全体カウント
     await redis.hincrby("stats:global", type, 1);
 
     return NextResponse.json({ ok: true });
