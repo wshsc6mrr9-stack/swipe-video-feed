@@ -37,10 +37,12 @@ export async function addVideo(video: any): Promise<VideoItem | null> {
   }
 }
 
-/** ✅ 動画一覧を取得する */
+/** ✅ 動画一覧を取得する（最新50件に制限してクラッシュ回避） */
 export async function listVideos(): Promise<VideoItem[]> {
   try {
-    const rows = await redis.lrange(KEY, 0, -1);
+    // 🚨 ここを修正しました: -1（全部）ではなく 49（最新50件）を取得
+    // これでデータ量が減り、Admin画面が復活します
+    const rows = await redis.lrange(KEY, 0, 49);
     if (!rows) return [];
 
     return rows
