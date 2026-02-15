@@ -50,7 +50,6 @@ function sanitizeTitle(raw: string) {
   let s = normalizeText(raw);
   if (!s) return s;
 
-  // 末尾の共通フッター系を削る（必要なら増やしてOK）
   s = s
     .replace(/\s*[｜|]\s*エロ動画・アダルトビデオ\s*[｜|]\s*FANZA動画\s*$/i, "")
     .replace(/\s*[｜|]\s*エロ動画・アダルトビデオ\s*$/i, "")
@@ -58,7 +57,6 @@ function sanitizeTitle(raw: string) {
     .replace(/\s*[｜|]\s*FANZA\s*$/i, "")
     .replace(/\s*[｜|]\s*DMM(?:\.co\.jp)?\s*$/i, "");
 
-  // 文中に混ざった同一文言も削りたい場合（保険）
   s = s
     .replace(/エロ動画・アダルトビデオ\s*[｜|]\s*FANZA動画/gi, "")
     .replace(/エロ動画\s*[｜|]\s*FANZA動画/gi, "")
@@ -67,15 +65,12 @@ function sanitizeTitle(raw: string) {
   return normalizeText(s);
 }
 
-/** ✅ URLっぽい文字列なら返す（雑に安全化） */
 function normalizeUrl(v: any): string {
   const s = normalizeText(v);
   if (!s) return "";
-  // スペース混入や全角を最低限除去
   return s.replace(/\s/g, "");
 }
 
-/** ✅ poster候補を色々なキーから拾う */
 function pickPoster(obj: any): string {
   const candidates = [
     obj?.poster,
@@ -98,16 +93,16 @@ function pickPoster(obj: any): string {
 
 export default function AdminPage() {
   const [items, setItems] = useState<VideoItem[]>([]);
+  // ✅ 総数を管理するステートを追加
+  const [totalCount, setTotalCount] = useState<number>(0);
+
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [poster, setPoster] = useState("");
   const [affUrl, setAffUrl] = useState("");
   const [affLabel, setAffLabel] = useState("");
 
-  // ✅ import元（作品ページ）へ戻る用
   const [sourcePageUrl, setSourcePageUrl] = useState("");
-
-  // ✅ JSON貼り付け欄
   const [fanzaJson, setFanzaJson] = useState("");
   const fanzaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -117,11 +112,8 @@ export default function AdminPage() {
 
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  // ✅ トースト（ダイアログは出さない）
   const [toast, setToast] = useState<string | null>(null);
 
-  // ✅ あなたのパスワード（Bearerトークンとして使用）
   const AUTH_TOKEN = "mdoskldmnvopdkmfjsps6hd9hs9hd0d";
 
   function showToast(msg: string) {
@@ -129,7 +121,6 @@ export default function AdminPage() {
     window.setTimeout(() => setToast(null), 1200);
   }
 
-  /** GENRE_GROUPS から (key/label)→key の辞書を作る + includes 用の正規化リスト */
   const genreIndex = useMemo(() => {
     const map = new Map<string, GenreKey>();
     const allKeys: GenreKey[] = [];
@@ -139,10 +130,8 @@ export default function AdminPage() {
       for (const it of g.items) {
         const k = it.key as GenreKey;
         allKeys.push(k);
-
         const kn = normalizeKey(it.key);
         const ln = normalizeKey(it.label);
-
         if (kn) {
           map.set(kn, k);
           allNorms.push({ norm: kn, key: k });
@@ -153,14 +142,10 @@ export default function AdminPage() {
         }
       }
     }
-
-    // norm が長い方を先に試す（部分一致で強い）
     allNorms.sort((a, b) => b.norm.length - a.norm.length);
-
     return { map, allKeys: uniq(allKeys), allNorms };
   }, []);
 
-  /** ✅ key → 日本語ラベル（選択済み表示を日本語にする） */
   const keyToLabel = useMemo(() => {
     const map = new Map<string, string>();
     for (const g of GENRE_GROUPS) {
@@ -171,7 +156,6 @@ export default function AdminPage() {
     return map;
   }, []);
 
-  /** ✅ 日本語タグ→あなたのGenreKeyへ寄せる（FANZA向け強化版） */
   const jpToKey = useMemo(() => {
     const dict: Array<[GenreKey, string[]]> = [
       ["debut", ["デビュー", "新人", "初av", "初av作品", "初AV", "初出演", "初登場", "初解禁"]],
@@ -358,26 +342,40 @@ export default function AdminPage() {
     setGenreQuery("");
   }
 
+  // ✅ データ読み込み（最新リスト ＋ 総数）
   async function load() {
     setErr(null);
-    const r = await fetch("/api/videos", { cache: "no-store" });
-    const j = await r.json().catch(() => null);
-    if (!r.ok || !j?.ok) {
-      setErr(j?.error ?? "load failed");
-      return;
+    try {
+      // 1. 最新の50件を取得
+      const r = await fetch("/api/videos", { cache: "no-store" });
+      const j = await r.json().catch(() => null);
+      
+      // 配列で来る場合と、{items:[]}で来る場合の両方に対応
+      if (Array.isArray(j)) {
+        setItems(j);
+      } else if (j?.items && Array.isArray(j.items)) {
+        setItems(j.items);
+      } else {
+        setItems([]);
+      }
+
+      // 2. 🚀 ここで総数を取得！
+      const rCount = await fetch("/api/count", { cache: "no-store" });
+      const jCount = await rCount.json().catch(() => ({ count: 0 }));
+      setTotalCount(Number(jCount.count ?? 0));
+
+    } catch (e) {
+      setErr("load failed");
     }
-    setItems(Array.isArray(j.items) ? j.items : []);
   }
 
   useEffect(() => {
     load();
   }, []);
 
-  /** ✅ JSONから「タイトル/ジャンル/URL/aff/poster」拾う（即反映） */
   function applyPasteText(raw: string) {
     const s = normalizeText(raw);
     if (!s) return;
-
     let obj: any = null;
     try {
       obj = JSON.parse(s);
@@ -386,35 +384,23 @@ export default function AdminPage() {
     }
     if (!obj || typeof obj !== "object") return;
 
-    // ---- title
     const t = sanitizeTitle(
-      obj.title ??
-        obj.name ??
-        obj.workTitle ??
-        obj.pageTitle ??
-        obj.productTitle ??
-        obj.videoTitle ??
-        ""
+      obj.title ?? obj.name ?? obj.workTitle ?? obj.pageTitle ?? obj.productTitle ?? obj.videoTitle ?? ""
     );
     if (t) setTitle(t);
 
-    // ---- url (videoUrl / url / src)
     const u = normalizeUrl(obj.videoUrl ?? obj.url ?? obj.src ?? obj.videoSrc ?? "");
     if (u) setUrl(u);
 
-    // ---- poster（候補キー増やした）
     const p = pickPoster(obj);
     if (p) setPoster(p);
 
-    // ---- affUrl (無ければ pageUrl)
     const au = normalizeUrl(obj.affUrl ?? obj.affiliateUrl ?? obj.pageUrl ?? obj.sourceUrl ?? "");
     if (au) setAffUrl(au);
 
-    // ✅ 戻り先（作品ページURL）
     const back = normalizeUrl(obj.pageUrl ?? obj.sourceUrl ?? "");
     if (back) setSourcePageUrl(back);
 
-    // ---- affLabel（未入力ならデフォ入れてもOK）
     const al = normalizeText(obj.affLabel ?? obj.affiliateLabel ?? "");
     if (al) {
       setAffLabel(al);
@@ -422,33 +408,20 @@ export default function AdminPage() {
       if (au && !normalizeText(affLabel)) setAffLabel("商品を見る");
     }
 
-    // ---- genres
     const source =
-      obj.genres ??
-      obj.genre ??
-      obj.tags ??
-      obj.tag ??
-      obj.hashtags ??
-      obj.hashTags ??
-      obj.categories ??
-      obj.category ??
-      [];
+      obj.genres ?? obj.genre ?? obj.tags ?? obj.tag ?? obj.hashtags ?? obj.hashTags ?? obj.categories ?? obj.category ?? [];
 
     let tokens: string[] = [];
     if (Array.isArray(source)) {
       tokens = source.map((x) => normalizeText(x)).filter(Boolean);
     } else if (typeof source === "string") {
-      tokens = source
-        .split(/[,\n]/g)
-        .map((x) => normalizeText(x))
-        .filter(Boolean);
+      tokens = source.split(/[,\n]/g).map((x) => normalizeText(x)).filter(Boolean);
     }
 
     const noiseRe =
       /(キャンペーン|セール|おすすめ順|人気順|売上|評価|お気に入り|新着|予約|最新作|準新作|ポイント|ログアウト|購入済み|月額|レンタル|リスト|ブランドストア|FANZA\s*トップ|FANZA\s*TV|みんなのおすすめ|ライブチャット|キャラチャット|出会い|オンラインゲーム|PCゲーム|ゲーム|動画(?!作品)|検索|ジャンルから探す|商品リストから探す|会員規約|会社概要|お問い合わせ|特定商取引法|個人情報保護)/i;
 
     const rawTokens = tokens.slice();
-
     const cleanTokens = tokens.filter((x) => !noiseRe.test(x));
     const words = uniq(cleanTokens.flatMap(splitWords));
     const cleanWords = words.filter((x) => !noiseRe.test(x));
@@ -467,7 +440,6 @@ export default function AdminPage() {
 
     const joinedRaw = [...cleanTokens, ...cleanWords, ...rescued].join(" ");
     const joinedN = normalizeKey(joinedRaw);
-
     const matched: GenreKey[] = [];
 
     for (const tok of [...cleanTokens, ...cleanWords, ...rescued]) {
@@ -505,18 +477,12 @@ export default function AdminPage() {
     setGenreQuery("");
   }
 
-  // ✅ 「importが来た = 自動追加していい」のフラグ（ブクマを変えないため）
   const autoWantedRef = useRef(false);
 
-  /** ✅ URLクエリ/ハッシュで受け取って自動反映（クリップボード不要） */
   useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search);
-
-      // 1) search param 優先
       let enc = sp.get("fanza") || sp.get("import");
-
-      // 2) hash fallback (#import=...)
       let fromHash = false;
       if (!enc) {
         const h = window.location.hash || "";
@@ -529,7 +495,6 @@ export default function AdminPage() {
 
       if (!enc) return;
 
-      // ✅ ブクマは #import なので、これを auto 扱いにする（=ブクマを一切変えない）
       const autoByQuery = sp.get("auto") === "1";
       autoWantedRef.current = autoByQuery || fromHash;
 
@@ -537,21 +502,16 @@ export default function AdminPage() {
       try {
         json = decodeURIComponent(enc);
       } catch {
-        // noop
       }
 
       setFanzaJson(json);
       applyPasteText(json);
 
       showToast("取り込みOK（タイトル/URL/ジャンル反映）");
-
-      // 同じ取り込みが繰り返し走らないようにURLを掃除
       const cleanUrl = window.location.pathname;
       window.history.replaceState({}, "", cleanUrl);
     } catch {
-      // 失敗しても静かに
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function onAdd(e: React.FormEvent) {
@@ -568,7 +528,7 @@ export default function AdminPage() {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${AUTH_TOKEN}` // ✅ ヘッダー追加
+          "Authorization": `Bearer ${AUTH_TOKEN}`
         },
         body: JSON.stringify({
           title: normalizeText(title),
@@ -603,7 +563,6 @@ export default function AdminPage() {
     }
   }
 
-  // ✅ 自動追加（importで反映後、title/urlが揃ったら1回だけPOST → 元ページへ戻る）
   const autoRanRef = useRef(false);
   useEffect(() => {
     if (!autoWantedRef.current) return;
@@ -611,7 +570,7 @@ export default function AdminPage() {
 
     const t = normalizeText(title);
     const u = normalizeUrl(url);
-    if (!t || !u) return; // 反映待ち
+    if (!t || !u) return;
 
     autoRanRef.current = true;
 
@@ -627,7 +586,7 @@ export default function AdminPage() {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${AUTH_TOKEN}` // ✅ ヘッダー追加
+            "Authorization": `Bearer ${AUTH_TOKEN}`
           },
           body: JSON.stringify({
             title: t,
@@ -642,12 +601,10 @@ export default function AdminPage() {
         const j = await r.json().catch(() => null);
         if (!r.ok || !j?.ok) {
           setErr(j?.error ?? `auto add failed (${r.status})`);
-          // 失敗時は止める（手で修正できるように戻らない）
           return;
         }
 
         showToast("自動追加OK");
-
         const back = normalizeUrl(sourcePageUrl) || "/";
         window.setTimeout(() => {
           window.location.href = back;
@@ -656,7 +613,6 @@ export default function AdminPage() {
         setBusy(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, url]);
 
   const query = genreQuery.trim().toLowerCase();
@@ -713,7 +669,6 @@ export default function AdminPage() {
         <div className="rounded-2xl bg-neutral-800 p-3 mb-3">
           <div className="flex items-center justify-between gap-3">
             <div className="text-sm font-semibold">FANZA抽出（JSON貼り付け）</div>
-
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -724,7 +679,6 @@ export default function AdminPage() {
               </button>
             </div>
           </div>
-
           <textarea
             ref={fanzaRef}
             className="mt-2 w-full h-24 px-3 py-2 rounded bg-neutral-900 outline-none text-xs leading-relaxed"
@@ -733,12 +687,10 @@ export default function AdminPage() {
             onChange={(e) => {
               const v = e.target.value;
               setFanzaJson(v);
-
               try {
                 JSON.parse(v);
                 applyPasteText(v);
               } catch {
-                // まだ途中なら無視
               }
             }}
           />
@@ -762,7 +714,6 @@ export default function AdminPage() {
           <div className="rounded-2xl bg-neutral-800 p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-semibold">ジャンル（複数選択）</div>
-
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -771,7 +722,6 @@ export default function AdminPage() {
                 >
                   リセット
                 </button>
-
                 <button
                   type="button"
                   className="text-xs rounded-full bg-white/10 text-white px-3 py-1"
@@ -802,19 +752,16 @@ export default function AdminPage() {
                   value={genreQuery}
                   onChange={(e) => setGenreQuery(e.target.value)}
                 />
-
                 <div className="mt-3 space-y-4">
                   {filteredGroups.map((g) => (
                     <div key={String(g.title)} className="space-y-2">
                       <div className="text-xs font-semibold text-white/80">
                         {g.title}
                       </div>
-
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                         {g.items.map((it) => {
                           const key = it.key as GenreKey;
                           const selected = normalizedSelected.includes(key);
-
                           return (
                             <button
                               key={String(key)}
@@ -834,7 +781,6 @@ export default function AdminPage() {
                       </div>
                     </div>
                   ))}
-
                   {filteredGroups.length === 0 ? (
                     <div className="text-xs text-white/60">該当なし</div>
                   ) : null}
@@ -898,7 +844,8 @@ export default function AdminPage() {
           <div>
             <div className="font-bold">登録済みは別ページで管理</div>
             <div className="text-sm text-white/60 mt-1">
-              現在: {items.length} 件（更新で反映）
+              現在: <span className="text-white font-bold text-base">{totalCount.toLocaleString()}</span> 件
+              （最新50件を表示中）
             </div>
           </div>
 
