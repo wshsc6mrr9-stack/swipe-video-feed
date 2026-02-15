@@ -5,18 +5,14 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    // 1. 全体の合計を取得
     const global = (await redis.hgetall("stats:global")) as Record<string, string> | null;
-    
-    // 2. 最新の200件を取得
     const rows = await redis.lrange("videos", 0, 199);
+    
     if (!rows || rows.length === 0) {
       return NextResponse.json({ ok: true, totals: { play: 0, click: 0, ctr: 0 }, rows: [] });
     }
 
     const videoList = rows.map((r) => (typeof r === "string" ? JSON.parse(r) : r));
-
-    // 🚀 【重要】パイプラインで一括取得（これで爆速になります）
     const pipeline = redis.pipeline();
     videoList.forEach((v: any) => {
       pipeline.hgetall(`stats:video:${v.id}`);
@@ -25,6 +21,7 @@ export async function GET() {
 
     const statsData = videoList.map((v: any, index: number) => {
       const s = allStats[index] as Record<string, string> | null;
+      // 🚨 画面側が探している名前に合わせて「play」「click」を確実に数値化
       const p = Number(s?.play || 0);
       const c = Number(s?.click || 0);
       return {

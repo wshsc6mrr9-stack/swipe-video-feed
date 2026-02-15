@@ -19,10 +19,12 @@ export default function AdvancedAnalyticsPage() {
     rows: Row[];
   } | null>(null);
 
+  // 🚨 初期ソートを 'play' (再生数) に設定
   const [sort, setSort] = useState<"play" | "click" | "ctr" | "createdAt">("play");
   const [selectedGenre, setSelectedGenre] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
 
+  // 🚀 統計データを取得する関数
   const loadStats = useCallback(async () => {
     setLoading(true);
     try {
@@ -42,6 +44,7 @@ export default function AdvancedAnalyticsPage() {
     loadStats();
   }, [loadStats]);
 
+  // ジャンル選択肢の生成
   const genreOptions = useMemo(() => {
     if (!data?.rows) return ["ALL"];
     const set = new Set<string>();
@@ -49,28 +52,28 @@ export default function AdvancedAnalyticsPage() {
     return ["ALL", ...Array.from(set)];
   }, [data]);
 
-  // 🚀 強力なソートロジック
+  // 🚀 強力なソート＆フィルタロジック
   const viewItems = useMemo(() => {
     if (!data?.rows) return [];
     
     let list = [...data.rows];
 
-    // ジャンルフィルタ
+    // 1. ジャンルで絞り込み
     if (selectedGenre !== "ALL") {
       list = list.filter((r) => r.genres?.includes(selectedGenre));
     }
 
-    // 並び替え
+    // 2. 並び替え実行
     list.sort((a, b) => {
       const valA = Number(a[sort] ?? 0);
       const valB = Number(b[sort] ?? 0);
 
-      // 1. 指定された数値で比較
+      // 数値に差がある場合は降順（大きい順）
       if (valB !== valA) {
         return valB - valA;
       }
       
-      // 2. 数値が同じ（0同士など）なら、名前やIDで並び替えて「変化」を出す
+      // 数値が同じ（0同士など）なら、名前で並び替えてリストが動かないように見せるのを防ぐ
       return a.title.localeCompare(b.title);
     });
 
@@ -80,44 +83,67 @@ export default function AdvancedAnalyticsPage() {
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
   if (loading && !data) {
-    return <div className="min-h-screen bg-black text-white flex items-center justify-center font-black italic">ANALYZING...</div>;
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center font-black italic tracking-widest">
+        ANALYZING...
+      </div>
+    );
   }
 
   return (
     <div className="min-h-screen bg-black text-white p-4 pb-20 select-none">
+      {/* ヘッダー */}
       <header className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-black italic tracking-tighter uppercase">Dashboard</h1>
           <p className="text-[10px] text-indigo-500 font-bold tracking-widest uppercase">Sort Mode: {sort}</p>
         </div>
-        <Link href="/admin" className="rounded-2xl bg-white text-black px-5 py-2 text-xs font-black">BACK</Link>
+        <Link href="/admin" className="rounded-2xl bg-white text-black px-5 py-2 text-xs font-black transition active:scale-95">
+          BACK
+        </Link>
       </header>
 
+      {/* 統計サマリーカード */}
       <div className="grid grid-cols-3 gap-3 mb-10">
         <StatCard title="Total Plays" value={data?.totals.play.toLocaleString() ?? "0"} unit="回" />
         <StatCard title="Total Clicks" value={data?.totals.click.toLocaleString() ?? "0"} unit="件" />
         <StatCard title="Avg. CTR" value={pct(data?.totals.ctr ?? 0)} highlight />
       </div>
 
+      {/* 操作パネル */}
       <div className="space-y-4 mb-6">
         <div className="flex flex-wrap gap-2">
-          {/* ✅ 各ボタンクリック時に確実に setSort を実行 */}
           <button onClick={() => setSort("play")} className={btn(sort === "play")}>再生順</button>
           <button onClick={() => setSort("click")} className={btn(sort === "click")}>クリック順</button>
           <button onClick={() => setSort("ctr")} className={btn(sort === "ctr")}>効率順</button>
           <button onClick={() => setSort("createdAt")} className={btn(sort === "createdAt")}>新しい順</button>
           
-          <button onClick={() => { setData(null); loadStats(); }} className="ml-auto bg-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black">更新</button>
+          <button 
+            onClick={() => {
+              setData(null);
+              loadStats();
+            }} 
+            className="ml-auto bg-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black tracking-widest active:scale-95 transition"
+          >
+            REFRESH
+          </button>
         </div>
         
         <div className="flex items-center gap-4 bg-white/5 p-4 rounded-2xl border border-white/5">
-          <span className="text-[10px] text-white/40 font-black uppercase">Genre:</span>
-          <select className="flex-1 bg-transparent text-sm font-bold outline-none" value={selectedGenre} onChange={(e) => setSelectedGenre(e.target.value)}>
-            {genreOptions.map((g) => <option key={g} value={g} className="bg-neutral-900">{g}</option>)}
+          <span className="text-[10px] text-white/40 font-black uppercase tracking-widest">Genre:</span>
+          <select 
+            className="flex-1 bg-transparent text-sm font-bold outline-none appearance-none" 
+            value={selectedGenre} 
+            onChange={(e) => setSelectedGenre(e.target.value)}
+          >
+            {genreOptions.map((g) => (
+              <option key={g} value={g} className="bg-neutral-900 text-white">{g}</option>
+            ))}
           </select>
         </div>
       </div>
 
+      {/* 動画別ランキング */}
       <div className="overflow-hidden rounded-[2rem] border border-white/5 bg-neutral-900/40">
         <div className="grid grid-cols-[1.5fr_1fr_0.6fr_0.6fr_0.6fr] gap-2 bg-white/5 px-6 py-4 text-[9px] font-black uppercase text-white/30 tracking-widest">
           <div>Content</div>
@@ -129,20 +155,31 @@ export default function AdvancedAnalyticsPage() {
 
         <div className="divide-y divide-white/5">
           {viewItems.map((r, i) => (
-            <div key={r.id} className="grid grid-cols-[1.5fr_1fr_0.6fr_0.6fr_0.6fr] gap-2 px-6 py-5 text-sm hover:bg-white/[0.03]">
+            <div key={r.id} className="grid grid-cols-[1.5fr_1fr_0.6fr_0.6fr_0.6fr] gap-2 px-6 py-5 text-sm hover:bg-white/[0.03] transition group">
               <div className="truncate">
-                <div className="font-bold truncate"><span className="text-[10px] text-white/20 mr-3">{i + 1}</span>{r.title}</div>
+                <div className="font-bold truncate group-hover:text-indigo-400 transition">
+                  <span className="text-[10px] text-white/20 mr-3 font-mono">{i + 1}</span>
+                  {r.title || "Untitled"}
+                </div>
                 <div className="text-[9px] text-white/20 font-mono mt-1 uppercase tracking-tighter">{r.id}</div>
               </div>
               <div className="flex flex-wrap gap-1 items-center overflow-hidden">
-                {r.genres?.slice(0, 2).map(g => <span key={g} className="text-[8px] bg-white/5 px-2 py-0.5 rounded-full text-white/50 border border-white/5">{g}</span>)}
+                {r.genres?.slice(0, 2).map(g => (
+                  <span key={g} className="text-[8px] border border-white/10 px-2 py-0.5 rounded-full text-white/40 font-bold uppercase">{g}</span>
+                ))}
               </div>
               <div className="text-right tabular-nums font-medium">{r.play.toLocaleString()}</div>
               <div className="text-right tabular-nums font-bold text-orange-400/80">{r.click.toLocaleString()}</div>
-              <div className="text-right tabular-nums text-indigo-400 font-black">{pct(r.ctr)}</div>
+              <div className="text-right tabular-nums font-black text-indigo-400">{pct(r.ctr)}</div>
             </div>
           ))}
         </div>
+
+        {viewItems.length === 0 && (
+          <div className="p-24 text-center text-white/20 font-black italic tracking-widest text-sm uppercase">
+            No Data Found
+          </div>
+        )}
       </div>
     </div>
   );
@@ -154,12 +191,14 @@ function StatCard({ title, value, unit, highlight }: any) {
       <div className="text-[9px] font-black uppercase text-white/40 tracking-widest">{title}</div>
       <div className="mt-3 flex items-baseline gap-1">
         <span className="text-4xl font-black tracking-tighter tabular-nums">{value}</span>
-        <span className="text-xs font-bold text-white/20">{unit}</span>
+        {unit && <span className="text-xs font-bold text-white/20">{unit}</span>}
       </div>
     </div>
   );
 }
 
 function btn(active: boolean) {
-  return `rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-tighter transition-all ${active ? "bg-white text-black" : "bg-white/5 text-white/30 hover:bg-white/10"}`;
+  return `rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-tighter transition-all active:scale-95 ${
+    active ? "bg-white text-black shadow-lg" : "bg-white/5 text-white/30 hover:bg-white/10"
+  }`;
 }
