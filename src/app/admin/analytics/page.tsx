@@ -19,18 +19,36 @@ export default function AdvancedAnalyticsPage() {
     rows: Row[];
   } | null>(null);
 
-  // 🚨 初期ソートを 'play' (再生数) に固定
+  // 初期ソートを 'play' (再生数順) に固定
   const [sort, setSort] = useState<"play" | "click" | "ctr">("play");
   const [selectedGenre, setSelectedGenre] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
 
+  // 🚀 データの取得と正規化
   const loadStats = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/stats/summary", { cache: "no-store" });
       const json = await res.json();
+      
       if (json.ok) {
-        setData(json);
+        // APIからのデータを念のためフロント側でも数値に変換（安全策）
+        const normalizedRows = (json.rows || []).map((r: any) => ({
+          ...r,
+          play: Number(r.play || 0),
+          click: Number(r.click || 0),
+          ctr: Number(r.ctr || 0),
+          createdAt: Number(r.createdAt || 0)
+        }));
+
+        setData({
+          totals: {
+            play: Number(json.totals?.play || 0),
+            click: Number(json.totals?.click || 0),
+            ctr: Number(json.totals?.ctr || 0),
+          },
+          rows: normalizedRows
+        });
       }
     } catch (e) {
       console.error("Analytics Load Error:", e);
@@ -50,25 +68,30 @@ export default function AdvancedAnalyticsPage() {
     return ["ALL", ...Array.from(set)];
   }, [data]);
 
+  // 🚀 強力なソートロジック
   const viewItems = useMemo(() => {
     if (!data?.rows) return [];
     
     let list = [...data.rows];
 
+    // ジャンルフィルタ
     if (selectedGenre !== "ALL") {
       list = list.filter((r) => r.genres?.includes(selectedGenre));
     }
 
-    // 🚀 並び替え：常に数値の大きい順
+    // 並び替え実行
     list.sort((a, b) => {
       const valA = Number(a[sort] ?? 0);
       const valB = Number(b[sort] ?? 0);
 
+      // 数値に差がある場合は降順（大きい順）
       if (valB !== valA) {
         return valB - valA;
       }
-      // 数値が同じ場合はIDで固定してガタつきを防ぐ
-      return a.id.localeCompare(b.id);
+      
+      // 数値が同じ（0同士など）場合は、IDで固定してガタつきを防ぐ
+      // または、新しい順に並べる
+      return (b.createdAt || 0) - (a.createdAt || 0);
     });
 
     return list;
@@ -96,6 +119,7 @@ export default function AdvancedAnalyticsPage() {
         </Link>
       </header>
 
+      {/* 統計サマリー */}
       <div className="grid grid-cols-3 gap-3 mb-10">
         <StatCard title="Total Plays" value={data?.totals.play.toLocaleString() ?? "0"} unit="回" />
         <StatCard title="Total Clicks" value={data?.totals.click.toLocaleString() ?? "0"} unit="件" />
@@ -104,7 +128,6 @@ export default function AdvancedAnalyticsPage() {
 
       <div className="space-y-4 mb-6">
         <div className="flex flex-wrap gap-2">
-          {/* 🚨 新着順ボタンを削除し、分析に特化 */}
           <button onClick={() => setSort("play")} className={btn(sort === "play")}>再生順</button>
           <button onClick={() => setSort("click")} className={btn(sort === "click")}>クリック順</button>
           <button onClick={() => setSort("ctr")} className={btn(sort === "ctr")}>効率順</button>
@@ -120,6 +143,7 @@ export default function AdvancedAnalyticsPage() {
           </button>
         </div>
         
+        {/* ジャンルフィルタ */}
         <div className="flex items-center gap-4 bg-white/5 p-4 rounded-2xl border border-white/5">
           <span className="text-[10px] text-white/40 font-black uppercase tracking-widest">Genre:</span>
           <select 
@@ -134,6 +158,7 @@ export default function AdvancedAnalyticsPage() {
         </div>
       </div>
 
+      {/* 動画別データリスト */}
       <div className="overflow-hidden rounded-[2rem] border border-white/5 bg-neutral-900/40 backdrop-blur-sm">
         <div className="grid grid-cols-[1.5fr_1fr_0.6fr_0.6fr_0.6fr] gap-2 bg-white/5 px-6 py-4 text-[9px] font-black uppercase text-white/30 tracking-widest">
           <div>Content</div>
