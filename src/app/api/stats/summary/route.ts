@@ -5,53 +5,52 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    // 全体統計の取得
     const global = (await redis.hgetall("stats:global")) as Record<string, string> | null;
-    
-    // 最新動画の取得
     const rows = await redis.lrange("videos", 0, 199);
+    
     if (!rows || rows.length === 0) {
       return NextResponse.json({ ok: true, totals: { play: 0, click: 0, ctr: 0 }, rows: [] });
     }
 
     const videoList = rows.map((r) => (typeof r === "string" ? JSON.parse(r) : r));
-
-    // パイプラインで個別統計を一括取得
     const pipeline = redis.pipeline();
+
     videoList.forEach((v: any) => {
-      pipeline.hgetall(`stats:video:${v.id}`);
+      // IDを綺麗にしてから問い合わせる
+      const cleanId = String(v.id).trim();
+      pipeline.hgetall(`stats:video:${cleanId}`);
     });
+
     const allStats = await pipeline.exec();
 
-    // 🚀 ここで数値を確実にマッピング
     const statsData = videoList.map((v: any, index: number) => {
       const s = allStats[index] as Record<string, string> | null;
-      const p = s && s.play ? parseInt(s.play, 10) : 0;
-      const c = s && s.click ? parseInt(s.click, 10) : 0;
-      
+      // 🚨 playCount や play など、どんな名前で保存されていても数値化
+      const p = Number(s?.play || s?.playCount || 0);
+      const c = Number(s?.click || s?.clickCount || 0);
+
       return {
         id: v.id,
-        title: v.title,
+        title: v.title || "無題の動画",
         genres: v.genres || [],
-        play: p, // 画面側の期待する名前
+        play: p,
         click: c,
         ctr: p > 0 ? (c / p) : 0,
-        createdAt: v.createdAt
+        createdAt: v.createdAt || 0
       };
     });
 
     return NextResponse.json({
       ok: true,
       totals: {
-        play: parseInt(global?.play || "0", 10),
-        click: parseInt(global?.click || "0", 10),
-        ctr: parseInt(global?.play || "0", 10) > 0 
-          ? (parseInt(global?.click || "0", 10) / parseInt(global?.play || "0", 10)) 
-          : 0,
+        play: Number(global?.play || 0),
+        click: Number(global?.click || 0),
+        ctr: Number(global?.play || 0) > 0 ? (Number(global?.click || 0) / Number(global?.play || 0)) : 0,
       },
       rows: statsData
     });
   } catch (e) {
+    console.error("Summary API Error:", e);
     return NextResponse.json({ ok: false }, { status: 500 });
   }
 }
