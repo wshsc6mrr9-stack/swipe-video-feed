@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useEffect, useRef } from "react";
 import VideoPlayer from "@/components/VideoPlayer";
 
 type VideoItem = {
@@ -29,7 +29,35 @@ export default function VideoCard({ video, isActive }: Props) {
   const affLabel =
     (video.affLabel ?? video.affiliateLabel ?? "商品を見る")?.trim() || "商品を見る";
 
-  // ✅ VideoPlayer に渡すオブジェクトを安定化（レンダー毎に無駄な差分を減らす）
+  // ---------------------------
+  // 🚀 トラッキング（計測）機能
+  // ---------------------------
+  const trackSentRef = useRef(false);
+
+  const trackAction = async (type: "play" | "click") => {
+    try {
+      await fetch("/api/stats/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId: video.id, type }),
+      });
+    } catch (e) {
+      console.error("Tracking failed", e);
+    }
+  };
+
+  // ✅ 動画がアクティブ（表示）になったら「再生数」をカウント
+  useEffect(() => {
+    if (isActive && !trackSentRef.current) {
+      trackAction("play");
+      trackSentRef.current = true; // 1回の表示につき1回だけカウント
+    }
+    if (!isActive) {
+      trackSentRef.current = false; // 画面から外れたらリセット（再度戻ってきたらカウント）
+    }
+  }, [isActive, video.id]);
+
+  // ✅ VideoPlayer に渡すオブジェクトを安定化
   const playerVideo = useMemo(() => {
     return {
       ...video,
@@ -39,7 +67,6 @@ export default function VideoCard({ video, isActive }: Props) {
       affLabel,
       poster: video.poster,
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [video.id, video.title, src, affUrl, affLabel, video.poster]);
 
   return (
@@ -48,8 +75,12 @@ export default function VideoCard({ video, isActive }: Props) {
       style={{
         height: "100svh",
       }}
+      // ✅ カード全体やリンクがクリックされた時に「アフィ移動」を計測したい場合
+      onClick={() => {
+        // もしVideoPlayer内のボタンだけでなく、カード操作も計測したい場合はここに追加
+        // 今回はボタン側（VideoPlayer内）で制御するのが一般的です
+      }}
     >
-      {/* ✅ safe-area を VideoPlayer 側のUIレイヤーで使えるようにする */}
       <div
         className="absolute inset-0"
         style={{
@@ -63,6 +94,9 @@ export default function VideoCard({ video, isActive }: Props) {
           // @ts-ignore
           video={playerVideo}
           isActive={isActive}
+          // ✅ VideoPlayer 側でアフィリンクが押された時に実行するコールバック（もし実装があれば）
+          // @ts-ignore
+          onAffiliateClick={() => trackAction("click")}
         />
       </div>
     </div>
