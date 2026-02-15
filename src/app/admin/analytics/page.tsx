@@ -19,19 +19,34 @@ export default function AdvancedAnalyticsPage() {
     rows: Row[];
   } | null>(null);
 
-  // 🚨 初期ソートを 'play' (再生数) に設定
   const [sort, setSort] = useState<"play" | "click" | "ctr" | "createdAt">("play");
   const [selectedGenre, setSelectedGenre] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
 
-  // 🚀 統計データを取得する関数
+  // 🚀 APIからデータを取得
   const loadStats = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/stats/summary", { cache: "no-store" });
       const json = await res.json();
+      
       if (json.ok) {
-        setData(json);
+        // 🚨 ここがポイント：APIの返り値が playCount 等になっていても play に変換して取り込む
+        const normalizedRows = (json.rows || []).map((r: any) => ({
+          ...r,
+          play: Number(r.play ?? r.playCount ?? 0),
+          click: Number(r.click ?? r.clickCount ?? 0),
+          ctr: Number(r.ctr ?? 0)
+        }));
+
+        setData({
+          totals: {
+            play: Number(json.totals?.play ?? 0),
+            click: Number(json.totals?.click ?? 0),
+            ctr: Number(json.totals?.ctr ?? 0),
+          },
+          rows: normalizedRows
+        });
       }
     } catch (e) {
       console.error("Analytics Load Error:", e);
@@ -44,7 +59,6 @@ export default function AdvancedAnalyticsPage() {
     loadStats();
   }, [loadStats]);
 
-  // ジャンル選択肢の生成
   const genreOptions = useMemo(() => {
     if (!data?.rows) return ["ALL"];
     const set = new Set<string>();
@@ -52,29 +66,20 @@ export default function AdvancedAnalyticsPage() {
     return ["ALL", ...Array.from(set)];
   }, [data]);
 
-  // 🚀 強力なソート＆フィルタロジック
   const viewItems = useMemo(() => {
     if (!data?.rows) return [];
-    
     let list = [...data.rows];
 
-    // 1. ジャンルで絞り込み
     if (selectedGenre !== "ALL") {
       list = list.filter((r) => r.genres?.includes(selectedGenre));
     }
 
-    // 2. 並び替え実行
+    // 🚀 数値の大きい順に確実に並び替える
     list.sort((a, b) => {
       const valA = Number(a[sort] ?? 0);
       const valB = Number(b[sort] ?? 0);
-
-      // 数値に差がある場合は降順（大きい順）
-      if (valB !== valA) {
-        return valB - valA;
-      }
-      
-      // 数値が同じ（0同士など）なら、名前で並び替えてリストが動かないように見せるのを防ぐ
-      return a.title.localeCompare(b.title);
+      if (valB !== valA) return valB - valA;
+      return b.createdAt - a.createdAt;
     });
 
     return list;
@@ -83,67 +88,44 @@ export default function AdvancedAnalyticsPage() {
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
   if (loading && !data) {
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center font-black italic tracking-widest">
-        ANALYZING...
-      </div>
-    );
+    return <div className="min-h-screen bg-black text-white flex items-center justify-center font-black italic tracking-widest">ANALYZING...</div>;
   }
 
   return (
     <div className="min-h-screen bg-black text-white p-4 pb-20 select-none">
-      {/* ヘッダー */}
       <header className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-black italic tracking-tighter uppercase">Dashboard</h1>
-          <p className="text-[10px] text-indigo-500 font-bold tracking-widest uppercase">Sort Mode: {sort}</p>
+          <p className="text-[10px] text-indigo-500 font-bold tracking-widest uppercase">Sort: {sort}</p>
         </div>
         <Link href="/admin" className="rounded-2xl bg-white text-black px-5 py-2 text-xs font-black transition active:scale-95">
           BACK
         </Link>
       </header>
 
-      {/* 統計サマリーカード */}
       <div className="grid grid-cols-3 gap-3 mb-10">
         <StatCard title="Total Plays" value={data?.totals.play.toLocaleString() ?? "0"} unit="回" />
         <StatCard title="Total Clicks" value={data?.totals.click.toLocaleString() ?? "0"} unit="件" />
         <StatCard title="Avg. CTR" value={pct(data?.totals.ctr ?? 0)} highlight />
       </div>
 
-      {/* 操作パネル */}
       <div className="space-y-4 mb-6">
         <div className="flex flex-wrap gap-2">
           <button onClick={() => setSort("play")} className={btn(sort === "play")}>再生順</button>
           <button onClick={() => setSort("click")} className={btn(sort === "click")}>クリック順</button>
           <button onClick={() => setSort("ctr")} className={btn(sort === "ctr")}>効率順</button>
-          <button onClick={() => setSort("createdAt")} className={btn(sort === "createdAt")}>新しい順</button>
-          
-          <button 
-            onClick={() => {
-              setData(null);
-              loadStats();
-            }} 
-            className="ml-auto bg-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black tracking-widest active:scale-95 transition"
-          >
-            REFRESH
-          </button>
+          <button onClick={() => setSort("createdAt")} className={btn(sort === "createdAt")}>新着順</button>
+          <button onClick={() => { setData(null); loadStats(); }} className="ml-auto bg-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black tracking-widest">REFRESH</button>
         </div>
         
         <div className="flex items-center gap-4 bg-white/5 p-4 rounded-2xl border border-white/5">
           <span className="text-[10px] text-white/40 font-black uppercase tracking-widest">Genre:</span>
-          <select 
-            className="flex-1 bg-transparent text-sm font-bold outline-none appearance-none" 
-            value={selectedGenre} 
-            onChange={(e) => setSelectedGenre(e.target.value)}
-          >
-            {genreOptions.map((g) => (
-              <option key={g} value={g} className="bg-neutral-900 text-white">{g}</option>
-            ))}
+          <select className="flex-1 bg-transparent text-sm font-bold outline-none" value={selectedGenre} onChange={(e) => setSelectedGenre(e.target.value)}>
+            {genreOptions.map((g) => <option key={g} value={g} className="bg-neutral-900">{g}</option>)}
           </select>
         </div>
       </div>
 
-      {/* 動画別ランキング */}
       <div className="overflow-hidden rounded-[2rem] border border-white/5 bg-neutral-900/40">
         <div className="grid grid-cols-[1.5fr_1fr_0.6fr_0.6fr_0.6fr] gap-2 bg-white/5 px-6 py-4 text-[9px] font-black uppercase text-white/30 tracking-widest">
           <div>Content</div>
@@ -164,7 +146,7 @@ export default function AdvancedAnalyticsPage() {
                 <div className="text-[9px] text-white/20 font-mono mt-1 uppercase tracking-tighter">{r.id}</div>
               </div>
               <div className="flex flex-wrap gap-1 items-center overflow-hidden">
-                {r.genres?.slice(0, 2).map(g => (
+                {r.genres?.slice(0, 1).map(g => (
                   <span key={g} className="text-[8px] border border-white/10 px-2 py-0.5 rounded-full text-white/40 font-bold uppercase">{g}</span>
                 ))}
               </div>
@@ -174,12 +156,6 @@ export default function AdvancedAnalyticsPage() {
             </div>
           ))}
         </div>
-
-        {viewItems.length === 0 && (
-          <div className="p-24 text-center text-white/20 font-black italic tracking-widest text-sm uppercase">
-            No Data Found
-          </div>
-        )}
       </div>
     </div>
   );
@@ -198,7 +174,5 @@ function StatCard({ title, value, unit, highlight }: any) {
 }
 
 function btn(active: boolean) {
-  return `rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-tighter transition-all active:scale-95 ${
-    active ? "bg-white text-black shadow-lg" : "bg-white/5 text-white/30 hover:bg-white/10"
-  }`;
+  return `rounded-xl px-4 py-2.5 text-[10px] font-black uppercase transition-all ${active ? "bg-white text-black shadow-lg" : "bg-white/5 text-white/30"}`;
 }
