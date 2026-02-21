@@ -15,12 +15,8 @@ const EVT_MUTED = "audio_muted_changed_v1";
 const KEY_LIKED = "liked_videos_v1";
 const EVT_LIKES = "likes_changed_v1";
 
-// ✅ 全動画を常に +7秒スタート
 const START_OFFSET_SEC = 7;
-
-// ✅ これ以上動いたら「スワイプ扱い」でタップ判定しない（誤停止対策）
 const TAP_MOVE_PX = 14;
-// ✅ これ以上長押しはタップ扱いしない
 const TAP_MAX_MS = 350;
 
 function isHlsUrl(url?: string) {
@@ -101,13 +97,11 @@ function isNotAllowed(err: any) {
   );
 }
 
-// ✅ MP4は Safari に「最初から7秒で読む」ように指示（#t=7）
 function withMediaFragmentStart(url: string) {
   const u = String(url ?? "");
   if (!u) return u;
   if (!isMp4Url(u)) return u;
   if (u.includes("#t=")) return u;
-  // 既に # があるなら触らない（壊す可能性）
   if (u.includes("#")) return u;
   return `${u}#t=${START_OFFSET_SEC}`;
 }
@@ -126,9 +120,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   const [ready, setReady] = useState(false);
   const [playing, setPlaying] = useState(false);
-  
-  // ✅ 強制3秒待機用のステート
-  const [minTimePassed, setMinTimePassed] = useState(false);
 
   const [muted, setMuted] = useState<boolean>(() => readMuted());
   const [forcedMuted, setForcedMuted] = useState(false);
@@ -139,7 +130,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const [duration, setDuration] = useState(0);
   const [current, setCurrent] = useState(0);
 
-  // like
   const [likeCount, setLikeCount] = useState<number>(() =>
     Number(video.likeCount ?? 0)
   );
@@ -147,7 +137,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     readLikedSet().has(String(video.id))
   );
 
-  // refs
   const currentRef = useRef(0);
   const durationRef = useRef(0);
   const lastUiRef = useRef(0);
@@ -161,13 +150,11 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const sentPlayRef = useRef(false);
   const userPausedRef = useRef(false);
 
-  // ✅ 7秒スキップ：状態機械
   const jumpedRef = useRef(false);
   const seekingRef = useRef(false);
   const seekAttemptsRef = useRef(0);
   const seekDeadlineRef = useRef(0);
 
-  // ✅ 黒防止/初回フレーム検知
   const [frameOk, setFrameOk] = useState(false);
   const frameOkRef = useRef(false);
 
@@ -184,7 +171,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     jumpedRef.current = false;
     seekingRef.current = false;
     seekAttemptsRef.current = 0;
-    seekDeadlineRef.current = performance.now() + 4500; // 4.5秒だけ粘る
+    seekDeadlineRef.current = performance.now() + 4500; 
 
     frameOkRef.current = false;
     setFrameOk(false);
@@ -196,14 +183,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     durationRef.current = 0;
     setCurrent(0);
     setDuration(0);
-
-    // ✅ 動画が変わるたびに「3秒カウント」をリセットして開始
-    setMinTimePassed(false);
-    const timer = setTimeout(() => {
-      setMinTimePassed(true);
-    }, 3000); // 3秒強制待機
-
-    return () => clearTimeout(timer);
   }, [video.id]);
 
   useEffect(() => {
@@ -247,7 +226,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     return t >= target - 0.25;
   };
 
-  // ✅ “最初のフレームが出た/時間が進んだ”タイミングで、まだ7秒じゃないなら強制で合わせる
   const hardSeekToStart = async (reason: string) => {
     const el = videoRef.current;
     if (!el) return;
@@ -262,19 +240,16 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       return;
     }
 
-    // これ以上リトライしすぎない
     if (seekAttemptsRef.current >= 10) return;
 
     seekingRef.current = true;
     seekAttemptsRef.current += 1;
 
     try {
-      // 一旦止めてからseek（Safariの“無視”率が下がる）
       try {
         el.pause();
       } catch {}
 
-      // seekableが育つのをちょい待つ（ここが地味に効く）
       await sleep(120);
 
       try {
@@ -287,7 +262,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         }
       } catch {}
 
-      // 反映待ち（seekedが来ない個体もあるから短め）
       await sleep(120);
 
       if (isAtTarget(el, target)) {
@@ -297,7 +271,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         if (seekRef.current) seekRef.current.value = String(target);
       }
 
-      // 再生に戻す
       if (activeRef.current && document.visibilityState === "visible" && !userPausedRef.current) {
         el.muted = effectiveMuted;
         try {
@@ -329,7 +302,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     } catch (err: any) {
       setPlaying(false);
 
-      // ✅ 音ONが拒否されたら強制ミュートで復帰
       if (!effectiveMuted && isNotAllowed(err)) {
         try {
           forcedMutedRef.current = true;
@@ -346,7 +318,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     }
   };
 
-  // タブ非表示
   useEffect(() => {
     const onVis = () => {
       const el = videoRef.current;
@@ -369,7 +340,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, muted, forcedMuted, src]);
 
-  // HLS attach
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
@@ -386,13 +356,11 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       el.poster = posterUrl || "";
     } catch {}
 
-    // ✅ “最初から出てる感”のため：preloadはauto
     try {
       el.preload = "auto";
     } catch {}
 
     if (isHlsUrl(rawSrc)) {
-      // HLSはrawSrcで
       if (Hls.isSupported()) {
         const hls = new Hls({
           lowLatencyMode: false,
@@ -419,11 +387,10 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           }
         });
       } else {
-        el.src = rawSrc; // Safari native HLS
+        el.src = rawSrc; 
         setReady(true);
       }
     } else {
-      // ✅ MP4は#t=7付けたsrcで読み込む
       el.src = src;
       setReady(true);
     }
@@ -436,7 +403,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     };
   }, [rawSrc, src, posterUrl]);
 
-  // active/inactive
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
@@ -454,12 +420,10 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     userPausedRef.current = false;
     tryResume("active");
 
-    // ✅ 念のため：すぐ一回だけseekを試す（失敗しても後でhardSeekが拾う）
     window.setTimeout(() => hardSeekToStart("active_kick"), 80);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, muted, forcedMuted, video.id, src]);
 
-  // events
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
@@ -474,14 +438,12 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     const onLoadedMeta = () => {
       updateDuration();
       setReady(true);
-      // metadata出た時点で一回だけ試す（ダメでも後で拾う）
       hardSeekToStart("loadedmeta");
     };
 
     const onLoadedData = () => {
       frameOkRef.current = true;
       setFrameOk(true);
-      // “絵が出た”＝seekが通りやすい瞬間。ここで本命を叩く。
       hardSeekToStart("loadeddata");
     };
 
@@ -489,7 +451,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       setPlaying(true);
       frameOkRef.current = true;
       setFrameOk(true);
-      // “再生が始まった”＝時間が進む。まだ7秒じゃないなら修正。
       hardSeekToStart("playing");
     };
 
@@ -503,13 +464,11 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         setCurrent(t);
       }
 
-      // ✅ ここで到達判定
       const target = targetStart(el);
       if (!jumpedRef.current && t >= target - 0.25) {
         jumpedRef.current = true;
       }
 
-      // ✅ まだ到達してないのに時間が進み始めた＝今がチャンス
       if (!jumpedRef.current && t > 0.05 && t < target - 0.25) {
         hardSeekToStart("timeupdate");
       }
@@ -541,7 +500,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src, muted, forcedMuted, video.id]);
 
-  // ✅ requestVideoFrameCallbackで再生バー安定 + “フレーム出た瞬間”にhardSeek
   const rvfcIdRef = useRef<number | null>(null);
   useEffect(() => {
     if (!isActive) return;
@@ -577,7 +535,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
             setCurrent(mt);
           }
 
-          // ✅ フレームが来た＝今が一番seek通る
           if (!jumpedRef.current) {
             const target = targetStart(el);
             if (mt >= target - 0.25) {
@@ -748,7 +705,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     }
   };
 
-  // ✅ 動画タップ判定（判定時間を400msに延長して誤操作を防止）
   const tapRef = useRef({ 
     downX: 0, 
     downY: 0, 
@@ -829,9 +785,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   const showBlackCover = !posterUrl && !frameOk;
 
-  // 🌟 動画の準備ができているか、または3秒経過したか
-  const showLoadingOverlay = !ready || !minTimePassed;
-
   return (
     <div style={{ position: "relative", width: "100%", height: "100%", background: "black", overflow: "hidden", touchAction: "pan-y" }}>
       <video
@@ -860,32 +813,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       {showBlackCover ? (
         <div style={{ position: "absolute", inset: 0, zIndex: 2, background: "black", pointerEvents: "none" }} />
       ) : null}
-
-      {/* ✅ 修正：3秒間は強制的にこの操作説明を出し続ける */}
-      {showLoadingOverlay && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            zIndex: 50,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "black",
-            color: "rgba(255,255,255,0.8)",
-            pointerEvents: "none",
-            gap: 20,
-            textAlign: "center",
-          }}
-        >
-          <div style={{ fontSize: 14, fontWeight: "bold" }}>動画を読み込み中...</div>
-          <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.8 }}>
-            <div>↓ 下にスワイプで次の動画</div>
-            <div>👆👉 左右ダブルタップでスキップ</div>
-          </div>
-        </div>
-      )}
 
       {showPR ? (
         <div
@@ -941,6 +868,12 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           </button>
         </div>
       ) : null}
+
+      {!ready && (
+        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "rgba(255,255,255,0.65)", zIndex: 10, pointerEvents: "none" }}>
+          Loading...
+        </div>
+      )}
 
       <div
         data-no-swipe="1"

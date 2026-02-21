@@ -1,4 +1,3 @@
-// src/components/VideoFeed.tsx
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -14,15 +13,12 @@ type VideoItem = {
   src?: string;
   poster?: string;
   srcType?: "mp4" | "hls";
-
   affUrl?: string;
   affLabel?: string;
   affiliateUrl?: string;
   affiliateLabel?: string;
-
   genres?: string[];
   genre?: string;
-
   likeCount?: number;
 };
 
@@ -68,6 +64,13 @@ export default function VideoFeed({
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
+
+  // 🌟 追加：最初の強制3秒ローディング画面
+  const [showSplash, setShowSplash] = useState(true);
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSplash(false), 3000);
+    return () => clearTimeout(timer);
+  }, []);
 
   const [vh, setVh] = useState<number>(() =>
     typeof window !== "undefined" ? Math.round(window.innerHeight) : 0
@@ -116,7 +119,6 @@ export default function VideoFeed({
     };
   }, []);
 
-  // 🚀 修正：検索条件をつけてAPIを叩くように変更
   const loadMoreVideos = useCallback(async () => {
     if (loading) return; 
     setLoading(true);
@@ -185,7 +187,6 @@ export default function VideoFeed({
     }
   }, [loading, genres, query]);
 
-  // 🚀 修正：初回だけでなく、ジャンル変更でitemsが空になった時も発動する
   useEffect(() => {
     if (items.length === 0) {
       loadMoreVideos();
@@ -228,7 +229,6 @@ export default function VideoFeed({
     return () => window.removeEventListener(EVT_LIKES, on as any);
   }, []);
 
-  // サーバー側で絞り込み済みですが、念のためのフィルターも残しておきます
   const viewItems = useMemo(() => {
     const sel = Array.isArray(genres) ? genres : [GENRE_ALL];
     
@@ -452,6 +452,8 @@ export default function VideoFeed({
   const safeLeft = `calc(env(safe-area-inset-left) + ${SAFE_PAD}px)`;
   const safeRight = `calc(env(safe-area-inset-right) + ${SAFE_PAD}px)`;
 
+  const isInitialLoading = items.length === 0 || showSplash;
+
   return (
     <div
       className="relative w-full bg-black overflow-hidden"
@@ -461,6 +463,30 @@ export default function VideoFeed({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
+      {isInitialLoading && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 9999,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "black",
+            color: "rgba(255,255,255,0.8)",
+            touchAction: "none",
+            pointerEvents: "auto",
+          }}
+        >
+          <div style={{ fontSize: 16, fontWeight: "bold", marginBottom: 20 }}>動画を読み込み中...</div>
+          <div style={{ fontSize: 13, opacity: 0.8, lineHeight: 2, textAlign: "center" }}>
+            <div>↓ 下にスワイプで次の動画</div>
+            <div>👆👉 左右ダブルタップでスキップ</div>
+          </div>
+        </div>
+      )}
+
       {!hideGenreMenu ? (
         <div
           className="absolute z-40"
@@ -472,7 +498,6 @@ export default function VideoFeed({
             onChange={(v) => {
               if (initialGenre) return;
               setGenres(v);
-              // 🚀 修正：ジャンルが変わったら現在のリストを全消しして再取得
               setItems([]); 
               setIndex(0);
               setTranslate(0, "none");
@@ -480,7 +505,6 @@ export default function VideoFeed({
             query={query}
             onChangeQuery={(s) => {
               setQuery(s);
-              // 🚀 修正：検索ワードが変わったらリストを全消しして再取得
               setItems([]); 
               setIndex(0);
               setTranslate(0, "none");
