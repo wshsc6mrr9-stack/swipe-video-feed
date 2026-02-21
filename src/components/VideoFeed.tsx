@@ -65,12 +65,6 @@ export default function VideoFeed({
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  const [showSplash, setShowSplash] = useState(true);
-  useEffect(() => {
-    const timer = setTimeout(() => setShowSplash(false), 3000);
-    return () => clearTimeout(timer);
-  }, []);
-
   const [vh, setVh] = useState<number>(() =>
     typeof window !== "undefined" ? Math.round(window.innerHeight) : 0
   );
@@ -451,7 +445,7 @@ export default function VideoFeed({
   const safeLeft = `calc(env(safe-area-inset-left) + ${SAFE_PAD}px)`;
   const safeRight = `calc(env(safe-area-inset-right) + ${SAFE_PAD}px)`;
 
-  const isInitialLoading = items.length === 0 || showSplash;
+  const isInitialLoading = items.length === 0;
 
   return (
     <div
