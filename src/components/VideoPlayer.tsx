@@ -737,8 +737,15 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     }
   };
 
-  // ✅ 動画タップ判定
-  const tapRef = useRef({ downX: 0, downY: 0, downT: 0, moved: false });
+  // ✅ 動画タップ判定（ダブルタップで5秒スキップ対応版）
+  const tapRef = useRef({ 
+    downX: 0, 
+    downY: 0, 
+    downT: 0, 
+    moved: false,
+    lastTapT: 0,
+    singleTapTimer: null as any
+  });
 
   const onVideoPointerDown = (e: React.PointerEvent) => {
     tapRef.current.downX = e.clientX;
@@ -753,11 +760,33 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     if (Math.abs(dx) + Math.abs(dy) > TAP_MOVE_PX) tapRef.current.moved = true;
   };
 
-  const onVideoPointerUp = () => {
+  const onVideoPointerUp = (e: React.PointerEvent) => {
     const dt = performance.now() - tapRef.current.downT;
     if (tapRef.current.moved) return;
     if (dt > TAP_MAX_MS) return;
-    togglePlay();
+
+    const now = performance.now();
+    const timeSinceLastTap = now - tapRef.current.lastTapT;
+
+    if (timeSinceLastTap < 300) {
+      clearTimeout(tapRef.current.singleTapTimer);
+      tapRef.current.lastTapT = 0;
+
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+
+      if (clickX > rect.width / 2) {
+        skip(5);
+      } else {
+        skip(-5);
+      }
+    } else {
+      tapRef.current.lastTapT = now;
+      clearTimeout(tapRef.current.singleTapTimer);
+      tapRef.current.singleTapTimer = setTimeout(() => {
+        togglePlay();
+      }, 300);
+    }
   };
 
   const showTapSound = isActive && effectiveMuted;
