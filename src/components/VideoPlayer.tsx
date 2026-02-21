@@ -126,6 +126,9 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   const [ready, setReady] = useState(false);
   const [playing, setPlaying] = useState(false);
+  
+  // ✅ 強制3秒待機用のステート
+  const [minTimePassed, setMinTimePassed] = useState(false);
 
   const [muted, setMuted] = useState<boolean>(() => readMuted());
   const [forcedMuted, setForcedMuted] = useState(false);
@@ -193,6 +196,14 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     durationRef.current = 0;
     setCurrent(0);
     setDuration(0);
+
+    // ✅ 動画が変わるたびに「3秒カウント」をリセットして開始
+    setMinTimePassed(false);
+    const timer = setTimeout(() => {
+      setMinTimePassed(true);
+    }, 3000); // 3秒強制待機
+
+    return () => clearTimeout(timer);
   }, [video.id]);
 
   useEffect(() => {
@@ -818,6 +829,9 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   const showBlackCover = !posterUrl && !frameOk;
 
+  // 🌟 動画の準備ができているか、または3秒経過したか
+  const showLoadingOverlay = !ready || !minTimePassed;
+
   return (
     <div style={{ position: "relative", width: "100%", height: "100%", background: "black", overflow: "hidden", touchAction: "pan-y" }}>
       <video
@@ -847,8 +861,8 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         <div style={{ position: "absolute", inset: 0, zIndex: 2, background: "black", pointerEvents: "none" }} />
       ) : null}
 
-      {/* ✅ 修正：ロード中の操作ガイド（読み込み中、スワイプ、ダブルタップ） */}
-      {!ready && (
+      {/* ✅ 修正：3秒間は強制的にこの操作説明を出し続ける */}
+      {showLoadingOverlay && (
         <div
           style={{
             position: "absolute",
