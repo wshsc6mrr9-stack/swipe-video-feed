@@ -1,14 +1,22 @@
 import { NextResponse } from "next/server";
-// 👇 修正ポイント: あなたの環境に合わせて "upstash" を "redis" に変更しました
-import { getRandomVideos } from "@/lib/redis"; 
+import { getFilteredVideos } from "@/lib/redis";
 
-// 毎回ランダムに動画を取得するために必須の設定
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    // ランダムに50個取得して返す
-    const videos = await getRandomVideos(50);
+    // URLからジャンルと検索ワードを受け取る
+    const { searchParams } = new URL(request.url);
+    const genresParam = searchParams.get('genres');
+    const queryParam = searchParams.get('query') || "";
+
+    let genres: string[] = [];
+    if (genresParam) {
+      genres = genresParam.split(',');
+    }
+
+    // データベース検索を実行
+    const videos = await getFilteredVideos(genres, queryParam, 50);
     return NextResponse.json(videos);
   } catch (e) {
     console.error(e);

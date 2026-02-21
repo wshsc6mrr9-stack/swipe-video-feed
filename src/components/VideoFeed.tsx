@@ -28,10 +28,6 @@ type VideoItem = {
 
 const EVT_LIKES = "likes_changed_v1";
 
-// ---------------------------
-// Helpers
-// ---------------------------
-
 function isInteractiveTarget(target: EventTarget | null) {
   const el = target as HTMLElement | null;
   if (!el) return false;
@@ -50,7 +46,6 @@ function isInteractiveTarget(target: EventTarget | null) {
   return !!hit;
 }
 
-// 🚨 修正箇所：どんな型(null/undefined)が来てもエラーにならないように変更
 function normalizeText(s: any) {
   return String(s ?? "")
     .normalize("NFKC")
@@ -62,7 +57,7 @@ function normalizeText(s: any) {
 type Props = {
   initialGenre?: GenreKey;
   hideGenreMenu?: boolean;
-  startId?: string; // ✅ /video/[id] で最初に表示したい動画
+  startId?: string;
 };
 
 export default function VideoFeed({
@@ -70,23 +65,19 @@ export default function VideoFeed({
   hideGenreMenu,
   startId,
 }: Props = {}) {
-  // ✅ 動画データ管理
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
-  const [loading, setLoading] = useState(false); // 重複読み込み防止
+  const [loading, setLoading] = useState(false);
 
-  // 画面サイズ
   const [vh, setVh] = useState<number>(() =>
     typeof window !== "undefined" ? Math.round(window.innerHeight) : 0
   );
 
-  // ジャンル・検索
   const [genres, setGenres] = useState<GenreKey[]>(
     initialGenre ? [initialGenre] : [GENRE_ALL]
   );
   const [query, setQuery] = useState("");
 
-  // ====== DOM操作用 ======
   const trackRef = useRef<HTMLDivElement | null>(null);
   const setTranslate = useCallback((y: number, transition?: string) => {
     const el = trackRef.current;
@@ -95,7 +86,6 @@ export default function VideoFeed({
     el.style.transform = `translate3d(0, ${y}px, 0)`;
   }, []);
 
-  // ====== ドラッグ用変数 ======
   const draggingRef = useRef(false);
   const animatingRef = useRef(false);
   const startYRef = useRef(0);
@@ -103,16 +93,13 @@ export default function VideoFeed({
   const startTimeRef = useRef(0);
   const pointerIdRef = useRef<number | null>(null);
 
-  // ✅ startId 適用フラグ
   const appliedStartIdRef = useRef<string>("");
 
-  // ✅ indexの非同期参照用
   const indexRef = useRef(index);
   useEffect(() => {
     indexRef.current = index;
   }, [index]);
 
-  // ===== 高さ追従 =====
   useEffect(() => {
     const update = () => {
       if (draggingRef.current) return;
@@ -129,21 +116,19 @@ export default function VideoFeed({
     };
   }, []);
 
-  // ---------------------------
-  // 🚀 無限ロード & データ取得ロジック
-  // ---------------------------
-  
-  const loadMoreVideos = useCallback(async (isFirstLoad = false) => {
-    // すでに読み込み中なら中断（連打防止）
+  // 🚀 修正：検索条件をつけてAPIを叩くように変更
+  const loadMoreVideos = useCallback(async () => {
     if (loading) return; 
     setLoading(true);
 
     try {
-      // ✅ ランダム取得API (/api/feed) を叩く
-      const res = await fetch("/api/feed", { cache: "no-store" });
+      const params = new URLSearchParams();
+      if (genres.length > 0) params.append("genres", genres.join(","));
+      if (query) params.append("query", query);
+
+      const res = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
       const json = await res.json().catch(() => null);
       
-      // レスポンスが配列かチェック
       const list = (Array.isArray(json) ? json : json?.items ?? []) as any[];
       
       if (!list.length) {
@@ -151,7 +136,6 @@ export default function VideoFeed({
         return;
       }
 
-      // データの正規化
       const normalized: VideoItem[] = list
         .map((v) => {
           const affUrl = (v?.affUrl ?? v?.affiliateUrl) as string | undefined;
@@ -175,7 +159,6 @@ export default function VideoFeed({
         })
         .filter((v) => !!v.id);
 
-      // いいね数の取得
       try {
         const ids = normalized.map((v) => v.id);
         if (ids.length) {
@@ -189,7 +172,6 @@ export default function VideoFeed({
         }
       } catch {}
 
-      // ステートに追加（重複排除）
       setItems((prev) => {
         const existingIds = new Set(prev.map((p) => p.id));
         const newItems = normalized.filter((n) => !existingIds.has(n.id));
@@ -201,26 +183,21 @@ export default function VideoFeed({
     } finally {
       setLoading(false);
     }
-  }, [loading]);
+  }, [loading, genres, query]);
 
-  // ✅ 初回マウント時にロード
+  // 🚀 修正：初回だけでなく、ジャンル変更でitemsが空になった時も発動する
   useEffect(() => {
     if (items.length === 0) {
-      loadMoreVideos(true);
+      loadMoreVideos();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [items.length, loadMoreVideos]);
 
-  // ✅ 「残り5本」になったら次を読み込むセンサー
   useEffect(() => {
     if (items.length > 0 && index >= items.length - 5) {
       loadMoreVideos();
     }
   }, [index, items.length, loadMoreVideos]);
 
-  // ---------------------------
-  // ジャンル切り替え & 初期化
-  // ---------------------------
   useEffect(() => {
     if (startId) return;
 
@@ -231,13 +208,8 @@ export default function VideoFeed({
       setTranslate(0);
       return;
     }
-    // ジャンルが指定されていない場合、ランダムFeedモード
-    setGenres([GENRE_ALL]);
-    setQuery("");
-    
   }, [initialGenre, startId, setTranslate]);
 
-  // ===== likeCount 更新イベント =====
   useEffect(() => {
     const on = (ev: Event) => {
       const e = ev as CustomEvent<{ videoId: string; count: number }>;
@@ -256,15 +228,11 @@ export default function VideoFeed({
     return () => window.removeEventListener(EVT_LIKES, on as any);
   }, []);
 
-  // ---------------------------
-  // フィルタリング (クライアントサイド)
-  // ---------------------------
+  // サーバー側で絞り込み済みですが、念のためのフィルターも残しておきます
   const viewItems = useMemo(() => {
     const sel = Array.isArray(genres) ? genres : [GENRE_ALL];
     
-    // ランダムFeedモード(ALL)なら、ロードされたものをそのまま出す
     if (sel.includes(GENRE_ALL)) {
-       // 検索クエリがある場合のみフィルタ
        const q = normalizeText(query);
        if (!q) return items;
        return items.filter((v) => {
@@ -275,7 +243,6 @@ export default function VideoFeed({
        });
     }
 
-    // 特定ジャンル・いいね順の場合
     let base = items;
 
     if (sel.length === 1 && sel[0] === GENRE_LIKES) {
@@ -305,7 +272,6 @@ export default function VideoFeed({
     });
   }, [items, genres, query]);
 
-  // ✅ startId 適用
   useEffect(() => {
     const sid = String(startId ?? "").trim();
     if (!sid) return;
@@ -320,7 +286,6 @@ export default function VideoFeed({
     appliedStartIdRef.current = sid;
   }, [startId, viewItems, setTranslate]);
 
-  // ✅ index範囲チェック
   useEffect(() => {
     setIndex((i) => Math.max(0, Math.min(viewItems.length - 1, i)));
     setTranslate(0);
@@ -331,9 +296,6 @@ export default function VideoFeed({
   const PEEK = 14;
   const cardH = Math.max(0, h - PEEK * 2);
 
-  // ---------------------------
-  // レンダリング用リスト計算
-  // ---------------------------
   const windowItems = useMemo(() => {
     const cur = viewItems[index];
     const prevItem = index > 0 ? viewItems[index - 1] : undefined;
@@ -348,9 +310,6 @@ export default function VideoFeed({
     return out;
   }, [viewItems, index]);
 
-  // ---------------------------
-  // ドラッグ & アニメーションロジック
-  // ---------------------------
   const clampIndex = useCallback(
     (next: number) => {
       if (!count) return 0;
@@ -441,7 +400,6 @@ export default function VideoFeed({
     const DIST = Math.max(55, h * 0.08);
     const VELO = 0.55;
 
-    // 前へ戻る or 次へ進む判定
     if ((dy < -DIST || (dy < -25 && v > VELO)) && index < count - 1) {
       finishSlide(-1);
       return;
@@ -455,7 +413,6 @@ export default function VideoFeed({
     window.setTimeout(() => setTranslate(0, "none"), 170);
   }, [count, finishSlide, h, index, setTranslate]);
 
-  // Pointer Events
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (isInteractiveTarget(e.target)) return;
@@ -490,15 +447,11 @@ export default function VideoFeed({
     [endDrag]
   );
 
-  // safe-area
   const SAFE_PAD = 12;
   const safeTop = `calc(env(safe-area-inset-top) + ${SAFE_PAD}px)`;
   const safeLeft = `calc(env(safe-area-inset-left) + ${SAFE_PAD}px)`;
   const safeRight = `calc(env(safe-area-inset-right) + ${SAFE_PAD}px)`;
 
-  // ---------------------------
-  // JSX Render
-  // ---------------------------
   return (
     <div
       className="relative w-full bg-black overflow-hidden"
@@ -519,12 +472,16 @@ export default function VideoFeed({
             onChange={(v) => {
               if (initialGenre) return;
               setGenres(v);
+              // 🚀 修正：ジャンルが変わったら現在のリストを全消しして再取得
+              setItems([]); 
               setIndex(0);
               setTranslate(0, "none");
             }}
             query={query}
             onChangeQuery={(s) => {
               setQuery(s);
+              // 🚀 修正：検索ワードが変わったらリストを全消しして再取得
+              setItems([]); 
               setIndex(0);
               setTranslate(0, "none");
             }}
