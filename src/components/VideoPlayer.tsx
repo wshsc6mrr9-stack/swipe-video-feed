@@ -737,7 +737,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     }
   };
 
-  // ✅ 動画タップ判定（ダブルタップで5秒スキップ対応版）
+  // ✅ 動画タップ判定（判定時間を400msに延長して誤操作を防止）
   const tapRef = useRef({ 
     downX: 0, 
     downY: 0, 
@@ -768,7 +768,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     const now = performance.now();
     const timeSinceLastTap = now - tapRef.current.lastTapT;
 
-    if (timeSinceLastTap < 300) {
+    if (timeSinceLastTap < 400) { // 300ms -> 400ms に変更
       clearTimeout(tapRef.current.singleTapTimer);
       tapRef.current.lastTapT = 0;
 
@@ -785,7 +785,8 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       clearTimeout(tapRef.current.singleTapTimer);
       tapRef.current.singleTapTimer = setTimeout(() => {
         togglePlay();
-      }, 300);
+        tapRef.current.lastTapT = 0;
+      }, 400); // 300ms -> 400ms に変更
     }
   };
 
