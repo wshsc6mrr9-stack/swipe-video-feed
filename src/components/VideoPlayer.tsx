@@ -768,7 +768,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     const now = performance.now();
     const timeSinceLastTap = now - tapRef.current.lastTapT;
 
-    if (timeSinceLastTap < 400) { // 300ms -> 400ms に変更
+    if (timeSinceLastTap < 400) { 
       clearTimeout(tapRef.current.singleTapTimer);
       tapRef.current.lastTapT = 0;
 
@@ -786,7 +786,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       tapRef.current.singleTapTimer = setTimeout(() => {
         togglePlay();
         tapRef.current.lastTapT = 0;
-      }, 400); // 300ms -> 400ms に変更
+      }, 400); 
     }
   };
 
@@ -847,6 +847,32 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         <div style={{ position: "absolute", inset: 0, zIndex: 2, background: "black", pointerEvents: "none" }} />
       ) : null}
 
+      {/* ✅ 修正：ロード中の操作ガイド（読み込み中、スワイプ、ダブルタップ） */}
+      {!ready && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 50,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "black",
+            color: "rgba(255,255,255,0.8)",
+            pointerEvents: "none",
+            gap: 20,
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: "bold" }}>動画を読み込み中...</div>
+          <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.8 }}>
+            <div>↓ 下にスワイプで次の動画</div>
+            <div>👆👉 左右ダブルタップでスキップ</div>
+          </div>
+        </div>
+      )}
+
       {showPR ? (
         <div
           style={{
@@ -901,12 +927,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
           </button>
         </div>
       ) : null}
-
-      {!ready && (
-        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "rgba(255,255,255,0.65)", zIndex: 10, pointerEvents: "none" }}>
-          Loading...
-        </div>
-      )}
 
       <div
         data-no-swipe="1"
