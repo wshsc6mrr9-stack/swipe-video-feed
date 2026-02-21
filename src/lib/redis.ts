@@ -5,21 +5,23 @@ export const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
+// 🌟 メモリキャッシュ用の変数
+let allVideosCache: any[] | null = null;
+let cacheTimestamp: number = 0;
+const CACHE_TTL = 1000 * 60 * 5; // 5分間記憶する
+
 export async function getFilteredVideos(genres: string[] = [], query: string = "", count: number = 50): Promise<any[]> {
   try {
     const isAll = genres.length === 0 || genres.includes("all") || genres.includes("likes");
     const hasQuery = query.trim().length > 0;
     
-    // まず全件数を取得
-    const total = await redis.llen("videos");
-    if (total === 0) return [];
-
-    // 🌟 1. トップ画面（検索・絞り込みなし）の時は、高速化のため一部だけランダム取得
+    // --- 1. トップ画面（検索・絞り込みなし） ---
     if (isAll && !hasQuery) {
-      const scanLimit = 2000; // 最新2000件からランダム
+      const total = await redis.llen("videos");
+      if (total === 0) return [];
+      const scanLimit = 2000;
       const maxStartIndex = Math.max(0, Math.min(total, scanLimit) - count);
       const start = Math.floor(Math.random() * maxStartIndex);
-      // ここは1回のリクエストで済むのでそのままでOK
       const rows = await redis.lrange("videos", start, start + count - 1);
       const videos = rows.map((r) => {
         try { return typeof r === "string" ? JSON.parse(r) : r; } catch { return null; }
@@ -27,50 +29,70 @@ export async function getFilteredVideos(genres: string[] = [], query: string = "
       return videos.sort(() => Math.random() - 0.5);
     }
 
-    // 🌟 2. 検索・絞り込み時（全件検索）
-    // ループで「待って」しまわないよう、全てのリクエストを一斉に発射（Promise.all）します
-    const CHUNK_SIZE = 1000;
-    const promises = [];
+    // --- 2. 検索・絞り込み時（キャッシュを利用して高速化） ---
+    const now = Date.now();
+    let allVideos = [];
 
-    for (let i = 0; i < total; i += CHUNK_SIZE) {
-      const end = Math.min(i + CHUNK_SIZE - 1, total - 1);
-      // awaitせずに、リクエストの約束（Promise）だけを配列に詰め込む
-      promises.push(redis.lrange("videos", i, end));
+    if (allVideosCache && (now - cacheTimestamp < CACHE_TTL)) {
+      allVideos = allVideosCache;
+    } else {
+      const total = await redis.llen("videos");
+      if (total === 0) return [];
+
+      const CHUNK_SIZE = 1000;
+      const promises = [];
+      for (let i = 0; i < total; i += CHUNK_SIZE) {
+        const end = Math.min(i + CHUNK_SIZE - 1, total - 1);
+        promises.push(redis.lrange("videos", i, end));
+      }
+      const chunkedResults = await Promise.all(promises);
+      
+      allVideos = chunkedResults.flat().map((r) => {
+        try { return typeof r === "string" ? JSON.parse(r) : r; } catch { return null; }
+      }).filter(Boolean);
+
+      allVideosCache = allVideos;
+      cacheTimestamp = now;
     }
 
-    // ここで一気に全データを並列受信！ (直列の数倍速い)
-    const chunkedResults = await Promise.all(promises);
-
-    // 全ての結果を1つの配列に結合(flat)してパース
-    let allVideos = chunkedResults.flat().map((r) => {
-      try { return typeof r === "string" ? JSON.parse(r) : r; } catch { return null; }
-    }).filter(Boolean);
+    // --- 3. メモリ上にある全データから絞り込み ---
+    let filtered = allVideos;
 
     // ジャンル絞り込み
     if (!isAll) {
       const want = new Set(genres);
-      allVideos = allVideos.filter((v: any) => {
+      filtered = filtered.filter((v: any) => {
         const tags = Array.isArray(v.genres) ? v.genres : (typeof v.genre === "string" ? [v.genre] : []);
         return tags.some((t: any) => want.has(String(t)));
       });
     }
 
-    // キーワード検索
+    // 🌟 修正：柔軟なキーワード検索（AND検索）
     if (hasQuery) {
-      const q = query.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
-      allVideos = allVideos.filter((v: any) => {
+      // 全角スペースを半角に変換し、スペースで区切って配列にする
+      const searchWords = query
+        .normalize("NFKC")
+        .toLowerCase()
+        .replace(/　/g, " ")
+        .split(/\s+/)
+        .filter(w => w.length > 0);
+
+      filtered = filtered.filter((v: any) => {
         const title = String(v.title || "").normalize("NFKC").toLowerCase();
         const affLabel = String(v.affLabel || v.affiliateLabel || "").normalize("NFKC").toLowerCase();
-        return title.includes(q) || affLabel.includes(q);
+        // 検索対象のテキストを合体させておく
+        const targetText = title + " " + affLabel;
+
+        // 入力されたすべてのキーワードが targetText に含まれているかチェック
+        return searchWords.every(word => targetText.includes(word));
       });
     }
 
-    // ランダムにシャッフルして返す
-    return allVideos.sort(() => Math.random() - 0.5).slice(0, count);
+    // 見つかったものから50件ランダムに返す
+    return filtered.sort(() => Math.random() - 0.5).slice(0, count);
 
   } catch (e) {
     console.error("Redis fetch error:", e);
-    // エラー時も空配列を返してアプリが落ちないようにする
     return [];
   }
 }
