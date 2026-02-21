@@ -65,7 +65,6 @@ export default function VideoFeed({
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  // 🌟 追加：最初の強制3秒ローディング画面
   const [showSplash, setShowSplash] = useState(true);
   useEffect(() => {
     const timer = setTimeout(() => setShowSplash(false), 3000);
@@ -481,8 +480,8 @@ export default function VideoFeed({
         >
           <div style={{ fontSize: 16, fontWeight: "bold", marginBottom: 20 }}>動画を読み込み中...</div>
           <div style={{ fontSize: 13, opacity: 0.8, lineHeight: 2, textAlign: "center" }}>
-            <div>↓ 下にスワイプで次の動画</div>
-            <div>👆👉 左右ダブルタップでスキップ</div>
+            <div>⬆︎ 上にスワイプで次の動画</div>
+            <div>ダブルタップで5秒スキップ</div>
           </div>
         </div>
       )}
