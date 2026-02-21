@@ -9,12 +9,14 @@ export async function getFilteredVideos(genres: string[] = [], query: string = "
   try {
     const isAll = genres.length === 0 || genres.includes("all") || genres.includes("likes");
     const hasQuery = query.trim().length > 0;
+    const total = await redis.llen("videos");
+    
+    if (total === 0) return [];
 
-    // 🌟 修正1: 検索なし（トップ画面）の場合は「高速ランダム取得」に戻し、制限オーバーを回避
+    // 🌟 検索なし（トップ画面）は高速表示を優先して一部からランダム取得
     if (isAll && !hasQuery) {
-      const total = await redis.llen("videos");
-      if (total === 0) return [];
-      const maxStartIndex = Math.max(0, total - count);
+      const scanLimit = 2000;
+      const maxStartIndex = Math.max(0, Math.min(total, scanLimit) - count);
       const start = Math.floor(Math.random() * maxStartIndex);
       const rows = await redis.lrange("videos", start, start + count - 1);
       const videos = rows.map((r) => {
@@ -23,37 +25,45 @@ export async function getFilteredVideos(genres: string[] = [], query: string = "
       return videos.sort(() => Math.random() - 0.5);
     }
 
-    // 🌟 修正2: 検索・ジャンル絞り込み時は、エラーを防ぐため「最新の3000件」の中で検索する
-    const total = await redis.llen("videos");
-    // 全件数が3000より多ければ「後ろから3000件(-3000)」、少なければ最初から(0)
-    const fetchStart = total > 3000 ? -3000 : 0; 
-    
-    const rows = await redis.lrange("videos", fetchStart, -1);
-    let videos = rows.map((r) => {
-      try { return typeof r === "string" ? JSON.parse(r) : r; } catch { return null; }
-    }).filter(Boolean);
+    // 🌟 検索・ジャンル絞り込み（100%全動画を対象）
+    // 通信量制限（1MBエラー）を回避するため、1000件ずつ「小分け」にして全件を調べ尽くします
+    const CHUNK_SIZE = 1000;
+    let matchedVideos: any[] = [];
+    const want = new Set(genres);
+    const q = hasQuery ? query.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim() : "";
 
-    // ジャンルで絞り込み
-    if (!isAll) {
-      const want = new Set(genres);
-      videos = videos.filter((v: any) => {
-        const tags = Array.isArray(v.genres) ? v.genres : (typeof v.genre === "string" ? [v.genre] : []);
-        return tags.some((t: any) => want.has(String(t)));
-      });
+    // 0件目から最後まで、CHUNK_SIZEずつズラしながら全件取得ループ
+    for (let i = 0; i < total; i += CHUNK_SIZE) {
+      const end = Math.min(i + CHUNK_SIZE - 1, total - 1);
+      const rows = await redis.lrange("videos", i, end);
+      
+      let chunkVideos = rows.map((r) => {
+        try { return typeof r === "string" ? JSON.parse(r) : r; } catch { return null; }
+      }).filter(Boolean);
+
+      // その1000件の中でジャンル絞り込み
+      if (!isAll) {
+        chunkVideos = chunkVideos.filter((v: any) => {
+          const tags = Array.isArray(v.genres) ? v.genres : (typeof v.genre === "string" ? [v.genre] : []);
+          return tags.some((t: any) => want.has(String(t)));
+        });
+      }
+
+      // その1000件の中でキーワード絞り込み
+      if (hasQuery) {
+        chunkVideos = chunkVideos.filter((v: any) => {
+          const title = String(v.title || "").normalize("NFKC").toLowerCase();
+          const affLabel = String(v.affLabel || v.affiliateLabel || "").normalize("NFKC").toLowerCase();
+          return title.includes(q) || affLabel.includes(q);
+        });
+      }
+
+      // 見つかった動画を「かき集め用配列」に追加
+      matchedVideos.push(...chunkVideos);
     }
 
-    // 検索キーワードで絞り込み
-    if (hasQuery) {
-      const q = query.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
-      videos = videos.filter((v: any) => {
-        const title = String(v.title || "").normalize("NFKC").toLowerCase();
-        const affLabel = String(v.affLabel || v.affiliateLabel || "").normalize("NFKC").toLowerCase();
-        return title.includes(q) || affLabel.includes(q);
-      });
-    }
-
-    // 見つかった中からランダムに指定件数（50件）だけ返す
-    return videos.sort(() => Math.random() - 0.5).slice(0, count);
+    // 全動画の中から見つかった対象をランダムに並び替えて、指定件数（50件）返す
+    return matchedVideos.sort(() => Math.random() - 0.5).slice(0, count);
   } catch (e) {
     console.error("Redis fetch error:", e);
     return [];
