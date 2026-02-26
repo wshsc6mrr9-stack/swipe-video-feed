@@ -14,18 +14,20 @@ export async function GET(req: Request) {
     const limit = parseInt(searchParams.get("limit") || "15", 10);
     const seed = parseInt(searchParams.get("seed") || "0", 10);
 
+    // リクエストされたジャンル（例: ["gal"]）
     let genreArray = genresParam ? genresParam.split(",").filter(Boolean) : [];
 
-    // ★ 改造ポイント：URLのID(gal)を、DBに入っている可能性のある日本語(ギャル)に変換して検索に含める
+    // ★ 解決策：URLのIDをDB内の日本語ラベルに変換して検索対象を広げる
     const expandedGenres = [...genreArray];
     genreArray.forEach((g) => {
       const seoInfo = GENRE_SEO_MAP[g as GenreKey];
       if (seoInfo && seoInfo.label) {
-        // 例: "gal" というリクエストが来たら "ギャル" も検索対象に加える
+        // "gal" が来たら、DBにあるはずの "ギャル" も一緒に探すように追加
         expandedGenres.push(seoInfo.label);
       }
     });
 
+    // 拡張されたキーワードでDBを検索
     const videos = await getFilteredVideos(expandedGenres, query, page, limit, seed);
 
     return NextResponse.json(videos);
