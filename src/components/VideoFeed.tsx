@@ -64,6 +64,11 @@ export default function VideoFeed({
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
+  
+  // ★ ページネーションとシードの管理
+  const [page, setPage] = useState(1);
+  const [seed, setSeed] = useState(() => typeof window !== "undefined" ? Math.floor(Math.random() * 1000000) : 0);
+  const [hasMore, setHasMore] = useState(true);
 
   const [vh, setVh] = useState<number>(() =>
     typeof window !== "undefined" ? Math.round(window.innerHeight) : 0
@@ -88,7 +93,6 @@ export default function VideoFeed({
   const dyRef = useRef(0);
   const startTimeRef = useRef(0);
   const pointerIdRef = useRef<number | null>(null);
-
   const appliedStartIdRef = useRef<string>("");
 
   const indexRef = useRef(index);
@@ -113,13 +117,18 @@ export default function VideoFeed({
   }, []);
 
   const loadMoreVideos = useCallback(async () => {
-    if (loading) return; 
+    if (loading || !hasMore) return; 
     setLoading(true);
 
     try {
       const params = new URLSearchParams();
       if (genres.length > 0) params.append("genres", genres.join(","));
       if (query) params.append("query", query);
+      
+      // ★ ページとシードをリクエストに付与
+      params.append("page", String(page));
+      params.append("seed", String(seed));
+      params.append("_t", Date.now().toString());
 
       const res = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
       const json = await res.json().catch(() => null);
@@ -127,6 +136,7 @@ export default function VideoFeed({
       const list = (Array.isArray(json) ? json : json?.items ?? []) as any[];
       
       if (!list.length) {
+        setHasMore(false);
         setLoading(false);
         return;
       }
@@ -135,7 +145,6 @@ export default function VideoFeed({
         .map((v) => {
           const affUrl = (v?.affUrl ?? v?.affiliateUrl) as string | undefined;
           const affLabel = (v?.affLabel ?? v?.affiliateLabel) as string | undefined;
-
           return {
             id: String(v.id ?? ""),
             title: String(v.title ?? ""),
@@ -169,37 +178,42 @@ export default function VideoFeed({
 
       setItems((prev) => {
         const existingIds = new Set(prev.map((p) => p.id));
-        const newItems = normalized.filter((n) => !existingIds.has(n.id));
-        return [...prev, ...newItems];
+        const newOnly = normalized.filter((n) => !existingIds.has(n.id));
+        // ★ サーバー側で完璧にシャッフルされた状態で届くので、そのまま末尾にくっつけるだけでOK
+        return [...prev, ...newOnly];
       });
+
+      setPage((p) => p + 1);
 
     } catch (e) {
       console.error("Load Error:", e);
     } finally {
       setLoading(false);
     }
-  }, [loading, genres, query]);
+  }, [loading, hasMore, genres, query, page, seed]);
 
   useEffect(() => {
-    if (items.length === 0) {
+    if (items.length === 0 && hasMore) {
       loadMoreVideos();
     }
-  }, [items.length, loadMoreVideos]);
+  }, [items.length, loadMoreVideos, hasMore]);
 
   useEffect(() => {
-    if (items.length > 0 && index >= items.length - 5) {
+    if (items.length > 0 && index >= items.length - 15 && hasMore) {
       loadMoreVideos();
     }
-  }, [index, items.length, loadMoreVideos]);
+  }, [index, items.length, loadMoreVideos, hasMore]);
 
   useEffect(() => {
     if (startId) return;
-
     if (initialGenre) {
       setGenres([initialGenre]);
+      setItems([]); 
       setIndex(0);
-      setQuery("");
-      setTranslate(0);
+      setPage(1);
+      setSeed(Math.floor(Math.random() * 1000000));
+      setHasMore(true);
+      setTranslate(0, "none");
       return;
     }
   }, [initialGenre, startId, setTranslate]);
@@ -224,34 +238,24 @@ export default function VideoFeed({
 
   const viewItems = useMemo(() => {
     const sel = Array.isArray(genres) ? genres : [GENRE_ALL];
-    
-    if (sel.includes(GENRE_ALL)) {
-       const q = normalizeText(query);
-       if (!q) return items;
-       return items.filter((v) => {
-         return (
-           normalizeText(v.title).includes(q) ||
-           normalizeText(v.affLabel).includes(q)
-         );
-       });
-    }
-
     let base = items;
 
-    if (sel.length === 1 && sel[0] === GENRE_LIKES) {
-      base = items
-        .slice()
-        .sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
-    } else {
-      const want = new Set(sel.map(String));
-      base = items.filter((v) => {
-        const tags = Array.isArray(v.genres)
-          ? v.genres
-          : typeof v.genre === "string"
-          ? [v.genre]
-          : [];
-        return tags.some((t) => want.has(String(t)));
-      });
+    if (!sel.includes(GENRE_ALL)) {
+      if (sel.length === 1 && sel[0] === GENRE_LIKES) {
+        base = items
+          .slice()
+          .sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
+      } else {
+        const want = new Set(sel.map(String));
+        base = items.filter((v) => {
+          const tags = Array.isArray(v.genres)
+            ? v.genres
+            : typeof v.genre === "string"
+            ? [v.genre]
+            : [];
+          return tags.some((t) => want.has(String(t)));
+        });
+      }
     }
 
     const q = normalizeText(query);
@@ -445,7 +449,7 @@ export default function VideoFeed({
   const safeLeft = `calc(env(safe-area-inset-left) + ${SAFE_PAD}px)`;
   const safeRight = `calc(env(safe-area-inset-right) + ${SAFE_PAD}px)`;
 
-  const isInitialLoading = items.length === 0;
+  const isInitialLoading = items.length === 0 && loading;
 
   return (
     <div
@@ -493,6 +497,9 @@ export default function VideoFeed({
               setGenres(v);
               setItems([]); 
               setIndex(0);
+              setPage(1);
+              setSeed(Math.floor(Math.random() * 1000000));
+              setHasMore(true);
               setTranslate(0, "none");
             }}
             query={query}
@@ -500,6 +507,9 @@ export default function VideoFeed({
               setQuery(s);
               setItems([]); 
               setIndex(0);
+              setPage(1);
+              setSeed(Math.floor(Math.random() * 1000000));
+              setHasMore(true);
               setTranslate(0, "none");
             }}
           />
