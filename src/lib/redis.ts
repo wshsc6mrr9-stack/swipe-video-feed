@@ -42,17 +42,16 @@ export async function getFilteredVideos(
     const isFavoritesMode = targetIds && targetIds.length > 0;
     const isRankingMode = !isFavoritesMode && (genres.includes("__likes__") || genres.includes("likes"));
     
-    // ★ 修正：genresが空、または "all" が含まれる場合は全件表示（これでフィードが復活）
+    // 全件表示の判定を確実に（空、all、またはGENRE_ALLが含まれる場合）
     const isAll = !isFavoritesMode && !isRankingMode && (
       genres.length === 0 || 
-      genres.some(g => ["all", "all", "GENRE_ALL"].includes(String(g).toLowerCase()))
+      genres.some(g => ["all", "GENRE_ALL"].includes(String(g)))
     );
     
-    const hasQuery = query.trim().length > 0;
     const now = Date.now();
     let allVideos = [];
 
-    // 1. データ取得（以前の動いていたリスト形式を維持）
+    // キャッシュまたはRedisから全データ取得
     if (allVideosCache && (now - cacheTimestamp < CACHE_TTL)) {
       allVideos = allVideosCache;
     } else {
@@ -74,66 +73,38 @@ export async function getFilteredVideos(
 
     let filtered = allVideos;
 
-    // 2. 絞り込みロジック
     if (isFavoritesMode) {
       const idSet = new Set(targetIds);
       filtered = filtered.filter((v: any) => idSet.has(String(v.id)));
-    }
-    else if (isRankingMode) {
+    } else if (isRankingMode) {
       const rankedIds = await redis.zrange(RANKING_KEY, 0, 2000, { rev: true });
       const rankMap = new Map<string, number>();
-      rankedIds.forEach((id: unknown, idx: number) => {
-        rankMap.set(String(id), idx);
-      });
-      filtered.sort((a: any, b: any) => {
-        const idA = String(a.id);
-        const idB = String(b.id);
-        const rankA = rankMap.has(idA) ? rankMap.get(idA)! : 999999;
-        const rankB = rankMap.has(idB) ? rankMap.get(idB)! : 999999;
-        return rankA - rankB;
-      });
-    }
-    else if (!isAll) {
-      // ★ 修正：日本語でも英語でもヒットするように Set を構築
-      const want = new Set<string>();
-      genres.forEach(g => {
-        const key = String(g).trim();
-        want.add(key.toLowerCase());
-        // ジャンルマップから変換（例: gal → ギャル）
-        const seoEntry = GENRE_SEO_MAP[key as GenreKey];
-        if (seoEntry?.label) want.add(seoEntry.label.toLowerCase());
-      });
-
+      rankedIds.forEach((id: any, idx: number) => rankMap.set(String(id), idx));
+      filtered.sort((a: any, b: any) => (rankMap.get(String(a.id)) ?? 999) - (rankMap.get(String(b.id)) ?? 999));
+    } else if (!isAll) {
+      // ★ ここが最重要：送られてきた文字(ギャル)とDBのタグが完全一致するか判定
+      const searchSet = new Set(genres.map(g => String(g).trim()));
       filtered = filtered.filter((v: any) => {
-        // 動画側のタグを全て抽出
         const videoTags = [
           ...(Array.isArray(v.genres) ? v.genres : []),
           v.genre,
           v.category
-        ].filter(Boolean).map(t => String(t).toLowerCase().trim());
-        
-        return videoTags.some(vt => want.has(vt));
+        ].filter(Boolean).map(String);
+        return videoTags.some(t => searchSet.has(t));
       });
     }
 
-    if (hasQuery) {
-      const searchWords = query.normalize("NFKC").toLowerCase().split(/\s+/).filter(w => w.length > 0);
-      filtered = filtered.filter((v: any) => {
-        const text = (v.title + " " + (v.affLabel || v.affiliateLabel || "")).normalize("NFKC").toLowerCase();
-        return searchWords.every(word => text.includes(word));
-      });
+    if (query.trim()) {
+      const q = query.toLowerCase();
+      filtered = filtered.filter(v => String(v.title || "").toLowerCase().includes(q));
     }
 
-    // 3. ページングとシャッフル
     const startIndex = (page - 1) * count;
-    if (isRankingMode) {
-      return filtered.slice(startIndex, startIndex + count);
-    } 
-    const shuffled = shuffleWithSeed(filtered, seed);
-    return shuffled.slice(startIndex, startIndex + count);
-
+    if (isRankingMode) return filtered.slice(startIndex, startIndex + count);
+    
+    return shuffleWithSeed(filtered, seed).slice(startIndex, startIndex + count);
   } catch (e) {
-    console.error("Redis error:", e);
+    console.error("Redis Error:", e);
     return [];
   }
 }
