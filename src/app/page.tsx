@@ -1,10 +1,10 @@
 // src/app/page.tsx
+import type { Metadata } from "next";
+import VideoFeedNoSSR from "@/app/VideoFeedNoSSR";
+
 // 魔法の設定：このページは絶対にキャッシュ（保存）せず、常に最新のデータを取得する！
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-import type { Metadata } from "next";
-import VideoFeedNoSSR from "@/app/VideoFeedNoSSR";
 
 // サイトのベースURL（環境変数がない場合はデフォルト値）
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://swipe-video-feed.vercel.app";
