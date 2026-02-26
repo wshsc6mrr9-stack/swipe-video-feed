@@ -1,85 +1,138 @@
-// src/lib/redis.ts
 import { Redis } from "@upstash/redis";
-import { GENRE_SEO_MAP, type GenreKey } from "./genres";
 
 export const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL || "",
-  token: process.env.UPSTASH_REDIS_REST_TOKEN || "",
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
-export const KEY_PREFIX = "v:";
+let allVideosCache: any[] | null = null;
+let cacheTimestamp: number = 0;
+const CACHE_TTL = 1000 * 60 * 5; 
+const RANKING_KEY = "video:ranking";
+
+function mulberry32(a: number) {
+  return function() {
+    var t = a += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }
+}
+
+function shuffleWithSeed<T>(array: T[], seedNum: number): T[] {
+  const random = mulberry32(seedNum);
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
 
 export async function getFilteredVideos(
-  genres: string[] = [],
-  query: string = "",
+  genres: string[] = [], 
+  query: string = "", 
+  count: number = 50,
   page: number = 1,
-  limit: number = 15,
   seed: number = 0,
-  ids: string[] = []
-) {
-  // 1. 全動画のキーを取得
-  let keys = await redis.keys(`${KEY_PREFIX}*`);
-  if (!keys.length) return [];
+  targetIds?: string[]
+): Promise<any[]> {
+  try {
+    const isFavoritesMode = targetIds && targetIds.length > 0;
+    const isRankingMode = !isFavoritesMode && (genres.includes("__likes__") || genres.includes("likes"));
+    const isAll = !isFavoritesMode && !isRankingMode && (genres.length === 0 || genres.includes("all"));
+    
+    const hasQuery = query.trim().length > 0;
+    
+    // 1. 全データ取得 (キャッシュ)
+    const now = Date.now();
+    let allVideos = [];
 
-  // 2. データを取得
-  const p = redis.pipeline();
-  keys.forEach((k) => p.get(k));
-  const results = await p.exec();
-  let allVideos = results.filter(Boolean) as any[];
+    if (allVideosCache && (now - cacheTimestamp < CACHE_TTL)) {
+      allVideos = allVideosCache;
+    } else {
+      const total = await redis.llen("videos");
+      if (total === 0) return [];
 
-  // 3. ID指定がある場合（特定の動画表示）
-  if (ids.length > 0) {
-    const idSet = new Set(ids.map(String));
-    allVideos = allVideos.filter((v) => idSet.has(String(v.id)));
-  }
-
-  // 4. ジャンルフィルタリング
-  // 「すべて(all)」が含まれているか、ジャンル指定が空ならフィルタリングをスキップ
-  const isAll = genres.length === 0 || genres.some(g => g.toLowerCase() === 'all' || g === 'GENRE_ALL');
-
-  if (!isAll) {
-    const searchTerms = new Set<string>();
-    genres.forEach(g => {
-      if (!g) return;
-      searchTerms.add(g.toLowerCase());
-      // 英語IDから日本語ラベルを取得して追加
-      const seoInfo = GENRE_SEO_MAP[g as GenreKey];
-      if (seoInfo?.label) searchTerms.add(seoInfo.label.toLowerCase());
-    });
-
-    allVideos = allVideos.filter((v) => {
-      // 全てのジャンル項目（genres配列、単体genre、category）をチェック
-      const vGenres = [
-        ...(Array.isArray(v.genres) ? v.genres : []),
-        v.genre,
-        v.category
-      ].filter(Boolean).map(s => String(s).toLowerCase());
+      const CHUNK_SIZE = 1000;
+      const promises = [];
+      for (let i = 0; i < total; i += CHUNK_SIZE) {
+        const end = Math.min(i + CHUNK_SIZE - 1, total - 1);
+        promises.push(redis.lrange("videos", i, end));
+      }
+      const chunkedResults = await Promise.all(promises);
       
-      return vGenres.some(vg => searchTerms.has(vg));
-    });
+      allVideos = chunkedResults.flat().map((r) => {
+        try { return typeof r === "string" ? JSON.parse(r) : r; } catch { return null; }
+      }).filter(Boolean);
+
+      allVideosCache = allVideos;
+      cacheTimestamp = now;
+    }
+
+    let filtered = allVideos;
+
+    // 2. モード別の絞り込み
+    if (isFavoritesMode) {
+      const idSet = new Set(targetIds);
+      filtered = filtered.filter((v: any) => idSet.has(String(v.id)));
+    }
+    else if (isRankingMode) {
+      // ★エラー修正箇所1: zrevrange を zrange({ rev: true }) に変更
+      const rankedIds = await redis.zrange(RANKING_KEY, 0, 2000, { rev: true });
+      
+      const rankMap = new Map<string, number>();
+      
+      // ★エラー修正箇所2: 型 (id: unknown, idx: number) を明示
+      rankedIds.forEach((id: unknown, idx: number) => {
+        rankMap.set(String(id), idx);
+      });
+      
+      filtered.sort((a: any, b: any) => {
+        const idA = String(a.id);
+        const idB = String(b.id);
+        const rankA = rankMap.has(idA) ? rankMap.get(idA)! : 999999;
+        const rankB = rankMap.has(idB) ? rankMap.get(idB)! : 999999;
+        return rankA - rankB;
+      });
+    }
+    else if (!isAll) {
+      const want = new Set(genres);
+      filtered = filtered.filter((v: any) => {
+        const tags = Array.isArray(v.genres) ? v.genres : (typeof v.genre === "string" ? [v.genre] : []);
+        return tags.some((t: any) => want.has(String(t)));
+      });
+    }
+
+    // 3. キーワード検索 (共通)
+    if (hasQuery) {
+      const searchWords = query
+        .normalize("NFKC")
+        .toLowerCase()
+        .replace(/　/g, " ")
+        .split(/\s+/)
+        .filter(w => w.length > 0);
+
+      filtered = filtered.filter((v: any) => {
+        const title = String(v.title || "").normalize("NFKC").toLowerCase();
+        const affLabel = String(v.affLabel || v.affiliateLabel || "").normalize("NFKC").toLowerCase();
+        const targetText = title + " " + affLabel;
+        return searchWords.every(word => targetText.includes(word));
+      });
+    }
+
+    // 4. ページングとソート
+    const startIndex = (page - 1) * count;
+
+    if (isRankingMode) {
+      return filtered.slice(startIndex, Math.min(startIndex + count, filtered.length));
+    } 
+    
+    const shuffled = shuffleWithSeed(filtered, seed);
+    return shuffled.slice(startIndex, Math.min(startIndex + count, shuffled.length));
+
+  } catch (e) {
+    console.error("Redis fetch error:", e);
+    return [];
   }
-
-  // 5. 検索
-  if (query) {
-    const q = query.toLowerCase();
-    allVideos = allVideos.filter(v => 
-      String(v.title || "").toLowerCase().includes(q) || 
-      String(v.id || "").toLowerCase().includes(q)
-    );
-  }
-
-  // 6. シャッフル
-  const seededRandom = (s: number) => {
-    const x = Math.sin(s) * 10000;
-    return x - Math.floor(x);
-  };
-  allVideos.sort((a, b) => {
-    const rA = seededRandom(seed + Number(String(a.id).substring(0, 5) || 0));
-    const rB = seededRandom(seed + Number(String(b.id).substring(0, 5) || 0));
-    return rA - rB;
-  });
-
-  // 7. ページネーション
-  const start = (page - 1) * limit;
-  return allVideos.slice(start, start + limit);
 }
