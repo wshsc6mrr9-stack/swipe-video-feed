@@ -1,5 +1,6 @@
 // src/app/genre/[id]/page.tsx
 import type { Metadata } from "next";
+// ★ 修正: インポート先を修正し、中身のコンポーネントを正しく呼び出す
 import VideoFeedNoSSR from "@/app/VideoFeedNoSSR";
 import { GENRE_SEO_MAP, type GenreKey } from "@/lib/genres";
 
@@ -18,10 +19,7 @@ export async function generateMetadata({
   const p = await params;
   const genreId = p.id; 
 
-  // 辞書からSEO情報を取得
   const seo = GENRE_SEO_MAP[genreId as GenreKey];
-
-  // ★ 修正: 'title' ではなく 'label' を使って名前を取得する
   const pageTitle = seo?.label || `${genreId} 動画一覧`;
   const desc = seo?.desc || `人気ジャンル ${genreId} のショート動画をスワイプで見放題！`;
 
@@ -63,6 +61,11 @@ export default async function GenrePage({
   const p = await params;
   const genreId = p.id;
 
-  // @ts-ignore
-  return <VideoFeedNoSSR initialGenre={genreId} />;
+  // ★ 修正: 画面全体を覆うようにレイアウトを調整して、VideoFeedを呼び出す
+  return (
+    <main style={{ width: '100vw', height: '100dvh', background: '#000' }}>
+       {/* @ts-ignore */}
+       <VideoFeedNoSSR initialGenre={genreId} />
+    </main>
+  );
 }
