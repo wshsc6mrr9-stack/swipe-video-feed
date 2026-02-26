@@ -84,9 +84,14 @@ export default function VideoFeed({
     typeof window !== "undefined" ? Math.round(window.innerHeight) : 0
   );
 
-  const [genres, setGenres] = useState<GenreKey[]>(
-    initialGenre ? [initialGenre] : [GENRE_ALL]
-  );
+  // ★ 修正：URLから来る initialGenre をデコードして初期値にする
+  const [genres, setGenres] = useState<GenreKey[]>(() => {
+    if (initialGenre) {
+      try { return [decodeURIComponent(initialGenre)]; } catch { return [initialGenre]; }
+    }
+    return [GENRE_ALL];
+  });
+
   const [query, setQuery] = useState("");
 
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -132,8 +137,8 @@ export default function VideoFeed({
 
     try {
       const params = new URLSearchParams();
-      // ★ 修正：現在選択されているジャンル（またはinitialGenre）を正しく反映
-      const activeGenres = genres.length > 0 ? genres : (initialGenre ? [initialGenre] : [GENRE_ALL]);
+      // ★ 修正：ジャンル配列をAPIに送る際、空文字などを除外して確実に送る
+      const activeGenres = genres.filter(Boolean);
       params.append("genres", activeGenres.join(","));
       
       if (query) params.append("query", query);
@@ -212,7 +217,7 @@ export default function VideoFeed({
     } finally {
       setLoading(false);
     }
-  }, [loading, hasMore, genres, initialGenre, query, page, seed]);
+  }, [loading, hasMore, genres, query, page, seed]);
 
   useEffect(() => {
     if (items.length === 0 && hasMore) {
@@ -226,10 +231,13 @@ export default function VideoFeed({
     }
   }, [index, items.length, loadMoreVideos, hasMore]);
 
-  // ★ 修正：initialGenre が変わった時のリセット処理を確実に実行
+  // ★ 修正：initialGenre が変わった（URLが変わった）時のデコードとリセットを徹底
   useEffect(() => {
     if (initialGenre) {
-      setGenres([initialGenre]);
+      let g = initialGenre;
+      try { g = decodeURIComponent(initialGenre); } catch {}
+      
+      setGenres([g]);
       setItems([]); 
       setIndex(0);
       setPage(1);
@@ -271,12 +279,11 @@ export default function VideoFeed({
       } else {
         const want = new Set(sel.map(String));
         base = items.filter((v) => {
-          const tags = Array.isArray(v.genres)
-            ? v.genres
-            : typeof v.genre === "string"
-            ? [v.genre]
-            : [];
-          return tags.some((t) => want.has(String(t)));
+          const tags = [
+            ...(Array.isArray(v.genres) ? v.genres : []),
+            v.genre
+          ].filter(Boolean).map(String);
+          return tags.some((t) => want.has(t));
         });
       }
     }
