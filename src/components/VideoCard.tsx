@@ -19,9 +19,12 @@ type VideoItem = {
 type Props = {
   video: VideoItem;
   isActive: boolean;
+  // ★ 追加: 上の階層(VideoFeed)から届く次の動画・前の動画への指示を受け取る
+  onNext?: () => void;
+  onPrev?: () => void;
 };
 
-export default function VideoCard({ video, isActive }: Props) {
+export default function VideoCard({ video, isActive, onNext, onPrev }: Props) {
   const src = (video.url ?? video.src ?? "") as string;
 
   // 互換：aff / affiliate を VideoPlayer 側が読む形に合わせる
@@ -75,11 +78,6 @@ export default function VideoCard({ video, isActive }: Props) {
       style={{
         height: "100svh",
       }}
-      // ✅ カード全体やリンクがクリックされた時に「アフィ移動」を計測したい場合
-      onClick={() => {
-        // もしVideoPlayer内のボタンだけでなく、カード操作も計測したい場合はここに追加
-        // 今回はボタン側（VideoPlayer内）で制御するのが一般的です
-      }}
     >
       <div
         className="absolute inset-0"
@@ -94,9 +92,14 @@ export default function VideoCard({ video, isActive }: Props) {
           // @ts-ignore
           video={playerVideo}
           isActive={isActive}
-          // ✅ VideoPlayer 側でアフィリンクが押された時に実行するコールバック（もし実装があれば）
+          // ✅ VideoPlayer 側でアフィリンクが押された時に実行
           // @ts-ignore
           onAffiliateClick={() => trackAction("click")}
+          // ✅ 動画が最後まで再生されたら自動で次へ行く設定を繋ぎ込む
+          onEnded={onNext}
+          // ✅ コントロール(次へ/前へボタン)がVideoPlayer内にあればそこへ渡す
+          onNext={onNext}
+          onPrev={onPrev}
         />
       </div>
     </div>

@@ -132,14 +132,17 @@ export default function VideoFeed({
 
     try {
       const params = new URLSearchParams();
-      if (genres.length > 0) params.append("genres", genres.join(","));
+      // ★ 修正：現在選択されているジャンル（またはinitialGenre）を正しく反映
+      const activeGenres = genres.length > 0 ? genres : (initialGenre ? [initialGenre] : [GENRE_ALL]);
+      params.append("genres", activeGenres.join(","));
+      
       if (query) params.append("query", query);
       
       params.append("page", String(page));
       params.append("seed", String(seed));
       params.append("_t", Date.now().toString());
 
-      if (genres.includes(GENRE_FAVORITES)) {
+      if (activeGenres.includes(GENRE_FAVORITES)) {
         const likedIds = Array.from(readLikedSet());
         if (likedIds.length === 0) {
            setItems([]);
@@ -209,7 +212,7 @@ export default function VideoFeed({
     } finally {
       setLoading(false);
     }
-  }, [loading, hasMore, genres, query, page, seed]);
+  }, [loading, hasMore, genres, initialGenre, query, page, seed]);
 
   useEffect(() => {
     if (items.length === 0 && hasMore) {
@@ -217,18 +220,14 @@ export default function VideoFeed({
     }
   }, [items.length, loadMoreVideos, hasMore]);
 
-  // ★ 修正点: 読み込みの閾値を調整
-  // 以前: items.length - 15 (残り15個になったら)
-  // 今回: items.length - 30 (残り30個になったら)
-  // これにより、ユーザーがリストの最後に到達するずっと前に次の通信が走ります
   useEffect(() => {
     if (items.length > 0 && index >= Math.max(0, items.length - 30) && hasMore) {
       loadMoreVideos();
     }
   }, [index, items.length, loadMoreVideos, hasMore]);
 
+  // ★ 修正：initialGenre が変わった時のリセット処理を確実に実行
   useEffect(() => {
-    if (startId) return;
     if (initialGenre) {
       setGenres([initialGenre]);
       setItems([]); 
@@ -237,9 +236,8 @@ export default function VideoFeed({
       setSeed(Math.floor(Math.random() * 1000000));
       setHasMore(true);
       setTranslate(0, "none");
-      return;
     }
-  }, [initialGenre, startId, setTranslate]);
+  }, [initialGenre, setTranslate]);
 
   useEffect(() => {
     const on = (ev: Event) => {
@@ -309,9 +307,11 @@ export default function VideoFeed({
   }, [startId, viewItems, setTranslate]);
 
   useEffect(() => {
-    setIndex((i) => Math.max(0, Math.min(viewItems.length - 1, i)));
-    setTranslate(0);
-  }, [viewItems.length, setTranslate]);
+    if (!startId) {
+      setIndex((i) => Math.max(0, Math.min(viewItems.length - 1, i)));
+      setTranslate(0);
+    }
+  }, [viewItems.length, setTranslate, startId]);
 
   const count = viewItems.length;
   const h = vh || 0;
@@ -518,7 +518,6 @@ export default function VideoFeed({
           <GenreMenu
             value={genres}
             onChange={(v) => {
-              if (initialGenre) return;
               setGenres(v);
               setItems([]); 
               setIndex(0);
@@ -573,15 +572,11 @@ export default function VideoFeed({
               }}
             >
               <VideoCard
-                // @ts-ignore
                 video={item}
-                // @ts-ignore
                 isActive={active}
-                // @ts-ignore
                 onNext={() => {
                   if (!animatingRef.current && index < count - 1) finishSlide(-1);
                 }}
-                // @ts-ignore
                 onPrev={() => {
                   if (!animatingRef.current && index > 0) finishSlide(1);
                 }}
