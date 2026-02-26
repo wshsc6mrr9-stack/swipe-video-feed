@@ -1,3 +1,4 @@
+// src/lib/redis.ts
 import { Redis } from "@upstash/redis";
 import { GENRE_SEO_MAP, type GenreKey } from "./genres";
 
@@ -33,21 +34,27 @@ export async function getFilteredVideos(
     allVideos = allVideos.filter((v) => idSet.has(String(v.id)));
   }
 
-  // 4. ジャンルフィルタリング（★ここを強化★）
+  // 4. ジャンルフィルタリング（★ 英語IDを日本語ラベルに紐付けて強化 ★）
   if (genres.length > 0 && !genres.includes("all")) {
-    // 検索ワードを拡張（例: "gal" が来たら "ギャル" も含める）
     const searchTerms = new Set<string>();
+    
     genres.forEach(g => {
-      searchTerms.add(g.toLowerCase());
-      // ジャンルマップから日本語名を取得して追加
+      const lowerG = g.toLowerCase();
+      searchTerms.add(lowerG);
+      
+      // GENRE_SEO_MAPから日本語のラベル（例: "ギャル"）を取得して検索候補に入れる
       const seoInfo = GENRE_SEO_MAP[g as GenreKey];
-      if (seoInfo?.label) searchTerms.add(seoInfo.label.toLowerCase());
+      if (seoInfo?.label) {
+        searchTerms.add(seoInfo.label.toLowerCase());
+      }
     });
 
     allVideos = allVideos.filter((v) => {
       const vGenres = (Array.isArray(v.genres) ? v.genres : [v.genre])
         .filter(Boolean)
         .map((s: string) => s.toLowerCase());
+      
+      // 動画のタグに、検索キーワードのいずれかが含まれていればヒット
       return vGenres.some((vg: string) => searchTerms.has(vg));
     });
   }
