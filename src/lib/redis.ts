@@ -6,13 +6,11 @@ export const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
-// キャッシュ設定
 let allVideosCache: any[] | null = null;
 let cacheTimestamp: number = 0;
 const CACHE_TTL = 1000 * 60 * 5; 
 const RANKING_KEY = "video:ranking";
 
-// シード値付きシャッフル
 function mulberry32(a: number) {
   return function() {
     var t = a += 0x6D2B79F5;
@@ -43,22 +41,21 @@ export async function getFilteredVideos(
   try {
     const isFavoritesMode = targetIds && targetIds.length > 0;
     const isRankingMode = !isFavoritesMode && (genres.includes("__likes__") || genres.includes("likes"));
-    // ★ 修正：genresが空、または "all" の時は「全件表示」
-    const isAll = !isFavoritesMode && !isRankingMode && (genres.length === 0 || genres.includes("all") || genres.includes("GENRE_ALL"));
+    // "all" または指定なしの場合は全件表示
+    const isAll = !isFavoritesMode && !isRankingMode && (
+      genres.length === 0 || 
+      genres.some(g => ["all", "all", "GENRE_ALL"].includes(String(g).toLowerCase()))
+    );
     
     const hasQuery = query.trim().length > 0;
-    
-    // 1. 全データ取得 (キャッシュ)
     const now = Date.now();
     let allVideos = [];
 
     if (allVideosCache && (now - cacheTimestamp < CACHE_TTL)) {
       allVideos = allVideosCache;
     } else {
-      // リスト型 "videos" から全件取得
       const total = await redis.llen("videos");
       if (total === 0) return [];
-
       const CHUNK_SIZE = 1000;
       const promises = [];
       for (let i = 0; i < total; i += CHUNK_SIZE) {
@@ -66,18 +63,15 @@ export async function getFilteredVideos(
         promises.push(redis.lrange("videos", i, end));
       }
       const chunkedResults = await Promise.all(promises);
-      
       allVideos = chunkedResults.flat().map((r) => {
         try { return typeof r === "string" ? JSON.parse(r) : r; } catch { return null; }
       }).filter(Boolean);
-
       allVideosCache = allVideos;
       cacheTimestamp = now;
     }
 
     let filtered = allVideos;
 
-    // 2. モード別の絞り込み
     if (isFavoritesMode) {
       const idSet = new Set(targetIds);
       filtered = filtered.filter((v: any) => idSet.has(String(v.id)));
@@ -88,7 +82,6 @@ export async function getFilteredVideos(
       rankedIds.forEach((id: unknown, idx: number) => {
         rankMap.set(String(id), idx);
       });
-      
       filtered.sort((a: any, b: any) => {
         const idA = String(a.id);
         const idB = String(b.id);
@@ -98,54 +91,48 @@ export async function getFilteredVideos(
       });
     }
     else if (!isAll) {
-      // ★ 修正：ジャンル検索を「英語ID」と「日本語ラベル」の両方で判定
-      const want = new Set<string>();
+      // ★ 解決策：検索ワードを徹底的に日本語ラベルへ紐付ける
+      const searchTerms = new Set<string>();
       genres.forEach(g => {
-        want.add(g.toLowerCase());
-        const seoInfo = GENRE_SEO_MAP[g as GenreKey];
-        if (seoInfo?.label) want.add(seoInfo.label.toLowerCase());
+        const key = String(g).trim();
+        searchTerms.add(key.toLowerCase());
+        
+        // genres.ts の GENRE_SEO_MAP を走査して、キーが一致したらラベル(日本語)も追加
+        const seoEntry = GENRE_SEO_MAP[key as GenreKey];
+        if (seoEntry?.label) {
+          searchTerms.add(seoEntry.label.toLowerCase());
+        }
       });
 
       filtered = filtered.filter((v: any) => {
-        const tags = [
+        // 動画側のタグ（genres配列, genre文字列, category文字列）をすべて統合
+        const videoTags = [
           ...(Array.isArray(v.genres) ? v.genres : []),
           v.genre,
           v.category
-        ].filter(Boolean).map(s => String(s).toLowerCase());
+        ].filter(Boolean).map(t => String(t).toLowerCase().trim());
         
-        return tags.some((t: string) => want.has(t));
+        return videoTags.some(vt => searchTerms.has(vt));
       });
     }
 
-    // 3. キーワード検索
     if (hasQuery) {
-      const searchWords = query
-        .normalize("NFKC")
-        .toLowerCase()
-        .replace(/　/g, " ")
-        .split(/\s+/)
-        .filter(w => w.length > 0);
-
+      const searchWords = query.normalize("NFKC").toLowerCase().split(/\s+/).filter(w => w.length > 0);
       filtered = filtered.filter((v: any) => {
-        const title = String(v.title || "").normalize("NFKC").toLowerCase();
-        const affLabel = String(v.affLabel || v.affiliateLabel || "").normalize("NFKC").toLowerCase();
-        const targetText = title + " " + affLabel;
-        return searchWords.every(word => targetText.includes(word));
+        const text = (v.title + " " + (v.affLabel || v.affiliateLabel || "")).normalize("NFKC").toLowerCase();
+        return searchWords.every(word => text.includes(word));
       });
     }
 
-    // 4. ページング
     const startIndex = (page - 1) * count;
-
     if (isRankingMode) {
       return filtered.slice(startIndex, startIndex + count);
     } 
-    
     const shuffled = shuffleWithSeed(filtered, seed);
     return shuffled.slice(startIndex, startIndex + count);
 
   } catch (e) {
-    console.error("Redis fetch error:", e);
+    console.error("Redis error:", e);
     return [];
   }
 }
