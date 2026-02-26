@@ -8,7 +8,6 @@ export const redis = new Redis({
 });
 
 export const KEY_PREFIX = "v:";
-const RANKING_KEY = "video_ranking_v1";
 
 export async function getFilteredVideos(
   genres: string[] = [],
@@ -22,62 +21,61 @@ export async function getFilteredVideos(
   let keys = await redis.keys(`${KEY_PREFIX}*`);
   if (!keys.length) return [];
 
-  // 2. データを一括取得
+  // 2. データを取得
   const p = redis.pipeline();
   keys.forEach((k) => p.get(k));
   const results = await p.exec();
   let allVideos = results.filter(Boolean) as any[];
 
-  // 3. ID指定がある場合（お気に入りなど）
+  // 3. ID指定がある場合（特定の動画表示）
   if (ids.length > 0) {
     const idSet = new Set(ids.map(String));
     allVideos = allVideos.filter((v) => idSet.has(String(v.id)));
   }
 
-  // 4. ジャンルフィルタリング（★ 英語IDを日本語ラベルに紐付けて強化 ★）
-  if (genres.length > 0 && !genres.includes("all")) {
+  // 4. ジャンルフィルタリング
+  // 「すべて(all)」が含まれているか、ジャンル指定が空ならフィルタリングをスキップ
+  const isAll = genres.length === 0 || genres.some(g => g.toLowerCase() === 'all' || g === 'GENRE_ALL');
+
+  if (!isAll) {
     const searchTerms = new Set<string>();
-    
     genres.forEach(g => {
-      const lowerG = g.toLowerCase();
-      searchTerms.add(lowerG);
-      
-      // GENRE_SEO_MAPから日本語のラベル（例: "ギャル"）を取得して検索候補に入れる
+      if (!g) return;
+      searchTerms.add(g.toLowerCase());
+      // 英語IDから日本語ラベルを取得して追加
       const seoInfo = GENRE_SEO_MAP[g as GenreKey];
-      if (seoInfo?.label) {
-        searchTerms.add(seoInfo.label.toLowerCase());
-      }
+      if (seoInfo?.label) searchTerms.add(seoInfo.label.toLowerCase());
     });
 
     allVideos = allVideos.filter((v) => {
-      const vGenres = (Array.isArray(v.genres) ? v.genres : [v.genre])
-        .filter(Boolean)
-        .map((s: string) => s.toLowerCase());
+      // 全てのジャンル項目（genres配列、単体genre、category）をチェック
+      const vGenres = [
+        ...(Array.isArray(v.genres) ? v.genres : []),
+        v.genre,
+        v.category
+      ].filter(Boolean).map(s => String(s).toLowerCase());
       
-      // 動画のタグに、検索キーワードのいずれかが含まれていればヒット
-      return vGenres.some((vg: string) => searchTerms.has(vg));
+      return vGenres.some(vg => searchTerms.has(vg));
     });
   }
 
-  // 5. キーワード検索
+  // 5. 検索
   if (query) {
     const q = query.toLowerCase();
-    allVideos = allVideos.filter(
-      (v) =>
-        v.title?.toLowerCase().includes(q) ||
-        v.id?.toLowerCase().includes(q)
+    allVideos = allVideos.filter(v => 
+      String(v.title || "").toLowerCase().includes(q) || 
+      String(v.id || "").toLowerCase().includes(q)
     );
   }
 
-  // 6. シャッフル（seedを使用）
+  // 6. シャッフル
   const seededRandom = (s: number) => {
     const x = Math.sin(s) * 10000;
     return x - Math.floor(x);
   };
-  
   allVideos.sort((a, b) => {
-    const rA = seededRandom(seed + Number(a.id.toString().substring(0,5)) || 0);
-    const rB = seededRandom(seed + Number(b.id.toString().substring(0,5)) || 0);
+    const rA = seededRandom(seed + Number(String(a.id).substring(0, 5) || 0));
+    const rB = seededRandom(seed + Number(String(b.id).substring(0, 5) || 0));
     return rA - rB;
   });
 
