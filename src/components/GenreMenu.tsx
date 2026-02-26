@@ -1,18 +1,17 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   GENRE_ALL,
   GENRE_LIKES,
+  GENRE_FAVORITES,
   GENRE_GROUPS,
   type GenreKey,
 } from "@/lib/genres";
 
 type Props = {
-  value: GenreKey[]; // ✅ 複数
-  onChange: (v: GenreKey[]) => void; // ✅ 複数
-
-  // ✅ 検索1本（タイトル検索 + ジャンル絞り込み両方に使う）
+  value: GenreKey[];
+  onChange: (v: GenreKey[]) => void;
   query: string;
   onChangeQuery: (s: string) => void;
 };
@@ -30,17 +29,20 @@ function normalizeSelected(value: GenreKey[]) {
   const v = Array.isArray(value) ? value : [];
   const cleaned = v.map((x) => String(x)).filter(Boolean) as GenreKey[];
 
-  // ALL と LIKES は単独扱い（他と混ぜない）
   if (cleaned.includes(GENRE_ALL)) return [GENRE_ALL];
   if (cleaned.includes(GENRE_LIKES)) return [GENRE_LIKES];
+  if (cleaned.includes(GENRE_FAVORITES)) return [GENRE_FAVORITES];
 
-  const out = cleaned.filter((x) => x !== GENRE_ALL && x !== GENRE_LIKES);
+  const out = cleaned.filter(
+    (x) => x !== GENRE_ALL && x !== GENRE_LIKES && x !== GENRE_FAVORITES
+  );
   return (out.length ? (uniq(out) as GenreKey[]) : [GENRE_ALL]) as GenreKey[];
 }
 
 function labelOf(key: GenreKey) {
   if (key === GENRE_ALL) return "All";
   if (key === GENRE_LIKES) return "♡ランキング";
+  if (key === GENRE_FAVORITES) return "♡お気に入り";
 
   for (const g of GENRE_GROUPS) {
     for (const it of g.items) {
@@ -58,21 +60,25 @@ export default function GenreMenu({
 }: Props) {
   const [open, setOpen] = useState(false);
 
+  // ★ 追加: 入力中の文字を一時的に保存する
+  const [localQuery, setLocalQuery] = useState(query);
+
+  // 親の検索ワードが外からリセットされた時などに同期する
+  useEffect(() => {
+    setLocalQuery(query);
+  }, [query]);
+
   const selected = useMemo(() => normalizeSelected(value), [value]);
 
   const summaryText = useMemo(() => {
     const labels = selected.map(labelOf);
-
-    // ✅ 開いてる間は「個別に出す（+4 表示しない）」
     if (open) return labels;
-
-    // ✅ 閉じたら「クール +4」形式
     if (selected.length <= 1) return [labels[0] ?? "All"];
     return [`${labels[0]} +${selected.length - 1}`];
   }, [selected, open]);
 
-  // ✅ 1本の検索入力を、ジャンル絞り込みにも使う
-  const genreQuery = query.trim().toLowerCase();
+  // 左側のジャンルリスト絞り込みは、打っている途中の文字(localQuery)でリアルタイムに反応させる
+  const genreQuery = localQuery.trim().toLowerCase();
 
   const filteredGroups = useMemo(() => {
     if (!genreQuery) return GENRE_GROUPS;
@@ -93,22 +99,32 @@ export default function GenreMenu({
   }
 
   function reset() {
-    // ✅ 検索もジャンルもまとめてリセット
+    setLocalQuery("");
     onChangeQuery("");
     setSelected([GENRE_ALL]);
   }
 
   function toggle(key: GenreKey) {
-    // ALL / LIKES は単独
     if (key === GENRE_ALL) return setSelected([GENRE_ALL]);
     if (key === GENRE_LIKES) return setSelected([GENRE_LIKES]);
+    if (key === GENRE_FAVORITES) return setSelected([GENRE_FAVORITES]);
 
-    // いま ALL/LIKES 単独なら、そこから切り替え
-    const cur = selected.filter((x) => x !== GENRE_ALL && x !== GENRE_LIKES);
+    const cur = selected.filter(
+      (x) => x !== GENRE_ALL && x !== GENRE_LIKES && x !== GENRE_FAVORITES
+    );
     const exists = cur.includes(key);
 
     const next = exists ? cur.filter((x) => x !== key) : [...cur, key];
     setSelected(next.length ? next : [GENRE_ALL]);
+  }
+
+  // ★ 追加: 検索を実行する（エンターが押された時）
+  function executeSearch() {
+    onChangeQuery(localQuery);
+    // 検索後、スマホのキーボードを閉じる
+    if (typeof document !== "undefined") {
+      (document.activeElement as HTMLElement)?.blur();
+    }
   }
 
   return (
@@ -125,7 +141,6 @@ export default function GenreMenu({
         {open ? "ジャンル" : "ジャンル検索"}
       </button>
 
-      {/* ✅ 閉じてる時の左上表示（クール +4） */}
       {!open ? (
         <div className="mt-2 flex flex-wrap gap-2">
           {summaryText.map((t) => (
@@ -146,7 +161,7 @@ export default function GenreMenu({
           style={{
             maxHeight: "72svh",
             overflow: "hidden",
-            touchAction: "pan-y", // ✅ iOSで余計なジェスチャーを減らす
+            touchAction: "pan-y",
           }}
           onClick={(e) => stop(e)}
         >
@@ -178,23 +193,38 @@ export default function GenreMenu({
             </div>
           </div>
 
-          {/* ✅ 検索（iPhoneズーム対策：text-base=16px） */}
-          <input
-            value={query}
-            onChange={(e) => onChangeQuery(e.target.value)}
-            placeholder="検索（タイトル/ジャンル）"
-            inputMode="search"
-            autoCapitalize="none"
-            autoCorrect="off"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-base outline-none text-white placeholder:text-white/40"
-            // ✅ 念のため：Tailwindが効かん環境でも 16px を強制
-            style={{ fontSize: 16 }}
-            onPointerDown={(e) => stop(e)}
-            onTouchStart={(e) => stop(e)}
-            onTouchMove={(e) => stop(e)}
-          />
+          {/* ★ 修正: formで囲むことで、スマホの検索ボタン(Enter)に反応させる */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              executeSearch();
+            }}
+            className="w-full relative flex gap-2"
+          >
+            <input
+              value={localQuery}
+              onChange={(e) => setLocalQuery(e.target.value)}
+              placeholder="検索（タイトル/ジャンル）"
+              inputMode="search"
+              autoCapitalize="none"
+              autoCorrect="off"
+              className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-base outline-none text-white placeholder:text-white/40"
+              style={{ fontSize: 16 }}
+              onPointerDown={(e) => stop(e)}
+              onTouchStart={(e) => stop(e)}
+              onTouchMove={(e) => stop(e)}
+            />
+            {/* 検索ボタン（横に配置） */}
+            <button
+              type="submit"
+              className="rounded-xl bg-white/20 px-3 py-2 text-sm font-bold text-white border border-white/10 whitespace-nowrap active:bg-white/30"
+              onPointerDown={(e) => stop(e)}
+            >
+              検索
+            </button>
+          </form>
 
-          {/* ✅ 2カラム：左=選択UI / 右=選択中 */}
+          {/* 2カラム：左=選択UI / 右=選択中 */}
           <div className="mt-2 grid grid-cols-[1fr_110px] gap-2">
             {/* 左：選択UI */}
             <div
@@ -206,7 +236,6 @@ export default function GenreMenu({
                 touchAction: "pan-y",
               }}
             >
-              {/* ALL */}
               <button
                 type="button"
                 onClick={(e) => {
@@ -223,7 +252,6 @@ export default function GenreMenu({
                 All
               </button>
 
-              {/* ランキング */}
               <button
                 type="button"
                 onClick={(e) => {
@@ -240,7 +268,22 @@ export default function GenreMenu({
                 ♡ランキング
               </button>
 
-              {/* グループ */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  stop(e);
+                  toggle(GENRE_FAVORITES);
+                }}
+                className={[
+                  "mt-2 w-full text-left rounded-xl border px-3 py-[4px] text-sm transition",
+                  selected.includes(GENRE_FAVORITES)
+                    ? "bg-white text-black border-white"
+                    : "bg-white/10 text-white border-white/10",
+                ].join(" ")}
+              >
+                ♡お気に入り
+              </button>
+
               <div className="mt-3 space-y-3">
                 {filteredGroups.map((g) => (
                   <div key={String(g.title)}>
@@ -291,7 +334,12 @@ export default function GenreMenu({
               ) : (
                 <div className="flex flex-col gap-2">
                   {selected
-                    .filter((x) => x !== GENRE_ALL && x !== GENRE_LIKES)
+                    .filter(
+                      (x) =>
+                        x !== GENRE_ALL &&
+                        x !== GENRE_LIKES &&
+                        x !== GENRE_FAVORITES
+                    )
                     .map((k) => (
                       <button
                         key={String(k)}
@@ -307,7 +355,6 @@ export default function GenreMenu({
                       </button>
                     ))}
 
-                  {/* LIKES 選択時も細長く */}
                   {selected.includes(GENRE_LIKES) ? (
                     <button
                       type="button"
@@ -319,6 +366,20 @@ export default function GenreMenu({
                       title="タップで外す"
                     >
                       ♡ランキング
+                    </button>
+                  ) : null}
+
+                  {selected.includes(GENRE_FAVORITES) ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        stop(e);
+                        toggle(GENRE_FAVORITES);
+                      }}
+                      className="w-full text-left rounded-full bg-white/10 border border-white/10 px-2 py-1 text-[11px] leading-tight text-white"
+                      title="タップで外す"
+                    >
+                      ♡お気に入り
                     </button>
                   ) : null}
                 </div>

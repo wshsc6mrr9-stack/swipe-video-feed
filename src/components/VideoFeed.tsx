@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import VideoCard from "@/components/VideoCard";
 import GenreMenu from "@/components/GenreMenu";
 import MoreMenu from "@/components/MoreMenu";
-import { GENRE_ALL, GENRE_LIKES, type GenreKey } from "@/lib/genres";
+import { GENRE_ALL, GENRE_LIKES, GENRE_FAVORITES, type GenreKey } from "@/lib/genres";
 
 type VideoItem = {
   id: string;
@@ -23,6 +23,17 @@ type VideoItem = {
 };
 
 const EVT_LIKES = "likes_changed_v1";
+const KEY_LIKED = "liked_videos_v1";
+
+function readLikedSet(): Set<string> {
+  try {
+    const raw = localStorage.getItem(KEY_LIKED);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) return new Set(arr.map(String));
+  } catch {}
+  return new Set();
+}
 
 function isInteractiveTarget(target: EventTarget | null) {
   const el = target as HTMLElement | null;
@@ -65,7 +76,6 @@ export default function VideoFeed({
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   
-  // ★ ページネーションとシードの管理
   const [page, setPage] = useState(1);
   const [seed, setSeed] = useState(() => typeof window !== "undefined" ? Math.floor(Math.random() * 1000000) : 0);
   const [hasMore, setHasMore] = useState(true);
@@ -125,10 +135,20 @@ export default function VideoFeed({
       if (genres.length > 0) params.append("genres", genres.join(","));
       if (query) params.append("query", query);
       
-      // ★ ページとシードをリクエストに付与
       params.append("page", String(page));
       params.append("seed", String(seed));
       params.append("_t", Date.now().toString());
+
+      if (genres.includes(GENRE_FAVORITES)) {
+        const likedIds = Array.from(readLikedSet());
+        if (likedIds.length === 0) {
+           setItems([]);
+           setHasMore(false);
+           setLoading(false);
+           return;
+        }
+        params.append("ids", likedIds.join(","));
+      }
 
       const res = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
       const json = await res.json().catch(() => null);
@@ -179,7 +199,6 @@ export default function VideoFeed({
       setItems((prev) => {
         const existingIds = new Set(prev.map((p) => p.id));
         const newOnly = normalized.filter((n) => !existingIds.has(n.id));
-        // ★ サーバー側で完璧にシャッフルされた状態で届くので、そのまま末尾にくっつけるだけでOK
         return [...prev, ...newOnly];
       });
 
@@ -198,8 +217,12 @@ export default function VideoFeed({
     }
   }, [items.length, loadMoreVideos, hasMore]);
 
+  // ★ 修正点: 読み込みの閾値を調整
+  // 以前: items.length - 15 (残り15個になったら)
+  // 今回: items.length - 30 (残り30個になったら)
+  // これにより、ユーザーがリストの最後に到達するずっと前に次の通信が走ります
   useEffect(() => {
-    if (items.length > 0 && index >= items.length - 15 && hasMore) {
+    if (items.length > 0 && index >= Math.max(0, items.length - 30) && hasMore) {
       loadMoreVideos();
     }
   }, [index, items.length, loadMoreVideos, hasMore]);
@@ -245,6 +268,8 @@ export default function VideoFeed({
         base = items
           .slice()
           .sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
+      } else if (sel.length === 1 && sel[0] === GENRE_FAVORITES) {
+        base = items;
       } else {
         const want = new Set(sel.map(String));
         base = items.filter((v) => {

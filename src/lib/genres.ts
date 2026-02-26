@@ -2,6 +2,7 @@
 
 export const GENRE_ALL = "all" as const;
 export const GENRE_LIKES = "__likes__" as const;
+export const GENRE_FAVORITES = "__favorites__" as const; // ★追加
 
 export type GenreKey = string;
 

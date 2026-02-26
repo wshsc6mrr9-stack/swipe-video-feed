@@ -1,9 +1,9 @@
-// src/app/api/likes/route.ts
 import { NextResponse } from "next/server";
 import { Redis } from "@upstash/redis";
 
 const redis = Redis.fromEnv();
 const KEY_PREFIX = "likes:count:";
+const RANKING_KEY = "video:ranking"; // ★追加: ランキング用のキー
 
 function keyOf(videoId: string) {
   return `${KEY_PREFIX}${videoId}`;
@@ -18,14 +18,24 @@ export async function GET(req: Request) {
     .filter(Boolean)
     .slice(0, 500);
 
-  const counts: Record<string, number> = {};
+  if (ids.length === 0) {
+    return NextResponse.json({ ok: true, counts: {} });
+  }
 
-  await Promise.all(
-    ids.map(async (id) => {
-      const v = await redis.get<number>(keyOf(id));
-      counts[id] = Number.isFinite(v as number) ? (v as number) : 0;
-    })
-  );
+  // 複数キーを一括取得
+  const counts: Record<string, number> = {};
+  const pipeline = redis.pipeline();
+  
+  ids.forEach((id) => {
+    pipeline.get(keyOf(id));
+  });
+
+  const results = await pipeline.exec();
+
+  ids.forEach((id, i) => {
+    const v = results[i];
+    counts[id] = Number.isFinite(v) ? (v as number) : 0;
+  });
 
   return NextResponse.json({ ok: true, counts });
 }
@@ -45,13 +55,28 @@ export async function POST(req: Request) {
   }
 
   const k = keyOf(videoId);
+  
+  // パイプラインで「個別カウント」と「ランキング」を同時に更新
+  const pipeline = redis.pipeline();
+  
+  // 1. 個別のカウントを増減
+  pipeline.incrby(k, delta);
+  
+  // 2. ランキング(Sorted Set)のスコアを増減
+  // ZINCRBY video:ranking 1 videoId
+  pipeline.zincrby(RANKING_KEY, delta, videoId);
 
-  // incrby は負にもできるので、0未満になったら 0 に戻す
-  const next = await redis.incrby(k, delta);
-  if ((next as number) < 0) {
+  const results = await pipeline.exec();
+  
+  // results[0] は incrby の結果
+  let nextCount = Number(results[0]);
+
+  // マイナスになったら0に戻すガード処理
+  if (nextCount < 0) {
     await redis.set(k, 0);
-    return NextResponse.json({ ok: true, count: 0 });
+    await redis.zadd(RANKING_KEY, { score: 0, member: videoId });
+    nextCount = 0;
   }
 
-  return NextResponse.json({ ok: true, count: Number(next) });
+  return NextResponse.json({ ok: true, count: nextCount });
 }
