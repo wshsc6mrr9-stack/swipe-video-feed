@@ -17,7 +17,7 @@ function mulberry32(a: number) {
     t = Math.imul(t ^ t >>> 15, t | 1);
     t ^= t + Math.imul(t ^ t >>> 7, t | 61);
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
+  }
 }
 
 function shuffleWithSeed<T>(array: T[], seedNum: number): T[] {
@@ -42,16 +42,17 @@ export async function getFilteredVideos(
     const isFavoritesMode = targetIds && targetIds.length > 0;
     const isRankingMode = !isFavoritesMode && (genres.includes("__likes__") || genres.includes("likes"));
     
-    // "all" または指定なしの場合は全件表示
+    // ★ 修正：genresが空、または "all" が含まれる場合は全件表示（これでフィードが復活）
     const isAll = !isFavoritesMode && !isRankingMode && (
       genres.length === 0 || 
-      genres.some(g => ["all", "GENRE_ALL"].includes(String(g).toLowerCase()))
+      genres.some(g => ["all", "all", "GENRE_ALL"].includes(String(g).toLowerCase()))
     );
     
     const hasQuery = query.trim().length > 0;
     const now = Date.now();
     let allVideos = [];
 
+    // 1. データ取得（以前の動いていたリスト形式を維持）
     if (allVideosCache && (now - cacheTimestamp < CACHE_TTL)) {
       allVideos = allVideosCache;
     } else {
@@ -73,6 +74,7 @@ export async function getFilteredVideos(
 
     let filtered = allVideos;
 
+    // 2. 絞り込みロジック
     if (isFavoritesMode) {
       const idSet = new Set(targetIds);
       filtered = filtered.filter((v: any) => idSet.has(String(v.id)));
@@ -92,27 +94,25 @@ export async function getFilteredVideos(
       });
     }
     else if (!isAll) {
-      // ★ 日本語化対応：URLの文字(ギャル)と、genres.tsの設定を両方検索対象にする
-      const searchTerms = new Set<string>();
+      // ★ 修正：日本語でも英語でもヒットするように Set を構築
+      const want = new Set<string>();
       genres.forEach(g => {
         const key = String(g).trim();
-        searchTerms.add(key.toLowerCase()); // 「ギャル」をそのまま追加
-        
-        // もし英字ID(gal)が届いた時のためにMAPも一応引く
+        want.add(key.toLowerCase());
+        // ジャンルマップから変換（例: gal → ギャル）
         const seoEntry = GENRE_SEO_MAP[key as GenreKey];
-        if (seoEntry?.label) {
-          searchTerms.add(seoEntry.label.toLowerCase());
-        }
+        if (seoEntry?.label) want.add(seoEntry.label.toLowerCase());
       });
 
       filtered = filtered.filter((v: any) => {
+        // 動画側のタグを全て抽出
         const videoTags = [
           ...(Array.isArray(v.genres) ? v.genres : []),
           v.genre,
           v.category
         ].filter(Boolean).map(t => String(t).toLowerCase().trim());
         
-        return videoTags.some(vt => searchTerms.has(vt));
+        return videoTags.some(vt => want.has(vt));
       });
     }
 
@@ -124,6 +124,7 @@ export async function getFilteredVideos(
       });
     }
 
+    // 3. ページングとシャッフル
     const startIndex = (page - 1) * count;
     if (isRankingMode) {
       return filtered.slice(startIndex, startIndex + count);
