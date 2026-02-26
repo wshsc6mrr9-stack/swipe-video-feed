@@ -17,7 +17,7 @@ function mulberry32(a: number) {
     t = Math.imul(t ^ t >>> 15, t | 1);
     t ^= t + Math.imul(t ^ t >>> 7, t | 61);
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  }
+  };
 }
 
 function shuffleWithSeed<T>(array: T[], seedNum: number): T[] {
@@ -41,10 +41,11 @@ export async function getFilteredVideos(
   try {
     const isFavoritesMode = targetIds && targetIds.length > 0;
     const isRankingMode = !isFavoritesMode && (genres.includes("__likes__") || genres.includes("likes"));
+    
     // "all" または指定なしの場合は全件表示
     const isAll = !isFavoritesMode && !isRankingMode && (
       genres.length === 0 || 
-      genres.some(g => ["all", "all", "GENRE_ALL"].includes(String(g).toLowerCase()))
+      genres.some(g => ["all", "GENRE_ALL"].includes(String(g).toLowerCase()))
     );
     
     const hasQuery = query.trim().length > 0;
@@ -91,13 +92,13 @@ export async function getFilteredVideos(
       });
     }
     else if (!isAll) {
-      // ★ 解決策：検索ワードを徹底的に日本語ラベルへ紐付ける
+      // ★ 日本語化対応：URLの文字(ギャル)と、genres.tsの設定を両方検索対象にする
       const searchTerms = new Set<string>();
       genres.forEach(g => {
         const key = String(g).trim();
-        searchTerms.add(key.toLowerCase());
+        searchTerms.add(key.toLowerCase()); // 「ギャル」をそのまま追加
         
-        // genres.ts の GENRE_SEO_MAP を走査して、キーが一致したらラベル(日本語)も追加
+        // もし英字ID(gal)が届いた時のためにMAPも一応引く
         const seoEntry = GENRE_SEO_MAP[key as GenreKey];
         if (seoEntry?.label) {
           searchTerms.add(seoEntry.label.toLowerCase());
@@ -105,7 +106,6 @@ export async function getFilteredVideos(
       });
 
       filtered = filtered.filter((v: any) => {
-        // 動画側のタグ（genres配列, genre文字列, category文字列）をすべて統合
         const videoTags = [
           ...(Array.isArray(v.genres) ? v.genres : []),
           v.genre,
