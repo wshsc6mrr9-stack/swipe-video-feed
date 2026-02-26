@@ -23,10 +23,6 @@ function isHlsUrl(url?: string) {
   return !!url && url.includes(".m3u8");
 }
 
-function isMp4Url(url?: string) {
-  return !!url && /\.mp4(\?|$|#)/i.test(url);
-}
-
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
@@ -83,10 +79,6 @@ function track(videoId: string, event: "play" | "aff_click") {
   } catch {}
 }
 
-function sleep(ms: number) {
-  return new Promise<void>((r) => setTimeout(r, ms));
-}
-
 function isNotAllowed(err: any) {
   const name = String(err?.name ?? "");
   const msg = String(err?.message ?? "");
@@ -97,21 +89,12 @@ function isNotAllowed(err: any) {
   );
 }
 
-function withMediaFragmentStart(url: string) {
-  const u = String(url ?? "");
-  if (!u) return u;
-  if (!isMp4Url(u)) return u;
-  if (u.includes("#t=")) return u;
-  if (u.includes("#")) return u;
-  return `${u}#t=${START_OFFSET_SEC}`;
-}
-
 export default function VideoPlayer({ video, isActive = false }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const seekRef = useRef<HTMLInputElement | null>(null);
 
   const rawSrc = (video.url ?? (video as any).src ?? "") as string;
-  const src = useMemo(() => withMediaFragmentStart(rawSrc), [rawSrc]);
 
   const posterUrl = useMemo(() => {
     const p = (video as any)?.poster;
@@ -120,6 +103,11 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   const [ready, setReady] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [isWaiting, setIsWaiting] = useState(true);
+
+  // ★ 追加: 黒いカバーを外すための状態管理
+  const [frameOk, setFrameOk] = useState(false);
+  const frameOkRef = useRef(false);
 
   const [muted, setMuted] = useState<boolean>(() => readMuted());
   const [forcedMuted, setForcedMuted] = useState(false);
@@ -137,26 +125,8 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     readLikedSet().has(String(video.id))
   );
 
-  const currentRef = useRef(0);
-  const durationRef = useRef(0);
-  const lastUiRef = useRef(0);
-  const seekRef = useRef<HTMLInputElement | null>(null);
-
-  const activeRef = useRef(isActive);
-  useEffect(() => {
-    activeRef.current = isActive;
-  }, [isActive]);
-
   const sentPlayRef = useRef(false);
   const userPausedRef = useRef(false);
-
-  const jumpedRef = useRef(false);
-  const seekingRef = useRef(false);
-  const seekAttemptsRef = useRef(0);
-  const seekDeadlineRef = useRef(0);
-
-  const [frameOk, setFrameOk] = useState(false);
-  const frameOkRef = useRef(false);
 
   const vAny = video as unknown as { affUrl?: string; affiliateUrl?: string };
   const affUrl = (vAny.affUrl ?? vAny.affiliateUrl) as string | undefined;
@@ -164,25 +134,17 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   useEffect(() => {
     sentPlayRef.current = false;
     userPausedRef.current = false;
-
     forcedMutedRef.current = false;
     setForcedMuted(false);
-
-    jumpedRef.current = false;
-    seekingRef.current = false;
-    seekAttemptsRef.current = 0;
-    seekDeadlineRef.current = performance.now() + 4500; 
-
-    frameOkRef.current = false;
-    setFrameOk(false);
-
     setReady(false);
     setPlaying(false);
-
-    currentRef.current = 0;
-    durationRef.current = 0;
+    setIsWaiting(true);
     setCurrent(0);
     setDuration(0);
+    
+    // カバー状態をリセット
+    frameOkRef.current = false;
+    setFrameOk(false);
   }, [video.id]);
 
   useEffect(() => {
@@ -200,95 +162,9 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     };
   }, []);
 
-  const getDurationLike = (el: HTMLVideoElement): number => {
-    const d = el.duration;
-    if (Number.isFinite(d) && d > 0) return d;
-    try {
-      const s = el.seekable;
-      if (s && s.length > 0) {
-        const end = s.end(s.length - 1);
-        if (Number.isFinite(end) && end > 0) return end;
-      }
-    } catch {}
-    const dr = durationRef.current;
-    if (Number.isFinite(dr) && dr > 0) return dr;
-    return 0;
-  };
-
-  const targetStart = (el: HTMLVideoElement) => {
-    const dLike = getDurationLike(el);
-    if (dLike > 0) return clamp(START_OFFSET_SEC, 0, Math.max(0, dLike - 0.01));
-    return START_OFFSET_SEC;
-  };
-
-  const isAtTarget = (el: HTMLVideoElement, target: number) => {
-    const t = Number.isFinite(el.currentTime) ? el.currentTime : currentRef.current || 0;
-    return t >= target - 0.25;
-  };
-
-  const hardSeekToStart = async (reason: string) => {
+  const tryResume = async () => {
     const el = videoRef.current;
-    if (!el) return;
-    if (!activeRef.current) return;
-    if (jumpedRef.current) return;
-    if (seekingRef.current) return;
-    if (performance.now() > seekDeadlineRef.current) return;
-
-    const target = targetStart(el);
-    if (isAtTarget(el, target)) {
-      jumpedRef.current = true;
-      return;
-    }
-
-    if (seekAttemptsRef.current >= 10) return;
-
-    seekingRef.current = true;
-    seekAttemptsRef.current += 1;
-
-    try {
-      try {
-        el.pause();
-      } catch {}
-
-      await sleep(120);
-
-      try {
-        // @ts-ignore
-        if (typeof el.fastSeek === "function") {
-          // @ts-ignore
-          el.fastSeek(target);
-        } else {
-          el.currentTime = target;
-        }
-      } catch {}
-
-      await sleep(120);
-
-      if (isAtTarget(el, target)) {
-        jumpedRef.current = true;
-        currentRef.current = target;
-        setCurrent(target);
-        if (seekRef.current) seekRef.current.value = String(target);
-      }
-
-      if (activeRef.current && document.visibilityState === "visible" && !userPausedRef.current) {
-        el.muted = effectiveMuted;
-        try {
-          await el.play();
-          setPlaying(true);
-        } catch {}
-      }
-    } finally {
-      seekingRef.current = false;
-    }
-  };
-
-  const tryResume = async (reason: string) => {
-    const el = videoRef.current;
-    if (!el) return;
-    if (!activeRef.current) return;
-    if (document.visibilityState !== "visible") return;
-    if (userPausedRef.current) return;
+    if (!el || !isActive || document.visibilityState !== "visible" || userPausedRef.current) return;
 
     el.muted = effectiveMuted;
 
@@ -301,7 +177,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       }
     } catch (err: any) {
       setPlaying(false);
-
       if (!effectiveMuted && isNotAllowed(err)) {
         try {
           forcedMutedRef.current = true;
@@ -324,27 +199,25 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       if (!el) return;
 
       if (document.visibilityState !== "visible") {
-        try {
-          el.pause();
-        } catch {}
+        try { el.pause(); } catch {}
         setPlaying(false);
       } else {
         if (isActive && !userPausedRef.current) {
-          tryResume("visibility");
+          tryResume();
         }
       }
     };
-
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, muted, forcedMuted, src]);
+  }, [isActive, muted, forcedMuted, rawSrc]);
 
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
 
     setReady(false);
+    setIsWaiting(true);
 
     try {
       hlsRef.current?.destroy();
@@ -354,10 +227,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     try {
       // @ts-ignore
       el.poster = posterUrl || "";
-    } catch {}
-
-    try {
-      el.preload = "auto";
+      el.preload = "metadata";
     } catch {}
 
     if (isHlsUrl(rawSrc)) {
@@ -365,9 +235,9 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         const hls = new Hls({
           lowLatencyMode: false,
           capLevelToPlayerSize: true,
-          backBufferLength: 10,
-          maxBufferLength: 20,
-          startPosition: START_OFFSET_SEC,
+          startPosition: START_OFFSET_SEC, 
+          maxBufferLength: 5,              
+          autoStartLoad: true,
         });
         hlsRef.current = hls;
         hls.loadSource(rawSrc);
@@ -376,9 +246,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         hls.on(Hls.Events.MANIFEST_PARSED, () => setReady(true));
         hls.on(Hls.Events.ERROR, (_evt, data) => {
           if (data?.fatal) {
-            try {
-              hls.destroy();
-            } catch {}
+            try { hls.destroy(); } catch {}
             hlsRef.current = null;
             try {
               el.src = rawSrc;
@@ -391,7 +259,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         setReady(true);
       }
     } else {
-      el.src = src;
+      el.src = rawSrc; 
       setReady(true);
     }
 
@@ -401,7 +269,71 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         hlsRef.current = null;
       } catch {}
     };
-  }, [rawSrc, src, posterUrl]);
+  }, [rawSrc, posterUrl]);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+
+    const removeCover = () => {
+      if (!frameOkRef.current) {
+        frameOkRef.current = true;
+        setFrameOk(true);
+      }
+    };
+
+    const onWaiting = () => setIsWaiting(true);
+    const onPlaying = () => {
+      setIsWaiting(false);
+      setPlaying(true);
+      removeCover(); // ★ 再生開始でカバーを外す
+    };
+    const onCanPlay = () => {
+      setIsWaiting(false);
+      removeCover(); // ★ 再生準備完了でカバーを外す
+    };
+    const onLoadedData = () => {
+      removeCover(); // ★ データ読み込み完了でカバーを外す
+    };
+    const onPause = () => setPlaying(false);
+
+    const onLoadedMetadata = () => {
+      setReady(true);
+      if (Number.isFinite(el.duration)) setDuration(el.duration);
+      
+      if (!isHlsUrl(rawSrc) && el.currentTime < START_OFFSET_SEC) {
+        el.currentTime = START_OFFSET_SEC;
+      }
+    };
+
+    const onTimeUpdate = () => {
+      setCurrent(el.currentTime);
+      if (el.currentTime > 0) {
+         removeCover(); // ★ 少しでも進んだらカバーを外す
+      }
+      if (el.currentTime < START_OFFSET_SEC - 0.5 && !userPausedRef.current && isActive) {
+         el.currentTime = START_OFFSET_SEC;
+      }
+    };
+
+    el.addEventListener("waiting", onWaiting);
+    el.addEventListener("playing", onPlaying);
+    el.addEventListener("canplay", onCanPlay);
+    el.addEventListener("loadeddata", onLoadedData);
+    el.addEventListener("pause", onPause);
+    el.addEventListener("loadedmetadata", onLoadedMetadata);
+    el.addEventListener("timeupdate", onTimeUpdate);
+
+    return () => {
+      el.removeEventListener("waiting", onWaiting);
+      el.removeEventListener("playing", onPlaying);
+      el.removeEventListener("canplay", onCanPlay);
+      el.removeEventListener("loadeddata", onLoadedData);
+      el.removeEventListener("pause", onPause);
+      el.removeEventListener("loadedmetadata", onLoadedMetadata);
+      el.removeEventListener("timeupdate", onTimeUpdate);
+    };
+  }, [rawSrc, isActive]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -409,168 +341,27 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
     el.muted = effectiveMuted;
 
-    if (!isActive) {
-      try {
-        el.pause();
-      } catch {}
+    if (isActive) {
+      if (hlsRef.current) hlsRef.current.config.maxBufferLength = 30;
+      el.preload = "auto";
+      
+      userPausedRef.current = false;
+      tryResume();
+    } else {
+      if (hlsRef.current) hlsRef.current.config.maxBufferLength = 2;
+      try { el.pause(); } catch {}
       setPlaying(false);
-      return;
+      
+      if (el.currentTime > 0) {
+        el.currentTime = START_OFFSET_SEC;
+      }
     }
-
-    userPausedRef.current = false;
-    tryResume("active");
-
-    window.setTimeout(() => hardSeekToStart("active_kick"), 80);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, muted, forcedMuted, video.id, src]);
-
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el) return;
-
-    const updateDuration = () => {
-      const dLike = getDurationLike(el);
-      durationRef.current = dLike;
-      setDuration(dLike);
-      if (seekRef.current) seekRef.current.max = String(Math.max(0, dLike || 0));
-    };
-
-    const onLoadedMeta = () => {
-      updateDuration();
-      setReady(true);
-      hardSeekToStart("loadedmeta");
-    };
-
-    const onLoadedData = () => {
-      frameOkRef.current = true;
-      setFrameOk(true);
-      hardSeekToStart("loadeddata");
-    };
-
-    const onPlaying = () => {
-      setPlaying(true);
-      frameOkRef.current = true;
-      setFrameOk(true);
-      hardSeekToStart("playing");
-    };
-
-    const onTime = () => {
-      const t = el.currentTime || 0;
-      currentRef.current = t;
-
-      const now = performance.now();
-      if (now - lastUiRef.current >= 200) {
-        lastUiRef.current = now;
-        setCurrent(t);
-      }
-
-      const target = targetStart(el);
-      if (!jumpedRef.current && t >= target - 0.25) {
-        jumpedRef.current = true;
-      }
-
-      if (!jumpedRef.current && t > 0.05 && t < target - 0.25) {
-        hardSeekToStart("timeupdate");
-      }
-    };
-
-    const onPause = () => {
-      setPlaying(false);
-      if (!activeRef.current) return;
-      if (document.visibilityState !== "visible") return;
-      if (userPausedRef.current) return;
-      window.setTimeout(() => tryResume("pause"), 120);
-    };
-
-    el.addEventListener("loadedmetadata", onLoadedMeta);
-    el.addEventListener("durationchange", onLoadedMeta);
-    el.addEventListener("loadeddata", onLoadedData);
-    el.addEventListener("playing", onPlaying);
-    el.addEventListener("timeupdate", onTime);
-    el.addEventListener("pause", onPause);
-
-    return () => {
-      el.removeEventListener("loadedmetadata", onLoadedMeta);
-      el.removeEventListener("durationchange", onLoadedMeta);
-      el.removeEventListener("loadeddata", onLoadedData);
-      el.removeEventListener("playing", onPlaying);
-      el.removeEventListener("timeupdate", onTime);
-      el.removeEventListener("pause", onPause);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src, muted, forcedMuted, video.id]);
-
-  const rvfcIdRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (!isActive) return;
-
-    let stopped = false;
-
-    const stopAll = () => {
-      stopped = true;
-      const elAny = videoRef.current as any;
-      if (elAny && typeof elAny.cancelVideoFrameCallback === "function" && rvfcIdRef.current != null) {
-        try {
-          elAny.cancelVideoFrameCallback(rvfcIdRef.current);
-        } catch {}
-      }
-      rvfcIdRef.current = null;
-    };
-
-    const elAny = videoRef.current as any;
-    if (!elAny || typeof elAny.requestVideoFrameCallback !== "function") return;
-
-    const onFrame = (_now: number, meta: any) => {
-      if (stopped) return;
-
-      const el = videoRef.current;
-      if (el) {
-        const mt = Number(meta?.mediaTime);
-        if (Number.isFinite(mt) && mt >= 0) {
-          currentRef.current = mt;
-
-          const now = performance.now();
-          if (now - lastUiRef.current >= 120) {
-            lastUiRef.current = now;
-            setCurrent(mt);
-          }
-
-          if (!jumpedRef.current) {
-            const target = targetStart(el);
-            if (mt >= target - 0.25) {
-              jumpedRef.current = true;
-            } else if (mt > 0.05 && mt < target - 0.25) {
-              hardSeekToStart("rvfc");
-            }
-          }
-        }
-
-        const dLike = getDurationLike(el);
-        if (Number.isFinite(dLike) && dLike > 0 && dLike !== durationRef.current) {
-          durationRef.current = dLike;
-          setDuration(dLike);
-          if (seekRef.current) seekRef.current.max = String(dLike);
-        }
-      }
-
-      try {
-        rvfcIdRef.current = elAny.requestVideoFrameCallback(onFrame);
-      } catch {}
-    };
-
-    try {
-      rvfcIdRef.current = elAny.requestVideoFrameCallback(onFrame);
-    } catch {}
-
-    return () => stopAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, video.id, src]);
+  }, [isActive, muted, forcedMuted, rawSrc]);
 
   const stop = (e: any) => {
     e?.stopPropagation?.();
-    try {
-      e?.nativeEvent?.stopImmediatePropagation?.();
-    } catch {}
+    try { e?.nativeEvent?.stopImmediatePropagation?.(); } catch {}
   };
 
   const togglePlay = async () => {
@@ -579,12 +370,10 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
     if (el.paused) {
       userPausedRef.current = false;
-      tryResume("toggle_play");
+      tryResume();
     } else {
       userPausedRef.current = true;
-      try {
-        el.pause();
-      } catch {}
+      try { el.pause(); } catch {}
       setPlaying(false);
     }
   };
@@ -594,7 +383,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     if (!el) return;
 
     const next = !muted;
-
     if (!next) {
       forcedMutedRef.current = false;
       setForcedMuted(false);
@@ -602,7 +390,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
     setMuted(next);
     writeMuted(next);
-
     el.muted = isActive ? (forcedMutedRef.current ? true : next) : true;
 
     if (isActive) {
@@ -616,24 +403,15 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   const seekTo = (t: number) => {
     const el = videoRef.current;
     if (!el) return;
-    const dLike = getDurationLike(el);
+    const dLike = duration > 0 ? duration : el.duration;
     const next = clamp(t, 0, dLike || t);
-    try {
-      // @ts-ignore
-      if (typeof el.fastSeek === "function") {
-        // @ts-ignore
-        el.fastSeek(next);
-      } else {
-        el.currentTime = next;
-      }
-    } catch {}
+    try { el.currentTime = next; } catch {}
   };
 
   const skip = (sec: number) => {
     const el = videoRef.current;
     if (!el) return;
-    const base = Number.isFinite(el.currentTime) ? el.currentTime : currentRef.current;
-    seekTo(base + sec);
+    seekTo(el.currentTime + sec);
   };
 
   const titleText = useMemo(() => video.title || rawSrc || "", [video.title, rawSrc]);
@@ -641,13 +419,12 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   const onToggleLike = async (e: any) => {
     stop(e);
-
     const id = String(video.id);
     const set = readLikedSet();
     const was = set.has(id);
     const nextLiked = !was;
-
     const nextCount = Math.max(0, (likeCount ?? 0) + (nextLiked ? 1 : -1));
+    
     setLikeCount(nextCount);
     setLiked(nextLiked);
 
@@ -665,30 +442,19 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       const serverCount = Number(j?.count);
       if (r.ok && j?.ok && Number.isFinite(serverCount)) {
         setLikeCount(serverCount);
-        window.dispatchEvent(
-          new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: serverCount } })
-        );
+        window.dispatchEvent(new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: serverCount } }));
       } else {
-        window.dispatchEvent(
-          new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } })
-        );
+        window.dispatchEvent(new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } }));
       }
     } catch {
-      window.dispatchEvent(
-        new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } })
-      );
+      window.dispatchEvent(new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } }));
     }
   };
 
   const onShare = async (e: any) => {
     stop(e);
-
-    const shareUrl = `https://swipe-video-feed.vercel.app/video/${encodeURIComponent(
-      String(video.id)
-    )}`;
-
+    const shareUrl = `https://swipe-video-feed.vercel.app/video/${encodeURIComponent(String(video.id))}`;
     const text = titleText || "Swipe Video Feed";
-
     try {
       if (typeof navigator !== "undefined" && "share" in navigator) {
         // @ts-ignore
@@ -696,7 +462,6 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
         return;
       }
     } catch {}
-
     try {
       await navigator.clipboard.writeText(shareUrl);
       alert("共有URLをコピーした");
@@ -706,12 +471,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   };
 
   const tapRef = useRef({ 
-    downX: 0, 
-    downY: 0, 
-    downT: 0, 
-    moved: false,
-    lastTapT: 0,
-    singleTapTimer: null as any
+    downX: 0, downY: 0, downT: 0, moved: false, lastTapT: 0, singleTapTimer: null as any
   });
 
   const onVideoPointerDown = (e: React.PointerEvent) => {
@@ -729,8 +489,7 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   const onVideoPointerUp = (e: React.PointerEvent) => {
     const dt = performance.now() - tapRef.current.downT;
-    if (tapRef.current.moved) return;
-    if (dt > TAP_MAX_MS) return;
+    if (tapRef.current.moved || dt > TAP_MAX_MS) return;
 
     const now = performance.now();
     const timeSinceLastTap = now - tapRef.current.lastTapT;
@@ -738,15 +497,10 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     if (timeSinceLastTap < 400) { 
       clearTimeout(tapRef.current.singleTapTimer);
       tapRef.current.lastTapT = 0;
-
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const clickX = e.clientX - rect.left;
-
-      if (clickX > rect.width / 2) {
-        skip(5);
-      } else {
-        skip(-5);
-      }
+      if (clickX > rect.width / 2) skip(5);
+      else skip(-5);
     } else {
       tapRef.current.lastTapT = now;
       clearTimeout(tapRef.current.singleTapTimer);
@@ -761,16 +515,13 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
 
   const enableSoundFromUser = async (e?: any) => {
     stop(e);
-
     const el = videoRef.current;
     if (!el) return;
 
     forcedMutedRef.current = false;
     setForcedMuted(false);
-
     setMuted(false);
     writeMuted(false);
-
     el.muted = false;
 
     try {
@@ -783,10 +534,17 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     } catch {}
   };
 
+  const spinnerStyle = `
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  `;
+
+  // ★ ここで黒カバーの表示判定をしています
   const showBlackCover = !posterUrl && !frameOk;
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%", background: "black", overflow: "hidden", touchAction: "pan-y" }}>
+      <style>{spinnerStyle}</style>
+
       <video
         ref={videoRef}
         playsInline
@@ -813,6 +571,19 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
       {showBlackCover ? (
         <div style={{ position: "absolute", inset: 0, zIndex: 2, background: "black", pointerEvents: "none" }} />
       ) : null}
+
+      {isActive && isWaiting && (
+        <div style={{
+          position: "absolute", inset: 0, zIndex: 20, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none"
+        }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: "50%",
+            border: "4px solid rgba(255,255,255,0.15)",
+            borderTopColor: "rgba(255,255,255,0.9)",
+            animation: "spin 0.8s linear infinite"
+          }} />
+        </div>
+      )}
 
       {!ready && (
         <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "rgba(255,255,255,0.65)", zIndex: 10, pointerEvents: "none" }}>
