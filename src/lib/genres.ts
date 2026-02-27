@@ -310,4 +310,24 @@ export function normalizeGenreKey(v: any): string {
   if (v == null) return "";
   // 小文字化をやめてトリムのみにする
   return String(v).trim();
-}
+}// src/lib/genres.ts の一番下に追加
+export const GENRE_SLUGS: Record<string, string> = {
+  "清楚": "seiso",
+  "美少女": "bishoujo",
+  "ギャル": "gyaru",
+  "可愛い": "kawaii",
+  "セクシー": "sexy",
+  "コスプレ": "cosplay",
+  "制服": "uniform",
+  "水着": "swimsuit",
+  "巨乳": "big-breasts",
+  "熟女": "milf",
+  "人妻": "married-woman",
+  "素人": "amateur",
+  // ※他のジャンルも必要に応じて追加できます
+};
+
+// 英語から日本語を引き出す逆引きマップ
+export const SLUG_TO_GENRE = Object.fromEntries(
+  Object.entries(GENRE_SLUGS).map(([k, v]) => [v, k])
+);
