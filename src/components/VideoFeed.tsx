@@ -6,7 +6,7 @@ import GenreMenu from "@/components/GenreMenu";
 import MoreMenu from "@/components/MoreMenu";
 import { GENRE_ALL, GENRE_LIKES, GENRE_FAVORITES, type GenreKey } from "@/lib/genres";
 
-// ===== 日本語ジャンル → Redisタグ変換（巨大マップ復活！） =====
+// ===== 日本語ジャンル → Redisタグ変換（完全網羅版） =====
 const GENRE_MAP: Record<string, string[]> = {
   // ---- タイプ ----
   "ギャル": ["gal"],
@@ -325,14 +325,11 @@ export default function VideoFeed({
       const params = new URLSearchParams();
       const activeGenres = genres.filter(Boolean);
 
-      // 【完全遵守】GENRE_MAP に「あるジャンル」だけ Redis 用タグに変換
       const apiGenres = activeGenres.flatMap((g) => {
         if (g === GENRE_FAVORITES || g === GENRE_LIKES) return [g];
         return GENRE_MAP[g] || []; 
       });
 
-      // 【完全遵守】変換結果が1つでもある時だけ params.append
-      // （空ならパラメータを送らない＝全件）
       if (apiGenres.length > 0) {
         params.set("genres", apiGenres.join(","));
       }
@@ -459,7 +456,6 @@ export default function VideoFeed({
     } else if (genres.length === 1 && genres[0] === GENRE_FAVORITES) {
        base = items;
     } else {
-       // 【完全遵守】GENRE_MAP に変換できたタグがある時だけ filter
        const wantList = genres.flatMap((g) => GENRE_MAP[g] || []);
        
        if (wantList.length > 0) {
@@ -469,16 +465,20 @@ export default function VideoFeed({
               v.genre
            ].filter(Boolean).map(String);
            
-           // 大文字小文字の差異を吸収しつつ、includes（部分一致）でチェック
+           // ★★★ ここが最強の修正ポイント！ ★★★
+           // 単純な includes だと "ol" が "idol" に反応してしまうため、
+           // タグをハイフンやスペースで分割（例: "student-adult" -> ["student", "adult"]）して、
+           // 「完全に一致する単語があるか」を厳密にチェックします。
            return tags.some((t) => {
              const lowerT = t.toLowerCase();
-             return wantList.some((w) => lowerT.includes(w.toLowerCase()));
+             const parts = lowerT.split(/[-_\s]/); // 単語に分解
+             return wantList.some((w) => {
+               const lowerW = w.toLowerCase();
+               return lowerT === lowerW || parts.includes(lowerW);
+             });
            });
          });
-         // ★ ここにあった「0件なら全部表示しちゃう」フェイルセーフを抹殺！
-         // （マップにあるジャンルなら、他の動画は絶対に混ぜない）
        }
-       // 【完全遵守】無い場合(wantList.length === 0)は items をそのまま返す（フィルタしない）
     }
 
     const q = normalizeText(query);
