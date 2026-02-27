@@ -8,7 +8,7 @@ export const redis = new Redis({
 
 let allVideosCache: any[] | null = null;
 let cacheTimestamp = 0;
-const CACHE_TTL = 1000 * 60 * 5;
+const CACHE_TTL = 1000 * 60 * 5; // 5min
 const RANKING_KEY = "video:ranking";
 
 // ---- seeded shuffle ----
@@ -31,9 +31,9 @@ function shuffleWithSeed<T>(array: T[], seedNum: number): T[] {
   return result;
 }
 
-// ===== getFilteredVideos（最終版） =====
+// ===== getFilteredVideos（キー総当り・日本語完全耐性 最終版） =====
 export async function getFilteredVideos(
-  genres: string[] | undefined, // ★ undefined = 全件モード
+  genres: string[] | undefined, // undefined or [] = 全件
   query: string = "",
   count: number = 50,
   page: number = 1,
@@ -47,7 +47,6 @@ export async function getFilteredVideos(
       Array.isArray(genres) &&
       (genres.includes("__likes__") || genres.includes("likes"));
 
-    // ★ 全件表示の判定（空配列や未指定は全件）
     const isAll =
       !isFavoritesMode &&
       !isRankingMode &&
@@ -95,7 +94,7 @@ export async function getFilteredVideos(
       const idSet = new Set(targetIds!.map(String));
       filtered = filtered.filter((v) => idSet.has(String(v.id)));
 
-      // ---- ranking ----
+    // ---- ranking ----
     } else if (isRankingMode) {
       const rankedIds = await redis.zrange(RANKING_KEY, 0, 2000, { rev: true });
       const rankMap = new Map<string, number>();
@@ -109,21 +108,25 @@ export async function getFilteredVideos(
         return ra - rb;
       });
 
-      // ---- genre filter（部分一致・日本語耐性） ----
+    // ---- genre filter（キー総当り・部分一致・日本語耐性） ----
     } else if (!isAll && Array.isArray(genres) && genres.length > 0) {
       const want = genres.map((g) =>
         String(g).normalize("NFKC").trim()
       );
 
       filtered = filtered.filter((v: any) => {
-        const tags = Array.isArray(v.genres)
-          ? v.genres
-          : typeof v.genre === "string"
-          ? [v.genre]
-          : [];
+        const candidates: string[] = [];
 
-        return tags.some((t: any) => {
-          const tag = String(t).normalize("NFKC").trim();
+        // 想定される全キーを総当り
+        if (Array.isArray(v.genres)) candidates.push(...v.genres);
+        if (typeof v.genre === "string") candidates.push(v.genre);
+        if (Array.isArray(v.tags)) candidates.push(...v.tags);
+        if (typeof v.tag === "string") candidates.push(v.tag);
+        if (typeof v.category === "string") candidates.push(v.category);
+        if (Array.isArray(v.categories)) candidates.push(...v.categories);
+
+        return candidates.some((c) => {
+          const tag = String(c).normalize("NFKC").trim();
           return want.some((w) => tag.includes(w));
         });
       });
