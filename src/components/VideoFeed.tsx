@@ -107,10 +107,12 @@ const GENRE_MAP: Record<string, string[]> = {
   "寝取り・寝取られ・NTR": ["ntr"],
   "乱行": ["multiple-play", "4p", "3p"],
   "淫乱": ["promiscuous", "hardcore"],
+  "淫乱・ハード系": ["hardcore", "promiscuous"],
   "レズビアン": ["lesbian"],
   "ナンパ": ["pickup"],
   "即ハメ": ["instant"],
   "不倫": ["affair"],
+  "BL（ボーイズラブ）": [],
   "オタク": ["otaku"],
   "お姫様": ["princess"],
   "ギリモザ": ["giri-mosaic"],
@@ -157,6 +159,8 @@ const GENRE_MAP: Record<string, string[]> = {
   "キャバ嬢・風俗嬢": ["hostess-service"],
   "主婦": ["housewife", "married-woman"],
   "義母": ["stepmother"],
+  "女教師": ["teacher", "teacher-adult"],
+  "OL・職業色々": ["office-mix", "business-suit"],
   "女子大生": ["college-student"],
   "お母さん": ["mature-mother"],
   "女子校生": ["student-adult", "school-adult"],
@@ -191,6 +195,7 @@ const GENRE_MAP: Record<string, string[]> = {
   "放尿・お漏らし": ["urination"],
   "飲尿": ["drink-urine"],
   "羞恥": ["humiliation"],
+  "羞め": ["humiliation-strong"],
   "4P": ["4p"],
   "デカチン・巨根": ["big-dick"],
   "その他（プレイ）": ["other-fetish"],
@@ -245,6 +250,7 @@ const EVT_LIKES = "likes_changed_v1";
 const KEY_LIKED = "liked_videos_v1";
 
 function readLikedSet(): Set<string> {
+  if (typeof window === "undefined") return new Set();
   try {
     const raw = localStorage.getItem(KEY_LIKED);
     if (!raw) return new Set();
@@ -357,31 +363,33 @@ export default function VideoFeed({
       const params = new URLSearchParams();
       const activeGenres = genres.filter(Boolean);
 
-      const apiGenres = activeGenres.flatMap((g) => {
-        if (g === GENRE_FAVORITES || g === GENRE_LIKES) return [g];
-        return GENRE_MAP[g] || []; 
-      });
-
-      if (apiGenres.length > 0) {
-        params.set("genres", apiGenres.join(","));
-      }
-      
-      if (query) params.set("query", query);
-      params.set("page", String(page));
-      params.set("seed", String(seed));
-      params.set("_t", Date.now().toString());
-
-      if (activeGenres.includes(GENRE_FAVORITES)) {
-        const likedIds = Array.from(readLikedSet());
-        if (likedIds.length === 0) {
+      const isFavMode = activeGenres.includes(GENRE_FAVORITES);
+      if (isFavMode) {
+        const likedSet = readLikedSet();
+        if (likedSet.size === 0) {
            setItems([]);
            setHasMore(false);
            loadingRef.current = false;
            setLoading(false);
            return;
         }
-        params.set("ids", likedIds.join(","));
+        params.set("ids", Array.from(likedSet).join(","));
+      } else {
+        const apiGenres = activeGenres.flatMap((g) => {
+          if (g === GENRE_FAVORITES || g === GENRE_LIKES) return [g];
+          return GENRE_MAP[g] || []; 
+        });
+
+        if (apiGenres.length > 0) {
+          params.set("genres", apiGenres.join(","));
+        }
+        
+        params.set("page", String(page));
+        params.set("seed", String(seed));
       }
+      
+      if (query) params.set("query", query);
+      params.set("_t", Date.now().toString());
 
       const res = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
       const json = await res.json().catch(() => null);
@@ -470,29 +478,10 @@ export default function VideoFeed({
 
   useEffect(() => {
     if (!hasMore) return;
-    if (items.length === 0) {
+    if (items.length === 0 || (viewItems.length - index <= 5)) {
       loadMoreVideos();
-    } else {
-      const remainingViews = viewItems.length - index;
-      if (remainingViews <= 5) {
-        loadMoreVideos();
-      }
     }
   }, [index, items.length, viewItems.length, hasMore, loadMoreVideos]);
-
-  useEffect(() => {
-    if (initialGenre) {
-      let g = initialGenre;
-      try { g = decodeURIComponent(initialGenre); } catch {}
-      setGenres([g]);
-      setItems([]); 
-      setIndex(0);
-      setPage(1);
-      setSeed(Math.floor(Math.random() * 1000000));
-      setHasMore(true);
-      setTranslate(0, "none");
-    }
-  }, [initialGenre, setTranslate]);
 
   useEffect(() => {
     const on = (ev: Event) => {
@@ -537,6 +526,7 @@ export default function VideoFeed({
       window.setTimeout(() => {
         setIndex((cur) => {
           const next = clampIndex(cur + (dir === -1 ? 1 : -1));
+          indexRef.current = next; 
           return next;
         });
         requestAnimationFrame(() => {
@@ -634,22 +624,12 @@ export default function VideoFeed({
       )}
 
       {isNoResults && (
-        <div style={{ position: "absolute", inset: 0, zIndex: 9000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "black", color: "white", padding: "20px", textAlign: "center", touchAction: "none", pointerEvents: "auto" }}>
-          <p style={{ fontSize: 16, fontWeight: "bold", marginBottom: 24, lineHeight: 1.5 }}>
-            現在、このジャンルの<br/>動画はありません 😢
-          </p>
+        <div className="absolute inset-0 z-9000 flex flex-col items-center justify-center bg-black text-white p-6 text-center touch-none pointer-events-auto">
+          <p className="text-base font-bold mb-6 leading-relaxed">現在、このジャンルの<br/>動画はありません 😢</p>
           <button 
-            onClick={() => {
-              setGenres([GENRE_ALL]);
-              setItems([]);
-              setIndex(0);
-              setPage(1);
-              setHasMore(true);
-            }} 
-            style={{ padding: "12px 24px", background: "white", color: "black", borderRadius: "30px", fontWeight: "bold", border: "none" }}
-          >
-            すべての動画を見る
-          </button>
+            onClick={() => { setGenres([GENRE_ALL]); setItems([]); setIndex(0); setPage(1); setHasMore(true); }} 
+            className="px-6 py-3 bg-white text-black rounded-full font-bold border-none"
+          >すべての動画を見る</button>
         </div>
       )}
 
