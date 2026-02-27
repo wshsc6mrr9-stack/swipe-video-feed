@@ -6,6 +6,18 @@ import GenreMenu from "@/components/GenreMenu";
 import MoreMenu from "@/components/MoreMenu";
 import { GENRE_ALL, GENRE_LIKES, GENRE_FAVORITES, type GenreKey } from "@/lib/genres";
 
+// ★ 追加：日本語ジャンル → Redisタグ変換マップ
+const GENRE_MAP: Record<string, string[]> = {
+  "美少女": ["bishoujo"],
+  "巨乳": ["big-breasts"],
+  "主観": ["pov"],
+  "VR": ["vr", "vr-only", "high-quality-vr"],
+  "清楚": ["innocent"],
+  "汗だく": ["sweaty"],
+  "パイパン": ["shaved"],
+  // 必要に応じて追加
+};
+
 type VideoItem = {
   id: string;
   title: string;
@@ -84,7 +96,7 @@ export default function VideoFeed({
     typeof window !== "undefined" ? Math.round(window.innerHeight) : 0
   );
 
-  // ★ URLから来る initialGenre をデコードして初期値にする
+  // URLから来る initialGenre をデコードして初期値にする
   const [genres, setGenres] = useState<GenreKey[]>(() => {
     if (initialGenre) {
       try { return [decodeURIComponent(initialGenre)]; } catch { return [initialGenre]; }
@@ -138,8 +150,11 @@ export default function VideoFeed({
     try {
       const params = new URLSearchParams();
       
-      // ★ ここをご要望通りに修正：Booleanでフィルタリングしてカンマ区切りで送る
-      const activeGenres = genres.filter(Boolean);
+      // ★ ここで GENRE_MAP を使って変換してから送信
+      const activeGenres = genres
+        .filter(Boolean)
+        .flatMap((g) => GENRE_MAP[g] ?? [g]); // マップにあれば展開、なければそのまま
+
       params.append("genres", activeGenres.join(","));
       
       if (query) params.append("query", query);
@@ -148,7 +163,7 @@ export default function VideoFeed({
       params.append("seed", String(seed));
       params.append("_t", Date.now().toString());
 
-      if (activeGenres.includes(GENRE_FAVORITES)) {
+      if (genres.includes(GENRE_FAVORITES)) {
         const likedIds = Array.from(readLikedSet());
         if (likedIds.length === 0) {
            setItems([]);
@@ -232,7 +247,7 @@ export default function VideoFeed({
     }
   }, [index, items.length, loadMoreVideos, hasMore]);
 
-  // ★ URLが変わったときのリセット処理（ここもそのまま維持）
+  // URLが変わったときのリセット処理
   useEffect(() => {
     if (initialGenre) {
       let g = initialGenre;
@@ -266,27 +281,28 @@ export default function VideoFeed({
     return () => window.removeEventListener(EVT_LIKES, on as any);
   }, []);
 
+  // ★ 表示時のフィルタリングにも GENRE_MAP を適用
   const viewItems = useMemo(() => {
-    const sel = Array.isArray(genres) ? genres : [GENRE_ALL];
+    // 全件表示ならそのまま
+    if (genres.includes(GENRE_ALL)) return items;
+
+    // 日本語ジャンルを英語タグに変換してセットを作成
+    const want = new Set(genres.flatMap((g) => GENRE_MAP[g] ?? [g]));
+
     let base = items;
 
-    if (!sel.includes(GENRE_ALL)) {
-      if (sel.length === 1 && sel[0] === GENRE_LIKES) {
-        base = items
-          .slice()
-          .sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
-      } else if (sel.length === 1 && sel[0] === GENRE_FAVORITES) {
-        base = items;
-      } else {
-        const want = new Set(sel.map(String));
-        base = items.filter((v) => {
-          const tags = [
+    if (genres.length === 1 && genres[0] === GENRE_LIKES) {
+       base = items.slice().sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
+    } else if (genres.length === 1 && genres[0] === GENRE_FAVORITES) {
+       base = items;
+    } else {
+       base = items.filter((v) => {
+         const tags = [
             ...(Array.isArray(v.genres) ? v.genres : []),
             v.genre
-          ].filter(Boolean).map(String);
-          return tags.some((t) => want.has(t));
-        });
-      }
+         ].filter(Boolean).map(String);
+         return tags.some((t) => want.has(t));
+       });
     }
 
     const q = normalizeText(query);
