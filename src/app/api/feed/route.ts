@@ -7,8 +7,8 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
-    // genre / genres 両対応（日本語URL対応）
-    const genresParam =
+    // ===== genre / genres 両対応（日本語URL完全対応）=====
+    const rawGenres =
       searchParams.get("genres") ??
       searchParams.get("genre") ??
       "";
@@ -21,26 +21,27 @@ export async function GET(req: Request) {
       }
     };
 
-    const genres = genresParam
+    const genres = rawGenres
       .split(",")
       .map(s => safeDecode(s.trim()))
       .filter(Boolean);
 
+    // ★ 超重要：空配列は undefined にする
+    const genresArg = genres.length > 0 ? genres : undefined;
+
+    // ===== その他クエリ =====
     const query = searchParams.get("query") || "";
 
-    // 数値パラメータ
-    const count = parseInt(searchParams.get("count") || "50", 10);
-    const page  = parseInt(searchParams.get("page")  || "1", 10);
-    const seed  = parseInt(searchParams.get("seed")  || "0", 10);
+    const count = Number(searchParams.get("count") ?? "50");
+    const page  = Number(searchParams.get("page")  ?? "1");
+    const seed  = Number(searchParams.get("seed")  ?? "0");
 
     const idsParam = searchParams.get("ids") || "";
     const targetIds = idsParam
       ? idsParam.split(",").map(s => s.trim()).filter(Boolean)
       : undefined;
 
-    // ★ 空配列は undefined に変換（超重要）
-    const genresArg = genres.length > 0 ? genres : undefined;
-
+    // ===== 取得 =====
     const videos = await getFilteredVideos(
       genresArg,
       query,
