@@ -250,6 +250,7 @@ const EVT_LIKES = "likes_changed_v1";
 const KEY_LIKED = "liked_videos_v1";
 
 function readLikedSet(): Set<string> {
+  if (typeof window === "undefined") return new Set();
   try {
     const raw = localStorage.getItem(KEY_LIKED);
     if (!raw) return new Set();
@@ -259,6 +260,7 @@ function readLikedSet(): Set<string> {
   return new Set();
 }
 
+// ★ 追加: エラーの原因だった関数
 function isInteractiveTarget(target: EventTarget | null) {
   const el = target as HTMLElement | null;
   if (!el) return false;
@@ -362,78 +364,62 @@ export default function VideoFeed({
       const params = new URLSearchParams();
       const activeGenres = genres.filter(Boolean);
 
-      const apiGenres = activeGenres.flatMap((g) => {
-        if (g === GENRE_FAVORITES || g === GENRE_LIKES) return [g];
-        return GENRE_MAP[g] || []; 
-      });
-
-      if (apiGenres.length > 0) {
-        params.set("genres", apiGenres.join(","));
+      const isFavMode = activeGenres.includes(GENRE_FAVORITES);
+      if (isFavMode) {
+        const likedSet = readLikedSet();
+        if (likedSet.size === 0) {
+           setItems([]);
+           setHasMore(false);
+           loadingRef.current = false;
+           setLoading(false);
+           return;
+        }
+        params.set("ids", Array.from(likedSet).join(","));
+      } else {
+        const apiGenres = activeGenres.flatMap((g) => {
+          if (g === GENRE_LIKES) return [g];
+          return GENRE_MAP[g] || []; 
+        });
+        if (apiGenres.length > 0) {
+          params.set("genres", apiGenres.join(","));
+        }
+        params.set("page", String(page));
+        params.set("seed", String(seed));
       }
       
       if (query) params.set("query", query);
-      params.set("page", String(page));
-      params.set("seed", String(seed));
       params.set("_t", Date.now().toString());
-
-      if (activeGenres.includes(GENRE_FAVORITES)) {
-        const likedIds = Array.from(readLikedSet());
-        if (likedIds.length === 0) {
-           setItems([]);
-           setHasMore(false);
-           return;
-        }
-        params.set("ids", likedIds.join(","));
-      }
 
       const res = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
       const json = await res.json().catch(() => null);
       const list = (Array.isArray(json) ? json : json?.items ?? []) as any[];
       
-      if (!list.length) {
+      if (!list || list.length === 0) {
         setHasMore(false);
+        loadingRef.current = false;
+        setLoading(false);
         return;
       }
 
       const normalized: VideoItem[] = list
-        .map((v) => {
-          const affUrl = (v?.affUrl ?? v?.affiliateUrl) as string | undefined;
-          const affLabel = (v?.affLabel ?? v?.affiliateLabel) as string | undefined;
-          return {
-            id: String(v.id ?? ""),
-            title: String(v.title ?? ""),
-            url: v.url ?? v.src,
-            src: v.src ?? v.url,
-            poster: v.poster,
-            srcType: v.srcType,
-            affUrl,
-            affLabel,
-            affiliateUrl: affUrl,
-            affiliateLabel: affLabel,
-            genres: Array.isArray(v.genres) ? v.genres : undefined,
-            genre: typeof v.genre === "string" ? v.genre : undefined,
-            likeCount: 0,
-          };
-        })
+        .map((v) => ({
+          id: String(v.id ?? ""),
+          title: String(v.title ?? ""),
+          url: v.url ?? v.src,
+          src: v.src ?? v.url,
+          poster: v.poster,
+          srcType: v.srcType,
+          affUrl: v.affUrl ?? v.affiliateUrl,
+          affLabel: v.affLabel ?? v.affiliateLabel,
+          genres: Array.isArray(v.genres) ? v.genres : undefined,
+          genre: typeof v.genre === "string" ? v.genre : undefined,
+          likeCount: Number(v.likeCount ?? 0),
+        }))
         .filter((v) => !!v.id);
-
-      try {
-        const ids = normalized.map((v) => v.id);
-        if (ids.length) {
-          const r2 = await fetch(
-            `/api/likes?ids=${encodeURIComponent(ids.join(","))}`,
-            { cache: "no-store" }
-          );
-          const j2 = await r2.json().catch(() => null);
-          const counts = (j2?.counts ?? {}) as Record<string, number>;
-          for (const v of normalized) v.likeCount = Number(counts[v.id] ?? 0);
-        }
-      } catch {}
 
       setItems((prev) => {
         const existingIds = new Set(prev.map((p) => p.id));
-        const newOnly = normalized.filter((n) => !existingIds.has(n.id));
-        return [...prev, ...newOnly];
+        return [...prev, ...normalized.filter((n) => !existingIds.has(n.id))];
       });
 
       setPage((p) => p + 1);
@@ -447,14 +433,17 @@ export default function VideoFeed({
   }, [hasMore, genres, query, page, seed]);
 
   const viewItems = useMemo(() => {
+    if (genres.includes(GENRE_FAVORITES)) {
+      const likedSet = readLikedSet();
+      return items.filter(v => likedSet.has(v.id));
+    }
+
     if (genres.includes(GENRE_ALL)) return items;
 
     let base = items;
 
     if (genres.length === 1 && genres[0] === GENRE_LIKES) {
        base = items.slice().sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
-    } else if (genres.length === 1 && genres[0] === GENRE_FAVORITES) {
-       base = items;
     } else {
        const wantList = genres.flatMap((g) => GENRE_MAP[g] || []);
        if (wantList.length > 0) {
@@ -481,9 +470,8 @@ export default function VideoFeed({
 
     return base.filter((v) => {
       const title = normalizeText(v.title);
-      const affLabel = normalizeText(v.affLabel ?? v.affiliateLabel ?? "");
       const id = normalizeText(v.id);
-      return title.includes(q) || affLabel.includes(q) || id.includes(q);
+      return title.includes(q) || id.includes(q);
     });
   }, [items, genres, query]);
 
@@ -556,7 +544,6 @@ export default function VideoFeed({
       window.setTimeout(() => {
         setIndex((cur) => {
           const next = clampIndex(cur + (dir === -1 ? 1 : -1));
-          indexRef.current = next; 
           return next;
         });
         requestAnimationFrame(() => {
