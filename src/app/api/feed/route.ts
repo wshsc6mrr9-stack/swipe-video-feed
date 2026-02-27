@@ -7,27 +7,48 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
-    // 送られてきた文字を確実に日本語として受け取る
-    const genresParam = searchParams.get("genres") || "";
+    // genre / genres 両対応（日本語URL対応）
+    const genresParam =
+      searchParams.get("genres") ??
+      searchParams.get("genre") ??
+      "";
+
+    const safeDecode = (s: string) => {
+      try {
+        return s.includes("%") ? decodeURIComponent(s) : s;
+      } catch {
+        return s;
+      }
+    };
+
     const genres = genresParam
       .split(",")
-      .map(s => {
-        try { return decodeURIComponent(s.trim()); } catch { return s.trim(); }
-      })
+      .map(s => safeDecode(s.trim()))
       .filter(Boolean);
 
     const query = searchParams.get("query") || "";
-    
-    // パラメータを数値化（デフォルト値もオリジナルに合わせる）
-    const count = parseInt(searchParams.get("count") || "50", 10);
-    const page = parseInt(searchParams.get("page") || "1", 10);
-    const seed = parseInt(searchParams.get("seed") || "0", 10);
-    
-    const idsParam = searchParams.get("ids") || "";
-    const targetIds = idsParam ? idsParam.split(",").map(s => s.trim()).filter(Boolean) : undefined;
 
-    // ★ 引数の順番をオリジナル(genres, query, count, page...)に完全一致させる
-    const videos = await getFilteredVideos(genres, query, count, page, seed, targetIds);
+    // 数値パラメータ
+    const count = parseInt(searchParams.get("count") || "50", 10);
+    const page  = parseInt(searchParams.get("page")  || "1", 10);
+    const seed  = parseInt(searchParams.get("seed")  || "0", 10);
+
+    const idsParam = searchParams.get("ids") || "";
+    const targetIds = idsParam
+      ? idsParam.split(",").map(s => s.trim()).filter(Boolean)
+      : undefined;
+
+    // ★ 空配列は undefined に変換（超重要）
+    const genresArg = genres.length > 0 ? genres : undefined;
+
+    const videos = await getFilteredVideos(
+      genresArg,
+      query,
+      count,
+      page,
+      seed,
+      targetIds
+    );
 
     return NextResponse.json(videos);
   } catch (error) {
