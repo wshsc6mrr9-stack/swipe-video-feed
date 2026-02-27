@@ -263,6 +263,7 @@ export default function VideoFeed({
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
+  const loadingRef = useRef(false); // ★ 連続フェッチ防止用の安全装置
   
   const [page, setPage] = useState(1);
   const [seed, setSeed] = useState(() => typeof window !== "undefined" ? Math.floor(Math.random() * 1000000) : 0);
@@ -318,7 +319,8 @@ export default function VideoFeed({
   }, []);
 
   const loadMoreVideos = useCallback(async () => {
-    if (loading || !hasMore) return; 
+    if (loadingRef.current || !hasMore) return; 
+    loadingRef.current = true;
     setLoading(true);
 
     try {
@@ -344,7 +346,6 @@ export default function VideoFeed({
         if (likedIds.length === 0) {
            setItems([]);
            setHasMore(false);
-           setLoading(false);
            return;
         }
         params.set("ids", likedIds.join(","));
@@ -356,7 +357,6 @@ export default function VideoFeed({
       
       if (!list.length) {
         setHasMore(false);
-        setLoading(false);
         return;
       }
 
@@ -406,19 +406,67 @@ export default function VideoFeed({
     } catch (e) {
       console.error("Load Error:", e);
     } finally {
+      loadingRef.current = false;
       setLoading(false);
     }
-  }, [loading, hasMore, genres, query, page, seed]);
+  }, [hasMore, genres, query, page, seed]);
 
-  useEffect(() => {
-    if (items.length === 0 && hasMore) loadMoreVideos();
-  }, [items.length, loadMoreVideos, hasMore]);
+  // 表示用に厳しくフィルタリングされた動画リスト
+  const viewItems = useMemo(() => {
+    if (genres.includes(GENRE_ALL)) return items;
 
-  useEffect(() => {
-    if (items.length > 0 && index >= Math.max(0, items.length - 30) && hasMore) {
-      loadMoreVideos();
+    let base = items;
+
+    if (genres.length === 1 && genres[0] === GENRE_LIKES) {
+       base = items.slice().sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
+    } else if (genres.length === 1 && genres[0] === GENRE_FAVORITES) {
+       base = items;
+    } else {
+       const wantList = genres.flatMap((g) => GENRE_MAP[g] || []);
+       if (wantList.length > 0) {
+         base = items.filter((v) => {
+           const tags = [
+              ...(Array.isArray(v.genres) ? v.genres : []),
+              v.genre
+           ].filter(Boolean).map(String);
+           
+           return tags.some((t) => {
+             const lowerT = t.toLowerCase();
+             const parts = lowerT.split(/[-_\s]/); 
+             return wantList.some((w) => {
+               const lowerW = w.toLowerCase();
+               return lowerT === lowerW || parts.includes(lowerW);
+             });
+           });
+         });
+       }
     }
-  }, [index, items.length, loadMoreVideos, hasMore]);
+
+    const q = normalizeText(query);
+    if (!q) return base;
+
+    return base.filter((v) => {
+      const title = normalizeText(v.title);
+      const affLabel = normalizeText(v.affLabel ?? v.affiliateLabel ?? "");
+      const id = normalizeText(v.id);
+      return title.includes(q) || affLabel.includes(q) || id.includes(q);
+    });
+  }, [items, genres, query]);
+
+  // ★★★ 最重要修正：自動追跡ページネーション ★★★
+  // 「表示できる動画（viewItems）」が残り少なくなったら、条件に合う動画が見つかるまでAPIを裏で呼び続ける
+  useEffect(() => {
+    if (!hasMore) return;
+    if (items.length === 0) {
+      loadMoreVideos();
+    } else {
+      // 画面に表示できている動画の「残りストック」が5件以下になったら自動で次を探しに行く
+      const remainingViews = viewItems.length - index;
+      if (remainingViews <= 5) {
+        loadMoreVideos();
+      }
+    }
+  }, [index, items.length, viewItems.length, hasMore, loadMoreVideos]);
 
   useEffect(() => {
     if (initialGenre) {
@@ -445,52 +493,6 @@ export default function VideoFeed({
     window.addEventListener(EVT_LIKES, on as any);
     return () => window.removeEventListener(EVT_LIKES, on as any);
   }, []);
-
-  const viewItems = useMemo(() => {
-    if (genres.includes(GENRE_ALL)) return items;
-
-    let base = items;
-
-    if (genres.length === 1 && genres[0] === GENRE_LIKES) {
-       base = items.slice().sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
-    } else if (genres.length === 1 && genres[0] === GENRE_FAVORITES) {
-       base = items;
-    } else {
-       const wantList = genres.flatMap((g) => GENRE_MAP[g] || []);
-       
-       if (wantList.length > 0) {
-         base = items.filter((v) => {
-           const tags = [
-              ...(Array.isArray(v.genres) ? v.genres : []),
-              v.genre
-           ].filter(Boolean).map(String);
-           
-           // ★★★ ここが最強の修正ポイント！ ★★★
-           // 単純な includes だと "ol" が "idol" に反応してしまうため、
-           // タグをハイフンやスペースで分割（例: "student-adult" -> ["student", "adult"]）して、
-           // 「完全に一致する単語があるか」を厳密にチェックします。
-           return tags.some((t) => {
-             const lowerT = t.toLowerCase();
-             const parts = lowerT.split(/[-_\s]/); // 単語に分解
-             return wantList.some((w) => {
-               const lowerW = w.toLowerCase();
-               return lowerT === lowerW || parts.includes(lowerW);
-             });
-           });
-         });
-       }
-    }
-
-    const q = normalizeText(query);
-    if (!q) return base;
-
-    return base.filter((v) => {
-      const title = normalizeText(v.title);
-      const affLabel = normalizeText(v.affLabel ?? v.affiliateLabel ?? "");
-      const id = normalizeText(v.id);
-      return title.includes(q) || affLabel.includes(q) || id.includes(q);
-    });
-  }, [items, genres, query]);
 
   const count = viewItems.length;
   const h = vh || 0;
