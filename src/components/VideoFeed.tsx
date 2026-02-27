@@ -6,7 +6,7 @@ import GenreMenu from "@/components/GenreMenu";
 import MoreMenu from "@/components/MoreMenu";
 import { GENRE_ALL, GENRE_LIKES, GENRE_FAVORITES, type GenreKey } from "@/lib/genres";
 
-// ===== 日本語ジャンル → Redisタグ変換（完全網羅版） =====
+// ===== 日本語ジャンル → Redisタグ変換（巨大マップ復活！） =====
 const GENRE_MAP: Record<string, string[]> = {
   // ---- タイプ ----
   "ギャル": ["gal"],
@@ -325,21 +325,22 @@ export default function VideoFeed({
       const params = new URLSearchParams();
       const activeGenres = genres.filter(Boolean);
 
-      // マップ変換
+      // 【完全遵守】GENRE_MAP に「あるジャンル」だけ Redis 用タグに変換
       const apiGenres = activeGenres.flatMap((g) => {
         if (g === GENRE_FAVORITES || g === GENRE_LIKES) return [g];
         return GENRE_MAP[g] || []; 
       });
 
-      // マップに該当がある場合のみパラメータ送信（該当なしなら送らない＝全件）
+      // 【完全遵守】変換結果が1つでもある時だけ params.append
+      // （空ならパラメータを送らない＝全件）
       if (apiGenres.length > 0) {
-        params.append("genres", apiGenres.join(","));
+        params.set("genres", apiGenres.join(","));
       }
       
-      if (query) params.append("query", query);
-      params.append("page", String(page));
-      params.append("seed", String(seed));
-      params.append("_t", Date.now().toString());
+      if (query) params.set("query", query);
+      params.set("page", String(page));
+      params.set("seed", String(seed));
+      params.set("_t", Date.now().toString());
 
       if (activeGenres.includes(GENRE_FAVORITES)) {
         const likedIds = Array.from(readLikedSet());
@@ -349,7 +350,7 @@ export default function VideoFeed({
            setLoading(false);
            return;
         }
-        params.append("ids", likedIds.join(","));
+        params.set("ids", likedIds.join(","));
       }
 
       const res = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
@@ -453,17 +454,14 @@ export default function VideoFeed({
 
     let base = items;
 
-    // ソート系
     if (genres.length === 1 && genres[0] === GENRE_LIKES) {
        base = items.slice().sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
     } else if (genres.length === 1 && genres[0] === GENRE_FAVORITES) {
        base = items;
     } else {
-       // ★ 復活させたフロントエンドフィルタ
-       // 1. マップからタグリストを取得
+       // 【完全遵守】GENRE_MAP に変換できたタグがある時だけ filter
        const wantList = genres.flatMap((g) => GENRE_MAP[g] || []);
        
-       // 2. マップにある場合だけ絞り込む（無い場合は items をそのまま返す＝フィルタしない）
        if (wantList.length > 0) {
          base = items.filter((v) => {
            const tags = [
@@ -471,10 +469,16 @@ export default function VideoFeed({
               v.genre
            ].filter(Boolean).map(String);
            
-           // 部分一致 (includes) でチェックして混ざりを排除
-           return tags.some((t) => wantList.some((w) => t.includes(w)));
+           // 大文字小文字の差異を吸収しつつ、includes（部分一致）でチェック
+           return tags.some((t) => {
+             const lowerT = t.toLowerCase();
+             return wantList.some((w) => lowerT.includes(w.toLowerCase()));
+           });
          });
+         // ★ ここにあった「0件なら全部表示しちゃう」フェイルセーフを抹殺！
+         // （マップにあるジャンルなら、他の動画は絶対に混ぜない）
        }
+       // 【完全遵守】無い場合(wantList.length === 0)は items をそのまま返す（フィルタしない）
     }
 
     const q = normalizeText(query);
