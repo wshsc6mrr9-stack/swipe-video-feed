@@ -35,13 +35,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
   }));
 
   // ---- ジャンルページ（GENRE_SLUGS 連動） ----
-  // 実際にページが表示される「英語スラッグ」のリスト（seiso, bishoujo等）を取得
+  // 実際にページが動作する「英語スラッグ」のリストを取得します
   const slugList = Object.values(GENRE_SLUGS || {});
 
   const genrePages: MetadataRoute.Sitemap = Array.from(
     new Set(slugList.map((s) => String(s).trim().toLowerCase()))
   ).map((slug) => ({
-    // 英語スラッグでURLを生成（確実に404を回避し、Googleに正しく認識させる）
+    // 英語スラッグを使用し、404にならない正しいURLを生成します
     url: `${base}/genre/${slug}`,
     lastModified: now,
     changeFrequency: "daily",
