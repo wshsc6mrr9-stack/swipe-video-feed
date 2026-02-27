@@ -9,7 +9,7 @@ export const redis = new Redis({
 
 let allVideosCache: any[] | null = null;
 let cacheTimestamp: number = 0;
-const CACHE_TTL = 1000 * 60 * 5; // 5分キャッシュ
+const CACHE_TTL = 1000 * 60 * 5; 
 const RANKING_KEY = "video:ranking";
 
 function mulberry32(a: number) {
@@ -31,12 +31,12 @@ function shuffleWithSeed<T>(array: T[], seedNum: number): T[] {
   return result;
 }
 
-// ★ 引数の定義を route.ts と完全に一致させる
+// ★ 修正：元の動いていた引数の順番（count が先、page が後）に戻す
 export async function getFilteredVideos(
   genres: string[] = [], 
   query: string = "", 
-  page: number = 1,
-  limit: number = 10,
+  count: number = 50,  // ← countが第3引数
+  page: number = 1,    // ← pageが第4引数
   seed: number = 0,
   targetIds?: string[]
 ): Promise<any[]> {
@@ -44,13 +44,12 @@ export async function getFilteredVideos(
     const isFavoritesMode = targetIds && targetIds.length > 0;
     const isRankingMode = !isFavoritesMode && (genres.includes("__likes__") || genres.includes("likes"));
     
-    // ★ 修正：全件表示の条件を「指定なし」または「all/GENRE_ALL」が含まれる場合に拡大
+    // 全件表示の判定
     const isAll = !isFavoritesMode && !isRankingMode && (
       genres.length === 0 || 
-      genres.some(g => ["all", "GENRE_ALL", "ランダム"].includes(String(g)))
+      genres.some(g => ["all", "GENRE_ALL", "ランダム"].includes(String(g).trim().toLowerCase()))
     );
     
-    // 1. 全データ取得（キャッシュ or Redis）
     const now = Date.now();
     let allVideos = [];
 
@@ -58,8 +57,7 @@ export async function getFilteredVideos(
       allVideos = allVideosCache;
     } else {
       const total = await redis.llen("videos");
-      if (total === 0) return []; // データが無い場合は空配列
-
+      if (total === 0) return [];
       const CHUNK_SIZE = 1000;
       const promises = [];
       for (let i = 0; i < total; i += CHUNK_SIZE) {
@@ -67,73 +65,62 @@ export async function getFilteredVideos(
         promises.push(redis.lrange("videos", i, end));
       }
       const chunkedResults = await Promise.all(promises);
-      
       allVideos = chunkedResults.flat().map((r) => {
         try { return typeof r === "string" ? JSON.parse(r) : r; } catch { return null; }
       }).filter(Boolean);
-
       allVideosCache = allVideos;
       cacheTimestamp = now;
     }
 
     let filtered = allVideos;
 
-    // 2. フィルタリング実行
     if (isFavoritesMode) {
       const idSet = new Set(targetIds);
       filtered = filtered.filter((v: any) => idSet.has(String(v.id)));
-    }
-    else if (isRankingMode) {
+    } else if (isRankingMode) {
       const rankedIds = await redis.zrange(RANKING_KEY, 0, 2000, { rev: true });
       const rankMap = new Map<string, number>();
       rankedIds.forEach((id: any, idx: number) => rankMap.set(String(id), idx));
       filtered.sort((a: any, b: any) => (rankMap.get(String(a.id)) ?? 99999) - (rankMap.get(String(b.id)) ?? 99999));
-    }
-    else if (!isAll) {
-      // ★ 修正：検索ワードを整理
-      const searchTerms = new Set<string>();
+    } else if (!isAll) {
+      // 日本語ジャンル検索
+      const want = new Set<string>();
       genres.forEach(g => {
         const key = String(g).trim();
-        searchTerms.add(key); // そのままの文字（例：美少女）
-        
-        // SEOマップにあればラベルも追加（念のため）
-        const seoEntry = GENRE_SEO_MAP[key as GenreKey];
-        if (seoEntry?.label) searchTerms.add(seoEntry.label);
+        want.add(key);
+        want.add(key.toLowerCase());
+        try {
+          const seo = GENRE_SEO_MAP[key as GenreKey];
+          if (seo?.label) want.add(seo.label);
+        } catch(e) {}
       });
 
       filtered = filtered.filter((v: any) => {
-        // 動画のタグをすべて取得して文字列化
-        const videoTags = [
+        const tags = [
           ...(Array.isArray(v.genres) ? v.genres : []),
           v.genre,
           v.category
-        ].filter(Boolean).map(String);
-        
-        // 動画タグの中に、検索ワードが含まれているか（部分一致も許容するとヒット率が上がるが、一旦は完全一致でSet検索）
-        return videoTags.some(t => searchTerms.has(t));
+        ].filter(Boolean).map(t => String(t).trim());
+        return tags.some(t => want.has(t) || want.has(t.toLowerCase()));
       });
     }
 
-    // 3. キーワード検索
     if (query.trim()) {
       const q = query.toLowerCase();
-      filtered = filtered.filter(v => 
-        String(v.title || "").toLowerCase().includes(q) ||
-        String(v.id || "").toLowerCase().includes(q)
-      );
+      filtered = filtered.filter(v => String(v.title || "").toLowerCase().includes(q) || String(v.id || "").toLowerCase().includes(q));
     }
 
-    // 4. ページネーション & シャッフル
-    const start = (page - 1) * limit;
-    
-    if (isRankingMode) {
-      return filtered.slice(start, start + limit);
-    } 
-    
-    // シード値を使って並び替え
-    const shuffled = shuffleWithSeed(filtered, seed);
-    return shuffled.slice(start, start + limit);
+    // ★ 念のための安全装置：万が一 page と count が逆転して送られてきても強制補正する
+    let safeCount = Math.max(1, count);
+    let safePage = Math.max(1, page);
+    if (safePage > 10 && safeCount < 5) {
+        const tmp = safePage; safePage = safeCount; safeCount = tmp;
+    }
 
+    const start = (safePage - 1) * safeCount;
+    if (isRankingMode) return filtered.slice(start, start + safeCount);
+    
+    return shuffleWithSeed(filtered, seed).slice(start, start + safeCount);
   } catch (e) {
     console.error("Redis Error:", e);
     return [];

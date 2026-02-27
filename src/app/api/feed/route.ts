@@ -8,29 +8,24 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
-    // 1. パラメータの取得と整理
     const genresParam = searchParams.get("genres") || "";
     const query = searchParams.get("query") || "";
-    const idsParam = searchParams.get("ids") || "";
-    
-    // 数値型は安全に変換（NaN対策）
-    const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
-    const limit = Math.max(1, parseInt(searchParams.get("limit") || "10", 10)); // デフォルト10件
+    const page = parseInt(searchParams.get("page") || "1", 10);
+    const limit = parseInt(searchParams.get("limit") || "15", 10); 
     const seed = parseInt(searchParams.get("seed") || "0", 10);
+    const idsParam = searchParams.get("ids") || "";
 
-    // 配列化（空文字を除去）
-    const genres = genresParam.split(",").map(s => s.trim()).filter(Boolean);
-    const targetIds = idsParam.split(",").map(s => s.trim()).filter(Boolean);
+    const genres = genresParam ? genresParam.split(",").map(s => s.trim()).filter(Boolean) : [];
+    const targetIds = idsParam ? idsParam.split(",").map(s => s.trim()).filter(Boolean) : undefined;
 
-    // 2. 検索実行（引数の順番を redis.ts と完全に合わせる）
-    // 順番: genres, query, page, limit, seed, targetIds
+    // ★ 修正：redis.ts が求めている引数の順番 (genres, query, count, page, seed, targetIds) に完全に合わせる
     const videos = await getFilteredVideos(
       genres,
       query,
-      page,
-      limit, // ここが重要！以前はここがズレていた可能性があります
+      limit, // 第3引数：count (取得件数)
+      page,  // 第4引数：page (ページ番号)
       seed,
-      targetIds.length > 0 ? targetIds : undefined
+      targetIds
     );
 
     return NextResponse.json(videos);
