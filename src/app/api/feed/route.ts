@@ -1,63 +1,57 @@
-// ===== src/app/api/feed/route.ts =====
 import { NextResponse } from "next/server";
 import { getFilteredVideos } from "@/lib/redis";
-import { GENRE_MAP } from "@/lib/genreMap";
 
 export const dynamic = "force-dynamic";
+
+// ★ 日本語ジャンル → Redisタグ変換
+const GENRE_MAP: Record<string, string[]> = {
+  "美少女": ["seductress", "exclusive"],
+  "主観": ["pov"],
+  "VR": ["vr", "vr-only"],
+  "ミニ系": ["petite"],
+  "パイパン": ["shaved"],
+  "清楚": ["innocent"],
+};
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
-    // --- genre / genres 両対応（日本語URL対応） ---
     const rawGenres =
       searchParams.get("genres") ??
       searchParams.get("genre") ??
       "";
 
-    const safeDecode = (s: string) => {
-      try {
-        return s.includes("%") ? decodeURIComponent(s) : s;
-      } catch {
-        return s;
-      }
-    };
-
-    // UIで選ばれた日本語ジャンル
-    const uiGenres = rawGenres
+    const genres = rawGenres
       .split(",")
-      .map(s => safeDecode(s.trim()))
+      .map(s => {
+        try {
+          return decodeURIComponent(s.trim());
+        } catch {
+          return s.trim();
+        }
+      })
       .filter(Boolean);
 
-    // ★ 日本語 → 英語（Redis検索用）に変換
-    const redisGenres = uiGenres.flatMap(g => GENRE_MAP[g] ?? []);
+    // ★ 日本語 → Redis用タグに変換
+    const mappedGenres = genres.flatMap(g => GENRE_MAP[g] ?? []);
 
-    // --- その他パラメータ ---
     const query = searchParams.get("query") || "";
-    const count = Number(searchParams.get("count") ?? "50");
-    const page  = Number(searchParams.get("page")  ?? "1");
-    const seed  = Number(searchParams.get("seed")  ?? "0");
-
-    const idsParam = searchParams.get("ids") || "";
-    const targetIds = idsParam
-      ? idsParam.split(",").map(s => s.trim()).filter(Boolean)
-      : undefined;
-
-    // 空配列は undefined（全件扱い）に
-    const genresArg = redisGenres.length > 0 ? redisGenres : undefined;
+    const count = parseInt(searchParams.get("count") || "50", 10);
+    const page  = parseInt(searchParams.get("page")  || "1", 10);
+    const seed  = parseInt(searchParams.get("seed")  || "0", 10);
 
     const videos = await getFilteredVideos(
-      genresArg,
+      mappedGenres.length > 0 ? mappedGenres : undefined,
       query,
       count,
       page,
-      seed,
-      targetIds
+      seed
     );
 
     return NextResponse.json(videos);
-  } catch (error) {
-    console.error("API Error:", error);
+  } catch (e) {
+    console.error(e);
     return NextResponse.json([], { status: 500 });
   }
 }
