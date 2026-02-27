@@ -263,10 +263,9 @@ export default function VideoFeed({
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
+  
   const [page, setPage] = useState(1);
-  const [seed, setSeed] = useState(
-    typeof window !== "undefined" ? Math.floor(Math.random() * 1_000_000) : 0
-  );
+  const [seed, setSeed] = useState(() => typeof window !== "undefined" ? Math.floor(Math.random() * 1000000) : 0);
   const [hasMore, setHasMore] = useState(true);
 
   const [vh, setVh] = useState<number>(() =>
@@ -275,11 +274,7 @@ export default function VideoFeed({
 
   const [genres, setGenres] = useState<GenreKey[]>(() => {
     if (initialGenre) {
-      try {
-        return [decodeURIComponent(initialGenre)];
-      } catch {
-        return [initialGenre];
-      }
+      try { return [decodeURIComponent(initialGenre)]; } catch { return [initialGenre]; }
     }
     return [GENRE_ALL];
   });
@@ -323,46 +318,47 @@ export default function VideoFeed({
   }, []);
 
   const loadMoreVideos = useCallback(async () => {
-    if (loading || !hasMore) return;
+    if (loading || !hasMore) return; 
     setLoading(true);
 
     try {
       const params = new URLSearchParams();
+      const activeGenres = genres.filter(Boolean);
 
-      const apiGenres = genres
-        .filter(Boolean)
-        .flatMap((g) => {
-          if (g === GENRE_FAVORITES || g === GENRE_LIKES) return [g];
-          return GENRE_MAP[g] || []; // マップにない場合は除外
-        });
+      // マップ変換
+      const apiGenres = activeGenres.flatMap((g) => {
+        if (g === GENRE_FAVORITES || g === GENRE_LIKES) return [g];
+        return GENRE_MAP[g] || []; 
+      });
 
       // マップに該当がある場合のみパラメータ送信（該当なしなら送らない＝全件）
       if (apiGenres.length > 0) {
-        params.set("genres", apiGenres.join(","));
+        params.append("genres", apiGenres.join(","));
       }
+      
+      if (query) params.append("query", query);
+      params.append("page", String(page));
+      params.append("seed", String(seed));
+      params.append("_t", Date.now().toString());
 
-      if (query) params.set("query", query);
-      params.set("page", String(page));
-      params.set("seed", String(seed));
-      params.set("_t", Date.now().toString());
-
-      if (genres.includes(GENRE_FAVORITES)) {
+      if (activeGenres.includes(GENRE_FAVORITES)) {
         const likedIds = Array.from(readLikedSet());
-        if (!likedIds.length) {
-          setItems([]);
-          setHasMore(false);
-          setLoading(false);
-          return;
+        if (likedIds.length === 0) {
+           setItems([]);
+           setHasMore(false);
+           setLoading(false);
+           return;
         }
-        params.set("ids", likedIds.join(","));
+        params.append("ids", likedIds.join(","));
       }
 
-      const res = await fetch(`/api/feed?${params}`, { cache: "no-store" });
-      const json = await res.json().catch(() => []);
-      const list = Array.isArray(json) ? json : [];
-
+      const res = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      const list = (Array.isArray(json) ? json : json?.items ?? []) as any[];
+      
       if (!list.length) {
         setHasMore(false);
+        setLoading(false);
         return;
       }
 
@@ -402,11 +398,15 @@ export default function VideoFeed({
       } catch {}
 
       setItems((prev) => {
-        const ids = new Set(prev.map((v) => v.id));
-        return [...prev, ...normalized.filter((v) => !ids.has(v.id))];
+        const existingIds = new Set(prev.map((p) => p.id));
+        const newOnly = normalized.filter((n) => !existingIds.has(n.id));
+        return [...prev, ...newOnly];
       });
 
       setPage((p) => p + 1);
+
+    } catch (e) {
+      console.error("Load Error:", e);
     } finally {
       setLoading(false);
     }
@@ -414,25 +414,23 @@ export default function VideoFeed({
 
   useEffect(() => {
     if (items.length === 0 && hasMore) loadMoreVideos();
-  }, [items.length, hasMore, loadMoreVideos]);
+  }, [items.length, loadMoreVideos, hasMore]);
 
   useEffect(() => {
     if (items.length > 0 && index >= Math.max(0, items.length - 30) && hasMore) {
       loadMoreVideos();
     }
-  }, [index, items.length, hasMore, loadMoreVideos]);
+  }, [index, items.length, loadMoreVideos, hasMore]);
 
   useEffect(() => {
     if (initialGenre) {
       let g = initialGenre;
-      try {
-        g = decodeURIComponent(initialGenre);
-      } catch {}
+      try { g = decodeURIComponent(initialGenre); } catch {}
       setGenres([g]);
-      setItems([]);
+      setItems([]); 
       setIndex(0);
       setPage(1);
-      setSeed(Math.floor(Math.random() * 1_000_000));
+      setSeed(Math.floor(Math.random() * 1000000));
       setHasMore(true);
       setTranslate(0, "none");
     }
@@ -443,11 +441,7 @@ export default function VideoFeed({
       const e = ev as CustomEvent<{ videoId: string; count: number }>;
       if (!e?.detail) return;
       setItems((prev) =>
-        prev.map((v) =>
-          v.id === e.detail.videoId
-            ? { ...v, likeCount: Number(e.detail.count) }
-            : v
-        )
+        prev.map((v) => v.id === e.detail.videoId ? { ...v, likeCount: Number(e.detail.count) } : v)
       );
     };
     window.addEventListener(EVT_LIKES, on as any);
@@ -455,13 +449,32 @@ export default function VideoFeed({
   }, []);
 
   const viewItems = useMemo(() => {
+    if (genres.includes(GENRE_ALL)) return items;
+
     let base = items;
 
-    // ソートだけ維持し、それ以外のフィルタリング（混ざり防止）はAPIの結果を信頼する
+    // ソート系
     if (genres.length === 1 && genres[0] === GENRE_LIKES) {
        base = items.slice().sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
     } else if (genres.length === 1 && genres[0] === GENRE_FAVORITES) {
        base = items;
+    } else {
+       // ★ 復活させたフロントエンドフィルタ
+       // 1. マップからタグリストを取得
+       const wantList = genres.flatMap((g) => GENRE_MAP[g] || []);
+       
+       // 2. マップにある場合だけ絞り込む（無い場合は items をそのまま返す＝フィルタしない）
+       if (wantList.length > 0) {
+         base = items.filter((v) => {
+           const tags = [
+              ...(Array.isArray(v.genres) ? v.genres : []),
+              v.genre
+           ].filter(Boolean).map(String);
+           
+           // 部分一致 (includes) でチェックして混ざりを排除
+           return tags.some((t) => wantList.some((w) => t.includes(w)));
+         });
+       }
     }
 
     const q = normalizeText(query);
@@ -493,16 +506,12 @@ export default function VideoFeed({
     return out;
   }, [viewItems, index]);
 
-  const clampIndex = useCallback(
-    (next: number) => {
+  const clampIndex = useCallback((next: number) => {
       if (!count) return 0;
       return Math.max(0, Math.min(count - 1, next));
-    },
-    [count]
-  );
+    }, [count]);
 
-  const finishSlide = useCallback(
-    (dir: -1 | 1) => {
+  const finishSlide = useCallback((dir: -1 | 1) => {
       if (!h || animatingRef.current) return;
       animatingRef.current = true;
       const dur = 200;
@@ -510,7 +519,7 @@ export default function VideoFeed({
       window.setTimeout(() => {
         setIndex((cur) => {
           const next = clampIndex(cur + (dir === -1 ? 1 : -1));
-          indexRef.current = next;
+          indexRef.current = next; 
           return next;
         });
         requestAnimationFrame(() => {
@@ -519,51 +528,37 @@ export default function VideoFeed({
           animatingRef.current = false;
         });
       }, dur);
-    },
-    [clampIndex, h, setTranslate]
-  );
+    }, [clampIndex, h, setTranslate]);
 
-  const applyRubberBand = useCallback(
-    (dy: number) => {
+  const applyRubberBand = useCallback((dy: number) => {
       if (!h) return dy;
       const atTop = index <= 0;
       const atBottom = index >= Math.max(0, count - 1);
       if (atTop && dy > 0) return dy * 0.35;
       if (atBottom && dy < 0) return dy * 0.35;
       return dy;
-    },
-    [h, index, count]
-  );
+    }, [h, index, count]);
 
-  const beginDrag = useCallback(
-    (clientY: number) => {
+  const beginDrag = useCallback((clientY: number) => {
       if (animatingRef.current) return;
       draggingRef.current = true;
       startYRef.current = clientY;
       dyRef.current = 0;
       startTimeRef.current = performance.now();
       setTranslate(0, "none");
-    },
-    [setTranslate]
-  );
+    }, [setTranslate]);
 
-  const moveDrag = useCallback(
-    (clientY: number) => {
+  const moveDrag = useCallback((clientY: number) => {
       if (!draggingRef.current || animatingRef.current) return;
       const dy = applyRubberBand(clientY - startYRef.current);
       dyRef.current = dy;
       setTranslate(dy, "none");
-    },
-    [applyRubberBand, setTranslate]
-  );
+    }, [applyRubberBand, setTranslate]);
 
   const endDrag = useCallback(() => {
     if (!draggingRef.current) return;
     draggingRef.current = false;
-    if (animatingRef.current) {
-      setTranslate(0, "none");
-      return;
-    }
+    if (animatingRef.current) { setTranslate(0, "none"); return; }
     const dy = dyRef.current;
     const dt = performance.now() - startTimeRef.current;
     const v = dt > 0 ? Math.abs(dy) / dt : 0;
@@ -581,8 +576,7 @@ export default function VideoFeed({
     window.setTimeout(() => setTranslate(0, "none"), 170);
   }, [count, finishSlide, h, index, setTranslate]);
 
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent) => {
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
       if (isInteractiveTarget(e.target)) return;
       if (animatingRef.current) return;
       if (typeof e.button === "number" && e.button !== 0) return;
@@ -590,28 +584,20 @@ export default function VideoFeed({
       beginDrag(e.clientY);
       (e.currentTarget as any).setPointerCapture?.(e.pointerId);
       e.preventDefault();
-    },
-    [beginDrag]
-  );
+    }, [beginDrag]);
 
-  const onPointerMove = useCallback(
-    (e: React.PointerEvent) => {
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
       if (pointerIdRef.current !== e.pointerId || !draggingRef.current) return;
       moveDrag(e.clientY);
       e.preventDefault();
-    },
-    [moveDrag]
-  );
+    }, [moveDrag]);
 
-  const onPointerUp = useCallback(
-    (e: React.PointerEvent) => {
+  const onPointerUp = useCallback((e: React.PointerEvent) => {
       if (pointerIdRef.current !== e.pointerId) return;
       pointerIdRef.current = null;
       endDrag();
       e.preventDefault();
-    },
-    [endDrag]
-  );
+    }, [endDrag]);
 
   const SAFE_PAD = 12;
   const safeTop = `calc(env(safe-area-inset-top) + ${SAFE_PAD}px)`;
@@ -621,78 +607,22 @@ export default function VideoFeed({
   const isInitialLoading = items.length === 0 && loading;
 
   return (
-    <div
-      className="relative w-full bg-black overflow-hidden"
-      style={{ height: "100svh", touchAction: "none" }}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-    >
+    <div className="relative w-full bg-black overflow-hidden" style={{ height: "100svh", touchAction: "none" }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
       {isInitialLoading && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            zIndex: 9999,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "black",
-            color: "rgba(255,255,255,0.8)",
-            touchAction: "none",
-            pointerEvents: "auto",
-          }}
-        >
+        <div style={{ position: "absolute", inset: 0, zIndex: 9999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "black", color: "rgba(255,255,255,0.8)", touchAction: "none", pointerEvents: "auto" }}>
           <div style={{ fontSize: 16, fontWeight: "bold", marginBottom: 20 }}>動画を読み込み中...</div>
-          <div style={{ fontSize: 13, opacity: 0.8, lineHeight: 2, textAlign: "center" }}>
-            <div>⬆︎ 上にスワイプで次の動画</div>
-            <div>ダブルタップで5秒スキップ</div>
-          </div>
+          <div style={{ fontSize: 13, opacity: 0.8, lineHeight: 2, textAlign: "center" }}><div>⬆︎ 上にスワイプで次の動画</div><div>ダブルタップで5秒スキップ</div></div>
         </div>
       )}
-
       {!hideGenreMenu && (
         <div className="absolute z-40" data-no-swipe="1" style={{ top: safeTop, left: safeLeft }}>
-          <GenreMenu
-            value={genres}
-            onChange={(v) => {
-              setGenres(v);
-              setItems([]);
-              setIndex(0);
-              setPage(1);
-              setSeed(Math.floor(Math.random() * 1_000_000));
-              setHasMore(true);
-              setTranslate(0, "none");
-            }}
-            query={query}
-            onChangeQuery={(s) => {
-              setQuery(s);
-              setItems([]);
-              setIndex(0);
-              setPage(1);
-              setSeed(Math.floor(Math.random() * 1_000_000));
-              setHasMore(true);
-              setTranslate(0, "none");
-            }}
-          />
+          <GenreMenu value={genres} onChange={(v) => { setGenres(v); setItems([]); setIndex(0); setPage(1); setSeed(Math.floor(Math.random() * 1000000)); setHasMore(true); setTranslate(0, "none"); }} query={query} onChangeQuery={(s) => { setQuery(s); setItems([]); setIndex(0); setPage(1); setSeed(Math.floor(Math.random() * 1000000)); setHasMore(true); setTranslate(0, "none"); }} />
         </div>
       )}
-      <div className="absolute z-40" data-no-swipe="1" style={{ top: `calc(${safeTop} - 8px)`, right: safeRight }}>
-        <MoreMenu />
-      </div>
+      <div className="absolute z-40" data-no-swipe="1" style={{ top: `calc(${safeTop} - 8px)`, right: safeRight }}><MoreMenu /></div>
       <div ref={trackRef} style={{ position: "relative", height: `${vh}px` }}>
         {windowItems.map(({ item, pos, absIndex }) => (
-          <div
-            key={`${item.id}:${absIndex}`}
-            style={{
-              position: "absolute",
-              inset: 0,
-              top: `${pos * h + PEEK}px`,
-              height: `${cardH}px`,
-            }}
-          >
+          <div key={`${item.id}:${absIndex}`} style={{ position: "absolute", inset: 0, top: `${pos * h + PEEK}px`, height: `${cardH}px` }}>
             <VideoCard video={item} isActive={absIndex === index} />
           </div>
         ))}
