@@ -1,4 +1,3 @@
-// ===== src/components/VideoFeed.tsx =====
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -6,7 +5,20 @@ import VideoCard from "@/components/VideoCard";
 import GenreMenu from "@/components/GenreMenu";
 import MoreMenu from "@/components/MoreMenu";
 import { GENRE_ALL, GENRE_LIKES, GENRE_FAVORITES, type GenreKey } from "@/lib/genres";
-import { GENRE_MAP } from "@/lib/genreMap";
+
+// ===== 日本語ジャンル → Redisタグ変換 =====
+// ※ ここにあるものだけが正しく絞り込まれます。
+// ※ ここに無いものは「全件表示」としてフォールバックします。
+const GENRE_MAP: Record<string, string[]> = {
+  "美少女": ["bishoujo"],
+  "巨乳": ["big-breasts"],
+  "主観": ["pov"],
+  "VR": ["vr", "vr-only", "high-quality-vr"],
+  "清楚": ["innocent"],
+  "汗だく": ["sweaty"],
+  "パイパン": ["shaved"],
+  // 必要に応じてお客様の環境で追加してください
+};
 
 type VideoItem = {
   id: string;
@@ -40,7 +52,7 @@ function readLikedSet(): Set<string> {
 function isInteractiveTarget(target: EventTarget | null) {
   const el = target as HTMLElement | null;
   if (!el) return false;
-  const hit = el.closest(
+  return !!el.closest(
     [
       "button",
       "a",
@@ -52,7 +64,6 @@ function isInteractiveTarget(target: EventTarget | null) {
       "[data-ui='controls']",
     ].join(",")
   );
-  return !!hit;
 }
 
 function normalizeText(s: any) {
@@ -61,17 +72,6 @@ function normalizeText(s: any) {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function uniq<T>(arr: T[]) {
-  return Array.from(new Set(arr));
-}
-
-function expandGenreKey(g: string): string[] {
-  const base = String(g ?? "").trim();
-  if (!base) return [];
-  // ★ 重要：日本語キーもそのまま残しつつ、マップがあれば追加で展開（両方投げる）
-  return uniq([base, ...(GENRE_MAP[base] ?? [])].filter(Boolean));
 }
 
 type Props = {
@@ -88,10 +88,9 @@ export default function VideoFeed({
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
-
   const [page, setPage] = useState(1);
-  const [seed, setSeed] = useState(() =>
-    typeof window !== "undefined" ? Math.floor(Math.random() * 1000000) : 0
+  const [seed, setSeed] = useState(
+    typeof window !== "undefined" ? Math.floor(Math.random() * 1_000_000) : 0
   );
   const [hasMore, setHasMore] = useState(true);
 
@@ -99,7 +98,6 @@ export default function VideoFeed({
     typeof window !== "undefined" ? Math.round(window.innerHeight) : 0
   );
 
-  // URLから来る initialGenre をデコードして初期値にする
   const [genres, setGenres] = useState<GenreKey[]>(() => {
     if (initialGenre) {
       try {
@@ -138,8 +136,7 @@ export default function VideoFeed({
     const update = () => {
       if (draggingRef.current) return;
       const vv = window.visualViewport;
-      const next = Math.round(vv?.height ?? window.innerHeight);
-      setVh(next);
+      setVh(Math.round(vv?.height ?? window.innerHeight));
     };
     update();
     window.addEventListener("resize", update);
@@ -157,46 +154,40 @@ export default function VideoFeed({
     try {
       const params = new URLSearchParams();
 
-      // ★ APIへ投げるgenres（日本語キーも英語タグも両方投げる）
-      const sel = Array.isArray(genres) ? genres : [GENRE_ALL];
-      const isAll = sel.includes(GENRE_ALL);
-      const isLikes = sel.length === 1 && sel[0] === GENRE_LIKES;
-      const isFav = sel.includes(GENRE_FAVORITES);
+      const apiGenres = genres
+        .filter(Boolean)
+        .flatMap((g) => {
+          if (g === GENRE_FAVORITES || g === GENRE_LIKES) return [g];
+          return GENRE_MAP[g] || []; // ない場合は空配列で除外
+        });
 
-      const activeGenres = uniq(
-        (isAll || isLikes || isFav ? [] : sel)
-          .filter(Boolean)
-          .flatMap((g) => expandGenreKey(String(g)))
-      );
+      // 変換結果が1つでもある時だけパラメータを送る
+      if (apiGenres.length > 0) {
+        params.set("genres", apiGenres.join(","));
+      }
 
-      // ランダム/likes/favorites以外のみ genres を付与（これで「全件」状態が壊れない）
-      if (activeGenres.length) params.append("genres", activeGenres.join(","));
+      if (query) params.set("query", query);
+      params.set("page", String(page));
+      params.set("seed", String(seed));
+      params.set("_t", Date.now().toString());
 
-      if (query) params.append("query", query);
-
-      params.append("page", String(page));
-      params.append("seed", String(seed));
-      params.append("_t", Date.now().toString());
-
-      if (isFav) {
+      if (genres.includes(GENRE_FAVORITES)) {
         const likedIds = Array.from(readLikedSet());
-        if (likedIds.length === 0) {
+        if (!likedIds.length) {
           setItems([]);
           setHasMore(false);
           setLoading(false);
           return;
         }
-        params.append("ids", likedIds.join(","));
+        params.set("ids", likedIds.join(","));
       }
 
-      const res = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
-      const json = await res.json().catch(() => null);
-
-      const list = (Array.isArray(json) ? json : json?.items ?? []) as any[];
+      const res = await fetch(`/api/feed?${params}`, { cache: "no-store" });
+      const json = await res.json().catch(() => []);
+      const list = Array.isArray(json) ? json : [];
 
       if (!list.length) {
         setHasMore(false);
-        setLoading(false);
         return;
       }
 
@@ -225,9 +216,10 @@ export default function VideoFeed({
       try {
         const ids = normalized.map((v) => v.id);
         if (ids.length) {
-          const r2 = await fetch(`/api/likes?ids=${encodeURIComponent(ids.join(","))}`, {
-            cache: "no-store",
-          });
+          const r2 = await fetch(
+            `/api/likes?ids=${encodeURIComponent(ids.join(","))}`,
+            { cache: "no-store" }
+          );
           const j2 = await r2.json().catch(() => null);
           const counts = (j2?.counts ?? {}) as Record<string, number>;
           for (const v of normalized) v.likeCount = Number(counts[v.id] ?? 0);
@@ -235,44 +227,37 @@ export default function VideoFeed({
       } catch {}
 
       setItems((prev) => {
-        const existingIds = new Set(prev.map((p) => p.id));
-        const newOnly = normalized.filter((n) => !existingIds.has(n.id));
-        return [...prev, ...newOnly];
+        const ids = new Set(prev.map((v) => v.id));
+        return [...prev, ...normalized.filter((v) => !ids.has(v.id))];
       });
 
       setPage((p) => p + 1);
-    } catch (e) {
-      console.error("Load Error:", e);
     } finally {
       setLoading(false);
     }
   }, [loading, hasMore, genres, query, page, seed]);
 
   useEffect(() => {
-    if (items.length === 0 && hasMore) {
-      loadMoreVideos();
-    }
-  }, [items.length, loadMoreVideos, hasMore]);
+    if (items.length === 0 && hasMore) loadMoreVideos();
+  }, [items.length, hasMore, loadMoreVideos]);
 
   useEffect(() => {
     if (items.length > 0 && index >= Math.max(0, items.length - 30) && hasMore) {
       loadMoreVideos();
     }
-  }, [index, items.length, loadMoreVideos, hasMore]);
+  }, [index, items.length, hasMore, loadMoreVideos]);
 
-  // URLが変わったときのリセット処理
   useEffect(() => {
     if (initialGenre) {
       let g = initialGenre;
       try {
         g = decodeURIComponent(initialGenre);
       } catch {}
-
       setGenres([g]);
       setItems([]);
       setIndex(0);
       setPage(1);
-      setSeed(Math.floor(Math.random() * 1000000));
+      setSeed(Math.floor(Math.random() * 1_000_000));
       setHasMore(true);
       setTranslate(0, "none");
     }
@@ -281,37 +266,49 @@ export default function VideoFeed({
   useEffect(() => {
     const on = (ev: Event) => {
       const e = ev as CustomEvent<{ videoId: string; count: number }>;
-      const videoId = e?.detail?.videoId;
-      const count = e?.detail?.count;
-      if (!videoId || !Number.isFinite(count)) return;
-
-      setItems((prev) => prev.map((v) => (v.id === videoId ? { ...v, likeCount: Number(count) } : v)));
+      if (!e?.detail) return;
+      setItems((prev) =>
+        prev.map((v) =>
+          v.id === e.detail.videoId
+            ? { ...v, likeCount: Number(e.detail.count) }
+            : v
+        )
+      );
     };
-
     window.addEventListener(EVT_LIKES, on as any);
     return () => window.removeEventListener(EVT_LIKES, on as any);
   }, []);
 
-  // ★ 表示時フィルタ：日本語キーでも英語タグでも一致させる
   const viewItems = useMemo(() => {
-    const sel = Array.isArray(genres) ? genres : [GENRE_ALL];
+    if (genres.includes(GENRE_ALL)) return items;
 
     let base = items;
 
-    if (!sel.includes(GENRE_ALL)) {
-      if (sel.length === 1 && sel[0] === GENRE_LIKES) {
-        base = items.slice().sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
-      } else if (sel.length === 1 && sel[0] === GENRE_FAVORITES) {
-        base = items;
-      } else {
-        const want = new Set(sel.flatMap((g) => expandGenreKey(String(g))));
-        base = items.filter((v) => {
-          const tags = [...(Array.isArray(v.genres) ? v.genres : []), v.genre]
-            .filter(Boolean)
-            .map((x) => String(x));
-          return tags.some((t) => want.has(t));
-        });
-      }
+    if (genres.length === 1 && genres[0] === GENRE_LIKES) {
+       base = items.slice().sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
+    } else if (genres.length === 1 && genres[0] === GENRE_FAVORITES) {
+       base = items;
+    } else {
+       const wantList = genres.flatMap((g) => GENRE_MAP[g] || []);
+       
+       if (wantList.length > 0) {
+         const filtered = items.filter((v) => {
+           const tags = [
+              ...(Array.isArray(v.genres) ? v.genres : []),
+              v.genre
+           ].filter(Boolean).map(String);
+           
+           // ★ 修正：バックエンドのロジックに合わせて「部分一致（includes）」に変更
+           return tags.some((t) => wantList.some((w) => t.includes(w)));
+         });
+
+         // ★ 究極のフェイルセーフ：万が一フロント側のフィルタで全滅したら、APIが返したデータをそのまま流す（真っ暗防止）
+         if (filtered.length > 0) {
+           base = filtered;
+         } else {
+           base = items;
+         }
+       }
     }
 
     const q = normalizeText(query);
@@ -325,41 +322,19 @@ export default function VideoFeed({
     });
   }, [items, genres, query]);
 
-  useEffect(() => {
-    const sid = String(startId ?? "").trim();
-    if (!sid) return;
-    if (!viewItems.length) return;
-    if (appliedStartIdRef.current === sid) return;
-
-    const i = viewItems.findIndex((v) => String(v.id) === sid);
-    if (i < 0) return;
-
-    setIndex(i);
-    setTranslate(0, "none");
-    appliedStartIdRef.current = sid;
-  }, [startId, viewItems, setTranslate]);
-
-  useEffect(() => {
-    if (!startId) {
-      setIndex((i) => Math.max(0, Math.min(viewItems.length - 1, i)));
-      setTranslate(0);
-    }
-  }, [viewItems.length, setTranslate, startId]);
-
   const count = viewItems.length;
   const h = vh || 0;
   const PEEK = 14;
   const cardH = Math.max(0, h - PEEK * 2);
 
   const windowItems = useMemo(() => {
-    const cur = viewItems[index];
-    const prevItem = index > 0 ? viewItems[index - 1] : undefined;
-    const nextItem = index + 1 < viewItems.length ? viewItems[index + 1] : undefined;
-
-    const out: Array<{ item: VideoItem; pos: -1 | 0 | 1; absIndex: number }> = [];
-    if (prevItem) out.push({ item: prevItem, pos: -1, absIndex: index - 1 });
-    if (cur) out.push({ item: cur, pos: 0, absIndex: index });
-    if (nextItem) out.push({ item: nextItem, pos: 1, absIndex: index + 1 });
+    const out: any[] = [];
+    if (viewItems[index - 1])
+      out.push({ item: viewItems[index - 1], pos: -1, absIndex: index - 1 });
+    if (viewItems[index])
+      out.push({ item: viewItems[index], pos: 0, absIndex: index });
+    if (viewItems[index + 1])
+      out.push({ item: viewItems[index + 1], pos: 1, absIndex: index + 1 });
     return out;
   }, [viewItems, index]);
 
@@ -373,22 +348,16 @@ export default function VideoFeed({
 
   const finishSlide = useCallback(
     (dir: -1 | 1) => {
-      if (!h) return;
-      if (animatingRef.current) return;
+      if (!h || animatingRef.current) return;
       animatingRef.current = true;
-
       const dur = 200;
-      const easing = "cubic-bezier(0.22,0.61,0.36,1)";
-
-      setTranslate(dir * h, `transform ${dur}ms ${easing}`);
-
+      setTranslate(dir * h, `transform ${dur}ms cubic-bezier(0.22,0.61,0.36,1)`);
       window.setTimeout(() => {
         setIndex((cur) => {
           const next = clampIndex(cur + (dir === -1 ? 1 : -1));
           indexRef.current = next;
           return next;
         });
-
         requestAnimationFrame(() => {
           setTranslate(0, "none");
           window.setTimeout(() => setTranslate(0, "none"), 0);
@@ -425,12 +394,8 @@ export default function VideoFeed({
 
   const moveDrag = useCallback(
     (clientY: number) => {
-      if (!draggingRef.current) return;
-      if (animatingRef.current) return;
-
-      const raw = clientY - startYRef.current;
-      const dy = applyRubberBand(raw);
-
+      if (!draggingRef.current || animatingRef.current) return;
+      const dy = applyRubberBand(clientY - startYRef.current);
       dyRef.current = dy;
       setTranslate(dy, "none");
     },
@@ -449,20 +414,17 @@ export default function VideoFeed({
     const dy = dyRef.current;
     const dt = performance.now() - startTimeRef.current;
     const v = dt > 0 ? Math.abs(dy) / dt : 0;
-
     const DIST = Math.max(55, h * 0.08);
     const VELO = 0.55;
 
     if ((dy < -DIST || (dy < -25 && v > VELO)) && index < count - 1) {
       finishSlide(-1);
-      return;
-    }
-    if ((dy > DIST || (dy > 25 && v > VELO)) && index > 0) {
+    } else if ((dy > DIST || (dy > 25 && v > VELO)) && index > 0) {
       finishSlide(1);
+    } else {
+      setTranslate(0, "transform 160ms ease-out");
+      window.setTimeout(() => setTranslate(0, "none"), 170);
     }
-
-    setTranslate(0, "transform 160ms ease-out");
-    window.setTimeout(() => setTranslate(0, "none"), 170);
   }, [count, finishSlide, h, index, setTranslate]);
 
   const onPointerDown = useCallback(
@@ -481,8 +443,7 @@ export default function VideoFeed({
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
-      if (pointerIdRef.current !== e.pointerId) return;
-      if (!draggingRef.current) return;
+      if (pointerIdRef.current !== e.pointerId || !draggingRef.current) return;
       moveDrag(e.clientY);
       e.preventDefault();
     },
@@ -539,7 +500,7 @@ export default function VideoFeed({
         </div>
       )}
 
-      {!hideGenreMenu ? (
+      {!hideGenreMenu && (
         <div className="absolute z-40" data-no-swipe="1" style={{ top: safeTop, left: safeLeft }}>
           <GenreMenu
             value={genres}
@@ -548,7 +509,7 @@ export default function VideoFeed({
               setItems([]);
               setIndex(0);
               setPage(1);
-              setSeed(Math.floor(Math.random() * 1000000));
+              setSeed(Math.floor(Math.random() * 1_000_000));
               setHasMore(true);
               setTranslate(0, "none");
             }}
@@ -558,54 +519,32 @@ export default function VideoFeed({
               setItems([]);
               setIndex(0);
               setPage(1);
-              setSeed(Math.floor(Math.random() * 1000000));
+              setSeed(Math.floor(Math.random() * 1_000_000));
               setHasMore(true);
               setTranslate(0, "none");
             }}
           />
         </div>
-      ) : null}
+      )}
 
       <div className="absolute z-40" data-no-swipe="1" style={{ top: `calc(${safeTop} - 8px)`, right: safeRight }}>
         <MoreMenu />
       </div>
 
-      <div
-        ref={trackRef}
-        style={{
-          position: "relative",
-          height: vh ? `${vh}px` : "100svh",
-          transform: "translate3d(0,0,0)",
-          willChange: "transform",
-        }}
-      >
-        {windowItems.map(({ item, pos, absIndex }) => {
-          const active = absIndex === index;
-
-          return (
-            <div
-              key={`${item.id}:${absIndex}`}
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                top: h ? `${pos * h + PEEK}px` : `${PEEK}px`,
-                height: `${cardH}px`,
-              }}
-            >
-              <VideoCard
-                video={item}
-                isActive={active}
-                onNext={() => {
-                  if (!animatingRef.current && index < count - 1) finishSlide(-1);
-                }}
-                onPrev={() => {
-                  if (!animatingRef.current && index > 0) finishSlide(1);
-                }}
-              />
-            </div>
-          );
-        })}
+      <div ref={trackRef} style={{ position: "relative", height: `${vh}px` }}>
+        {windowItems.map(({ item, pos, absIndex }) => (
+          <div
+            key={`${item.id}:${absIndex}`}
+            style={{
+              position: "absolute",
+              inset: 0,
+              top: `${pos * h + PEEK}px`,
+              height: `${cardH}px`,
+            }}
+          >
+            <VideoCard video={item} isActive={absIndex === index} />
+          </div>
+        ))}
       </div>
     </div>
   );
