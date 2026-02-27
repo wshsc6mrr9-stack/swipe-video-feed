@@ -1,6 +1,5 @@
-// src/app/sitemap.ts
 import type { MetadataRoute } from "next";
-import { GENRE_SEO_MAP } from "@/lib/genres";
+import { GENRE_SEO_MAP, GENRE_SLUGS } from "@/lib/genres";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const base = (process.env.NEXT_PUBLIC_SITE_URL || "https://swipe-video-feed.vercel.app")
@@ -35,19 +34,15 @@ export default function sitemap(): MetadataRoute.Sitemap {
         : 0.6,
   }));
 
-  // ---- ジャンルページ（GENRE_SEO_MAP 連動） ----
-  const slugs: string[] =
-    GENRE_SEO_MAP instanceof Map
-      ? Array.from(GENRE_SEO_MAP.keys()).map((s) => String(s))
-      : Object.keys(GENRE_SEO_MAP || {});
+  // ---- ジャンルページ（GENRE_SLUGS 連動） ----
+  // 現在のサイトは日本語URLではなく、seiso などの「英語スラッグ」で動いているため、
+  // GENRE_SLUGS の値（英語）を抽出します。
+  const slugList = Object.values(GENRE_SLUGS || {});
 
   const genrePages: MetadataRoute.Sitemap = Array.from(
-    new Set(
-      slugs
-        .map((s) => String(s).trim().toLowerCase())
-        .filter(Boolean)
-    )
+    new Set(slugList.map((s) => String(s).trim().toLowerCase()))
   ).map((slug) => ({
+    // ここで encodeURIComponent(slug) を使うことで、安全なURLを生成します
     url: `${base}/genre/${encodeURIComponent(slug)}`,
     lastModified: now,
     changeFrequency: "daily",
