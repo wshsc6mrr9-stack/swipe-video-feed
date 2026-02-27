@@ -6,191 +6,207 @@ import GenreMenu from "@/components/GenreMenu";
 import MoreMenu from "@/components/MoreMenu";
 import { GENRE_ALL, GENRE_LIKES, GENRE_FAVORITES, type GenreKey } from "@/lib/genres";
 
-// ===== 日本語ジャンル → Redisタグ変換（完全網羅版） =====
+// ===== 日本語ジャンル → Redisタグ変換（実データに基づいた最強版） =====
+// ※ count数が多いタグを優先的に採用しています。
 const GENRE_MAP: Record<string, string[]> = {
   // ---- タイプ ----
-  "ギャル": ["gal"],
-  "可愛い": ["cute", "idol-celebrity"],
-  "クール": ["cool"],
-  "セクシー": ["sexy"],
-  "清楚": ["innocent"],
-  "グラマラス": ["glamorous"],
-  "スレンダー": ["slender"],
-  "グラマー": ["glamour"],
-  "小柄": ["petite", "small"],
-  "長身": ["tall"],
-  "アスリート": ["athlete"],
-  "筋肉": ["muscle"],
+  "ギャル": ["promiscuous", "hardcore", "gal"], // galは0件だが念のため残す
+  "可愛い": ["bishoujo", "beautiful-style", "idol-celebrity", "cute", "kawaii"],
+  "クール": ["cool", "beautiful-style"],
+  "セクシー": ["seductress", "sexy"],
+  "清楚": ["innocent", "beautiful-style"],
+  "グラマラス": ["beautiful-style", "glamorous"],
+  "スレンダー": ["slender", "beautiful-style"],
+  "グラマー": ["big-breasts", "beautiful-style"],
+  "小柄": ["petite", "mini"],
+  "長身": ["tall", "beautiful-style"],
+  "アスリート": ["athlete", "muscular"],
+  "筋肉": ["muscular", "athlete"],
   "ぽっちゃり": ["chubby", "plump"],
-  "巨乳": ["big-breasts", "huge-breasts"],
-  "微乳・貧乳": ["small-breasts", "flat-chested"],
-  "超乳": ["huge-breasts"],
-  "巨尻": ["big-ass"],
-  "むっちり": ["thick", "plump"],
-  "大人っぽい": ["mature"],
-  "お姉さん": ["older-sister", "mature"],
-  "モデル系": ["model"],
-  "アジア系": ["asian"],
-  "欧美系": ["western"],
-  "巨乳フェチ": ["big-breasts-fetish"],
-  "尻フェチ": ["ass-fetish"],
+  "巨乳": ["big-breasts", "huge-breasts", "big-breasts-fetish"],
+  "微乳・貧乳": ["small-breasts", "slender"],
+  "超乳": ["huge-breasts", "big-breasts"],
+  "巨尻": ["big-butt", "butt-fetish"],
+  "むっちり": ["chubby", "curvy"],
+  "大人っぽい": ["mature", "seductress"],
+  "お姉さん": ["oneesan", "older-sister"],
+  "モデル系": ["model", "beautiful-style"],
+  "アジア系": ["asian"], // データになし
+  "欧美系": ["western"], // データになし
+  "巨乳フェチ": ["big-breasts-fetish", "big-breasts"],
+  "尻フェチ": ["butt-fetish", "big-butt"],
   "パイパン": ["shaved"],
-  "ミニ系": ["mini"],
+  "ミニ系": ["mini", "petite"],
   "主観": ["pov"],
   "汗だく": ["sweaty"],
-  "美少女": ["bishoujo", "beautiful-girl"],
-  "色白": ["fair-skin"],
-  "美乳": ["beautiful-breasts"],
+  "美少女": ["bishoujo", "beautiful-style"],
+  "色白": ["fair-skin", "innocent"],
+  "美乳": ["beautiful-style", "big-breasts"],
 
   // ---- コスチューム ----
   "コスプレ": ["cosplay"],
   "制服": ["uniform", "student-uniform-adult"],
-  "セーラー服": ["sailor-suit"],
+  "セーラー服": ["sailor-uniform", "student-uniform-adult"],
   "水着": ["swimsuit"],
   "競泳・スクール水着": ["school-swimsuit"],
   "ボディコン": ["bodycon"],
   "ランジェリー": ["lingerie"],
-  "エプロン": ["apron"],
+  "エプロン": ["apron", "naked-apron"],
   "裸エプロン": ["naked-apron"],
-  "バニー": ["bunny", "bunny-girl"],
+  "バニー": ["bunny"],
   "覆面・マスク": ["mask"],
   "めがね": ["glasses"],
-  "パンスト・タイツ": ["pantyhose", "tights"],
+  "パンスト・タイツ": ["pantyhose"],
   "ニーソックス": ["knee-socks"],
   "レオタード": ["leotard"],
-  "和服・浴衣": ["kimono", "yukata"],
-  "体操着": ["gym-uniform"],
-  "ビジネススーツ": ["business-suit"],
-  "学生服": ["school-uniform", "student-adult"],
-  "秘書": ["secretary"],
-  "女装・男の娘": ["cross-dressing", "otoko-no-ko"],
+  "和服・浴衣": ["kimono"],
+  "体操着": ["gym-uniform", "bloomers"],
+  "ビジネススーツ": ["business-suit", "office-mix"],
+  "学生服": ["student-uniform-adult", "school-adult"],
+  "秘書": ["secretary", "office-mix"],
+  "女装・男の娘": ["crossdress"],
   "チャイナドレス": ["china-dress"],
   "ルーズソックス": ["loose-socks"],
   "レースクィーン": ["race-queen"],
   "チアガール": ["cheerleader"],
   "ブルマ": ["bloomers"],
-  "スチュワーデス": ["stewardess", "flight-attendant"],
+  "スチュワーデス": ["stewardess", "cabin-attendant"],
 
   // ---- ジャンル ----
   "ベスト・総集編": ["best-compilation"],
   "デビュー作品": ["debut"],
-  "単体作品": ["solo"],
-  "SF": ["sci-fi"],
+  "単体作品": ["solo", "single-actress"],
+  "SF": ["sf"],
   "イメージビデオ": ["image-video"],
   "素人": ["amateur"],
   "企画": ["planning"],
   "アクション": ["action"],
   "アニメ": ["anime"],
-  "SM": ["sm", "bdsm"],
-  "ギャグ・コメディ": ["comedy"],
-  "学園もの": ["school-stuff"],
-  "痴女": ["chijo", "slut"],
-  "淫語": ["dirty-talk"],
+  "SM": ["sm", "hardcore"],
+  "ギャグ・コメディ": ["gag-comedy"],
+  "学園もの": ["school-adult", "student-adult"],
+  "痴女": ["promiscuous", "seductress"],
+  "淫語": ["dirty-talk", "obscene-talk"],
   "ハーレム": ["harem"],
   "童貞": ["virgin-theme"],
-  "近親相姦": ["incest"],
-  "イタズラ": ["mischief"],
-  "ドラマ": ["drama"],
-  "寝取り・寝取られ・NTR": ["cuckold", "ntr"],
-  "乱行": ["orgy"],
-  "淫乱": ["lewd"],
+  "近親相姦": ["incest-taboo"],
+  "イタズラ": ["prank"],
+  "ドラマ": ["story-drama"],
+  "寝取り・寝取られ・NTR": ["ntr"],
+  "乱行": ["multiple-play", "4p", "group"],
+  "淫乱": ["promiscuous", "bitch"],
   "レズビアン": ["lesbian"],
   "ナンパ": ["pickup"],
-  "即ハメ": ["instant-sex"],
+  "即ハメ": ["instant"],
   "不倫": ["affair"],
-  "BL（ボーイズラブ）": ["bl", "boys-love"],
+  "BL（ボーイズラブ）": ["boys-love"], // データになし
   "オタク": ["otaku"],
-  "ギリモザ": ["barely-mosaic"],
+  "ギリモザ": ["giri-mosaic"],
   "盗撮・のぞき": ["voyeur"],
-  "複数話": ["multi-episode"],
-  "放置": ["neglect"],
-  "ビッチ": ["bitch"],
+  "複数話": ["multiple-episodes"],
+  "放置": ["hands-off", "neglect"],
+  "ビッチ": ["bitch", "promiscuous"],
   "触手": ["tentacle"],
   "時間停止": ["time-stop"],
 
   // ---- 職業いろいろ ----
-  "アイドル・芸能人": ["idol", "entertainer"],
-  "オフィス": ["office"],
-  "上司": ["boss"],
-  "部下・同僚": ["colleague"],
+  "アイドル・芸能人": ["idol-celebrity", "celebrity"],
+  "オフィス": ["office-mix", "office"],
+  "上司": ["boss", "office-mix"],
+  "部下・同僚": ["subordinate-colleague", "office-mix"],
   "面接": ["interview"],
-  "医者": ["doctor"],
+  "医者": ["hospital-clinic"],
   "看護師": ["nurse"],
-  "教師": ["teacher"],
+  "教師": ["teacher", "teacher-adult"],
   "インストラクター": ["instructor"],
   "ウェイトレス": ["waitress"],
   "メイド": ["maid"],
-  "CA・スチュワーデス": ["ca", "flight-attendant"],
+  "CA・スチュワーデス": ["cabin-attendant", "stewardess"],
   "受付嬢": ["receptionist"],
-  "マッサージ": ["massage"],
+  "マッサージ": ["massage", "massage-play"],
   "エステ": ["esthetic"],
-  "野外・屋外": ["outdoors"],
+  "病院・クリニック": ["hospital-clinic"],
+  "ホテル": ["hotel"],
+  "温泉": ["hot-spring"],
+  "お風呂": ["bath"],
+  "自宅": ["home"],
+  "野外・屋外": ["outdoor"],
   "旅行": ["travel"],
   "デート": ["date"],
+  "飲み会・合コン": ["drinking-party"],
+  "近所・ご近所": ["neighbor"], // データになし
   "カップル": ["couple"],
   "人妻": ["married-woman", "housewife"],
-  "熟女": ["mature-woman", "milf"],
+  "熟女": ["milf", "mature-mother"],
   "ママ友": ["mom-friend"],
-  "姉・妹": ["sister", "sisters"],
-  "キャバ嬢・風俗嬢": ["hostess", "sex-worker"],
-  "主婦": ["housewife"],
-  "義母": ["mother-in-law", "stepmother"],
-  "女教師": ["female-teacher", "teacher-adult"],
-  "OL・職業色々": ["office-lady", "ol", "business-suit"],
+  "姉・妹": ["sisters"],
+  "キャバ嬢・風俗嬢": ["hostess-service"],
+  "主婦": ["housewife", "married-woman"],
+  "義母": ["stepmother", "mother-in-law"],
+  "女教師": ["teacher-adult", "teacher"],
+  "OL・職業色々": ["office-mix", "business-suit"],
   "女子大生": ["college-student"],
-  "お母さん": ["mother"],
-  "女子校生": ["high-school-girl", "student-adult", "school-adult"],
+  "お母さん": ["mature-mother", "milf"],
+  "女子校生": ["student-adult", "school-adult"],
 
   // ---- プレイ ----
   "キス": ["kiss"],
   "マッサージプレイ": ["massage-play"],
-  "おもちゃ": ["toys"],
-  "3P": ["3p"],
-  "複数プレイ": ["group-sex"],
-  "シャワー": ["shower"],
-  "ローション": ["lotion"],
-  "オイル": ["oil"],
-  "言葉責め": ["verbal-abuse"],
+  "おもちゃ": ["toys", "electric-toy"],
+  "3P": ["3p", "multiple-play"],
+  "複数プレイ": ["multiple-play", "4p"],
+  "シャワー": ["shower", "bath"],
+  "ローション": ["lotion", "oil-play"],
+  "オイル": ["oil-play", "lotion"],
+  "焦らし": ["tease"],
+  "言葉責め": ["obscene-talk", "dirty-talk"],
   "フェラ": ["blowjob"],
   "パイズリ": ["titjob"],
   "手コキ": ["handjob"],
   "クンニ": ["cunnilingus"],
-  "オナニー": ["masturbation"],
-  "シックスナイン": ["69", "sixty-nine"],
-  "アナルセックス": ["anal"],
-  "イマラチオ": ["irrumatio"],
-  "イラマチオ": ["irrumatio", "iramachio"],
-  "中出し": ["creampie"],
-  "顔射": ["facial"],
-  "縛り・緊縛": ["bondage"],
+  "オナニー": ["masturbation", "support-masturbation"],
+  "シックスナイン": ["sixty-nine"],
+  "アナルセックス": ["anal-sex"],
+  "イマラチオ": ["iramachio", "irrumatio"],
+  "イラマチオ": ["iramachio", "irrumatio"],
+  "中出し": ["creampie", "finish"],
+  "顔射": ["facial", "finish"],
+  "縛り・緊縛": ["bondage", "restraint"],
   "騎乗位": ["cowgirl"],
   "潮吹き": ["squirting"],
-  "放尿・お漏らし": ["peeing", "omorashi"],
-  "飲尿": ["drinking-urine"],
-  "羞恥": ["shame"],
-  "4P": ["4p"],
-  "デカチン・巨根": ["big-cock"],
-  "電マ": ["vibrator"],
-  "拘束": ["restraint"],
-  "ぶっかけ": ["bukkake"],
-  "パンチラ": ["upskirt"],
-  "胸チラ": ["cleavage"],
+  "放尿・お漏らし": ["urination", "drink-urine"],
+  "飲尿": ["drink-urine"],
+  "羞恥": ["humiliation", "humiliation-strong"],
+  "羞め": ["humiliation", "humiliation-strong"],
+  "4P": ["4p", "multiple-play"],
+  "デカチン・巨根": ["big-dick"],
+  "電マ": ["electric-toy"],
+  "拘束": ["restraint", "bondage"],
+  "ぶっかけ": ["finish", "facial"],
+  "パンチラ": ["panty-shot", "upskirt"],
+  "胸チラ": ["boob-slip"],
   "スパンキング": ["spanking"],
   "カーセックス": ["car-sex"],
   "スカトロ": ["scat"],
   "ヨガ": ["yoga"],
-  "オナサポ": ["masturbation-support"],
+  "オナサポ": ["support-masturbation"],
 
   // ---- その他 ----
-  "VR": ["vr", "vr-only", "high-quality-vr"],
+  "VR": ["vr", "vr-only"],
   "ハイクオリティVR": ["high-quality-vr"],
-  "スマホ推奨": ["smartphone-recommended"],
-  "短尺": ["short"],
-  "シリーズ": ["series"],
+  "スマホ推奨": ["vertical-video"], // データになし
+  "短尺": ["short"], // データになし
+  "4時間以上": ["over-4-hours"],
+  "16時間以上": ["over-16-hours"],
+  "シリーズ": ["series"], // データになし
+  "セット商品": ["set"],
+  "デジモ": ["digimo"],
   "独占配信": ["exclusive"],
+  "AI生成作品": ["ai-generated"],
   "FANZA配信限定": ["fanza-exclusive"],
   "4K": ["4k"],
   "3D": ["3d"],
+  "その他": ["other"],
   "VR専用": ["vr-only"],
   "縦動画": ["vertical-video"],
 };
@@ -263,7 +279,7 @@ export default function VideoFeed({
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
-  const loadingRef = useRef(false); // ★ 連続フェッチ防止用の安全装置
+  const loadingRef = useRef(false);
   
   const [page, setPage] = useState(1);
   const [seed, setSeed] = useState(() => typeof window !== "undefined" ? Math.floor(Math.random() * 1000000) : 0);
@@ -382,19 +398,6 @@ export default function VideoFeed({
         })
         .filter((v) => !!v.id);
 
-      try {
-        const ids = normalized.map((v) => v.id);
-        if (ids.length) {
-          const r2 = await fetch(
-            `/api/likes?ids=${encodeURIComponent(ids.join(","))}`,
-            { cache: "no-store" }
-          );
-          const j2 = await r2.json().catch(() => null);
-          const counts = (j2?.counts ?? {}) as Record<string, number>;
-          for (const v of normalized) v.likeCount = Number(counts[v.id] ?? 0);
-        }
-      } catch {}
-
       setItems((prev) => {
         const existingIds = new Set(prev.map((p) => p.id));
         const newOnly = normalized.filter((n) => !existingIds.has(n.id));
@@ -411,7 +414,6 @@ export default function VideoFeed({
     }
   }, [hasMore, genres, query, page, seed]);
 
-  // 表示用に厳しくフィルタリングされた動画リスト
   const viewItems = useMemo(() => {
     if (genres.includes(GENRE_ALL)) return items;
 
@@ -453,14 +455,11 @@ export default function VideoFeed({
     });
   }, [items, genres, query]);
 
-  // ★★★ 最重要修正：自動追跡ページネーション ★★★
-  // 「表示できる動画（viewItems）」が残り少なくなったら、条件に合う動画が見つかるまでAPIを裏で呼び続ける
   useEffect(() => {
     if (!hasMore) return;
     if (items.length === 0) {
       loadMoreVideos();
     } else {
-      // 画面に表示できている動画の「残りストック」が5件以下になったら自動で次を探しに行く
       const remainingViews = viewItems.length - index;
       if (remainingViews <= 5) {
         loadMoreVideos();
@@ -611,6 +610,7 @@ export default function VideoFeed({
   const safeRight = `calc(env(safe-area-inset-right) + ${SAFE_PAD}px)`;
 
   const isInitialLoading = items.length === 0 && loading;
+  const isNoResults = !loading && !hasMore && items.length > 0 && viewItems.length === 0;
 
   return (
     <div className="relative w-full bg-black overflow-hidden" style={{ height: "100svh", touchAction: "none" }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
@@ -620,6 +620,27 @@ export default function VideoFeed({
           <div style={{ fontSize: 13, opacity: 0.8, lineHeight: 2, textAlign: "center" }}><div>⬆︎ 上にスワイプで次の動画</div><div>ダブルタップで5秒スキップ</div></div>
         </div>
       )}
+
+      {isNoResults && (
+        <div style={{ position: "absolute", inset: 0, zIndex: 9000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "black", color: "white", padding: "20px", textAlign: "center", touchAction: "none", pointerEvents: "auto" }}>
+          <p style={{ fontSize: 16, fontWeight: "bold", marginBottom: 24, lineHeight: 1.5 }}>
+            現在、このジャンルの<br/>動画はありません 😢
+          </p>
+          <button 
+            onClick={() => {
+              setGenres([GENRE_ALL]);
+              setItems([]);
+              setIndex(0);
+              setPage(1);
+              setHasMore(true);
+            }} 
+            style={{ padding: "12px 24px", background: "white", color: "black", borderRadius: "30px", fontWeight: "bold", border: "none" }}
+          >
+            すべての動画を見る
+          </button>
+        </div>
+      )}
+
       {!hideGenreMenu && (
         <div className="absolute z-40" data-no-swipe="1" style={{ top: safeTop, left: safeLeft }}>
           <GenreMenu value={genres} onChange={(v) => { setGenres(v); setItems([]); setIndex(0); setPage(1); setSeed(Math.floor(Math.random() * 1000000)); setHasMore(true); setTranslate(0, "none"); }} query={query} onChangeQuery={(s) => { setQuery(s); setItems([]); setIndex(0); setPage(1); setSeed(Math.floor(Math.random() * 1000000)); setHasMore(true); setTranslate(0, "none"); }} />
