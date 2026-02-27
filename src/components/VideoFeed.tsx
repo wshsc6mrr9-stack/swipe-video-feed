@@ -6,18 +6,193 @@ import GenreMenu from "@/components/GenreMenu";
 import MoreMenu from "@/components/MoreMenu";
 import { GENRE_ALL, GENRE_LIKES, GENRE_FAVORITES, type GenreKey } from "@/lib/genres";
 
-// ===== 日本語ジャンル → Redisタグ変換 =====
-// ※ ここにあるものだけが正しく絞り込まれます。
-// ※ ここに無いものは「全件表示」としてフォールバックします。
+// ===== 日本語ジャンル → Redisタグ変換（完全網羅版） =====
 const GENRE_MAP: Record<string, string[]> = {
-  "美少女": ["bishoujo"],
-  "巨乳": ["big-breasts"],
-  "主観": ["pov"],
-  "VR": ["vr", "vr-only", "high-quality-vr"],
+  // ---- タイプ ----
+  "ギャル": ["gal"],
+  "可愛い": ["cute", "idol-celebrity"],
+  "クール": ["cool"],
+  "セクシー": ["sexy"],
   "清楚": ["innocent"],
-  "汗だく": ["sweaty"],
+  "グラマラス": ["glamorous"],
+  "スレンダー": ["slender"],
+  "グラマー": ["glamour"],
+  "小柄": ["petite", "small"],
+  "長身": ["tall"],
+  "アスリート": ["athlete"],
+  "筋肉": ["muscle"],
+  "ぽっちゃり": ["chubby", "plump"],
+  "巨乳": ["big-breasts", "huge-breasts"],
+  "微乳・貧乳": ["small-breasts", "flat-chested"],
+  "超乳": ["huge-breasts"],
+  "巨尻": ["big-ass"],
+  "むっちり": ["thick", "plump"],
+  "大人っぽい": ["mature"],
+  "お姉さん": ["older-sister", "mature"],
+  "モデル系": ["model"],
+  "アジア系": ["asian"],
+  "欧美系": ["western"],
+  "巨乳フェチ": ["big-breasts-fetish"],
+  "尻フェチ": ["ass-fetish"],
   "パイパン": ["shaved"],
-  // 必要に応じてお客様の環境で追加してください
+  "ミニ系": ["mini"],
+  "主観": ["pov"],
+  "汗だく": ["sweaty"],
+  "美少女": ["bishoujo", "beautiful-girl"],
+  "色白": ["fair-skin"],
+  "美乳": ["beautiful-breasts"],
+
+  // ---- コスチューム ----
+  "コスプレ": ["cosplay"],
+  "制服": ["uniform", "student-uniform-adult"],
+  "セーラー服": ["sailor-suit"],
+  "水着": ["swimsuit"],
+  "競泳・スクール水着": ["school-swimsuit"],
+  "ボディコン": ["bodycon"],
+  "ランジェリー": ["lingerie"],
+  "エプロン": ["apron"],
+  "裸エプロン": ["naked-apron"],
+  "バニー": ["bunny", "bunny-girl"],
+  "覆面・マスク": ["mask"],
+  "めがね": ["glasses"],
+  "パンスト・タイツ": ["pantyhose", "tights"],
+  "ニーソックス": ["knee-socks"],
+  "レオタード": ["leotard"],
+  "和服・浴衣": ["kimono", "yukata"],
+  "体操着": ["gym-uniform"],
+  "ビジネススーツ": ["business-suit"],
+  "学生服": ["school-uniform", "student-adult"],
+  "秘書": ["secretary"],
+  "女装・男の娘": ["cross-dressing", "otoko-no-ko"],
+  "チャイナドレス": ["china-dress"],
+  "ルーズソックス": ["loose-socks"],
+  "レースクィーン": ["race-queen"],
+  "チアガール": ["cheerleader"],
+  "ブルマ": ["bloomers"],
+  "スチュワーデス": ["stewardess", "flight-attendant"],
+
+  // ---- ジャンル ----
+  "ベスト・総集編": ["best-compilation"],
+  "デビュー作品": ["debut"],
+  "単体作品": ["solo"],
+  "SF": ["sci-fi"],
+  "イメージビデオ": ["image-video"],
+  "素人": ["amateur"],
+  "企画": ["planning"],
+  "アクション": ["action"],
+  "アニメ": ["anime"],
+  "SM": ["sm", "bdsm"],
+  "ギャグ・コメディ": ["comedy"],
+  "学園もの": ["school-stuff"],
+  "痴女": ["chijo", "slut"],
+  "淫語": ["dirty-talk"],
+  "ハーレム": ["harem"],
+  "童貞": ["virgin-theme"],
+  "近親相姦": ["incest"],
+  "イタズラ": ["mischief"],
+  "ドラマ": ["drama"],
+  "寝取り・寝取られ・NTR": ["cuckold", "ntr"],
+  "乱行": ["orgy"],
+  "淫乱": ["lewd"],
+  "レズビアン": ["lesbian"],
+  "ナンパ": ["pickup"],
+  "即ハメ": ["instant-sex"],
+  "不倫": ["affair"],
+  "BL（ボーイズラブ）": ["bl", "boys-love"],
+  "オタク": ["otaku"],
+  "ギリモザ": ["barely-mosaic"],
+  "盗撮・のぞき": ["voyeur"],
+  "複数話": ["multi-episode"],
+  "放置": ["neglect"],
+  "ビッチ": ["bitch"],
+  "触手": ["tentacle"],
+  "時間停止": ["time-stop"],
+
+  // ---- 職業いろいろ ----
+  "アイドル・芸能人": ["idol", "entertainer"],
+  "オフィス": ["office"],
+  "上司": ["boss"],
+  "部下・同僚": ["colleague"],
+  "面接": ["interview"],
+  "医者": ["doctor"],
+  "看護師": ["nurse"],
+  "教師": ["teacher"],
+  "インストラクター": ["instructor"],
+  "ウェイトレス": ["waitress"],
+  "メイド": ["maid"],
+  "CA・スチュワーデス": ["ca", "flight-attendant"],
+  "受付嬢": ["receptionist"],
+  "マッサージ": ["massage"],
+  "エステ": ["esthetic"],
+  "野外・屋外": ["outdoors"],
+  "旅行": ["travel"],
+  "デート": ["date"],
+  "カップル": ["couple"],
+  "人妻": ["married-woman", "housewife"],
+  "熟女": ["mature-woman", "milf"],
+  "ママ友": ["mom-friend"],
+  "姉・妹": ["sister", "sisters"],
+  "キャバ嬢・風俗嬢": ["hostess", "sex-worker"],
+  "主婦": ["housewife"],
+  "義母": ["mother-in-law", "stepmother"],
+  "女教師": ["female-teacher", "teacher-adult"],
+  "OL・職業色々": ["office-lady", "ol", "business-suit"],
+  "女子大生": ["college-student"],
+  "お母さん": ["mother"],
+  "女子校生": ["high-school-girl", "student-adult", "school-adult"],
+
+  // ---- プレイ ----
+  "キス": ["kiss"],
+  "マッサージプレイ": ["massage-play"],
+  "おもちゃ": ["toys"],
+  "3P": ["3p"],
+  "複数プレイ": ["group-sex"],
+  "シャワー": ["shower"],
+  "ローション": ["lotion"],
+  "オイル": ["oil"],
+  "言葉責め": ["verbal-abuse"],
+  "フェラ": ["blowjob"],
+  "パイズリ": ["titjob"],
+  "手コキ": ["handjob"],
+  "クンニ": ["cunnilingus"],
+  "オナニー": ["masturbation"],
+  "シックスナイン": ["69", "sixty-nine"],
+  "アナルセックス": ["anal"],
+  "イマラチオ": ["irrumatio"],
+  "イラマチオ": ["irrumatio", "iramachio"],
+  "中出し": ["creampie"],
+  "顔射": ["facial"],
+  "縛り・緊縛": ["bondage"],
+  "騎乗位": ["cowgirl"],
+  "潮吹き": ["squirting"],
+  "放尿・お漏らし": ["peeing", "omorashi"],
+  "飲尿": ["drinking-urine"],
+  "羞恥": ["shame"],
+  "4P": ["4p"],
+  "デカチン・巨根": ["big-cock"],
+  "電マ": ["vibrator"],
+  "拘束": ["restraint"],
+  "ぶっかけ": ["bukkake"],
+  "パンチラ": ["upskirt"],
+  "胸チラ": ["cleavage"],
+  "スパンキング": ["spanking"],
+  "カーセックス": ["car-sex"],
+  "スカトロ": ["scat"],
+  "ヨガ": ["yoga"],
+  "オナサポ": ["masturbation-support"],
+
+  // ---- その他 ----
+  "VR": ["vr", "vr-only", "high-quality-vr"],
+  "ハイクオリティVR": ["high-quality-vr"],
+  "スマホ推奨": ["smartphone-recommended"],
+  "短尺": ["short"],
+  "シリーズ": ["series"],
+  "独占配信": ["exclusive"],
+  "FANZA配信限定": ["fanza-exclusive"],
+  "4K": ["4k"],
+  "3D": ["3d"],
+  "VR専用": ["vr-only"],
+  "縦動画": ["vertical-video"],
 };
 
 type VideoItem = {
@@ -158,10 +333,10 @@ export default function VideoFeed({
         .filter(Boolean)
         .flatMap((g) => {
           if (g === GENRE_FAVORITES || g === GENRE_LIKES) return [g];
-          return GENRE_MAP[g] || []; // ない場合は空配列で除外
+          return GENRE_MAP[g] || []; // マップにない場合は除外
         });
 
-      // 変換結果が1つでもある時だけパラメータを送る
+      // マップに該当がある場合のみパラメータ送信（該当なしなら送らない＝全件）
       if (apiGenres.length > 0) {
         params.set("genres", apiGenres.join(","));
       }
@@ -280,35 +455,13 @@ export default function VideoFeed({
   }, []);
 
   const viewItems = useMemo(() => {
-    if (genres.includes(GENRE_ALL)) return items;
-
     let base = items;
 
+    // ソートだけ維持し、それ以外のフィルタリング（混ざり防止）はAPIの結果を信頼する
     if (genres.length === 1 && genres[0] === GENRE_LIKES) {
        base = items.slice().sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
     } else if (genres.length === 1 && genres[0] === GENRE_FAVORITES) {
        base = items;
-    } else {
-       const wantList = genres.flatMap((g) => GENRE_MAP[g] || []);
-       
-       if (wantList.length > 0) {
-         const filtered = items.filter((v) => {
-           const tags = [
-              ...(Array.isArray(v.genres) ? v.genres : []),
-              v.genre
-           ].filter(Boolean).map(String);
-           
-           // ★ 修正：バックエンドのロジックに合わせて「部分一致（includes）」に変更
-           return tags.some((t) => wantList.some((w) => t.includes(w)));
-         });
-
-         // ★ 究極のフェイルセーフ：万が一フロント側のフィルタで全滅したら、APIが返したデータをそのまま流す（真っ暗防止）
-         if (filtered.length > 0) {
-           base = filtered;
-         } else {
-           base = items;
-         }
-       }
     }
 
     const q = normalizeText(query);
@@ -328,13 +481,15 @@ export default function VideoFeed({
   const cardH = Math.max(0, h - PEEK * 2);
 
   const windowItems = useMemo(() => {
-    const out: any[] = [];
-    if (viewItems[index - 1])
-      out.push({ item: viewItems[index - 1], pos: -1, absIndex: index - 1 });
-    if (viewItems[index])
-      out.push({ item: viewItems[index], pos: 0, absIndex: index });
-    if (viewItems[index + 1])
-      out.push({ item: viewItems[index + 1], pos: 1, absIndex: index + 1 });
+    const cur = viewItems[index];
+    const prevItem = index > 0 ? viewItems[index - 1] : undefined;
+    const nextItem =
+      index + 1 < viewItems.length ? viewItems[index + 1] : undefined;
+    const out: Array<{ item: VideoItem; pos: -1 | 0 | 1; absIndex: number }> =
+      [];
+    if (prevItem) out.push({ item: prevItem, pos: -1, absIndex: index - 1 });
+    if (cur) out.push({ item: cur, pos: 0, absIndex: index });
+    if (nextItem) out.push({ item: nextItem, pos: 1, absIndex: index + 1 });
     return out;
   }, [viewItems, index]);
 
@@ -405,26 +560,25 @@ export default function VideoFeed({
   const endDrag = useCallback(() => {
     if (!draggingRef.current) return;
     draggingRef.current = false;
-
     if (animatingRef.current) {
       setTranslate(0, "none");
       return;
     }
-
     const dy = dyRef.current;
     const dt = performance.now() - startTimeRef.current;
     const v = dt > 0 ? Math.abs(dy) / dt : 0;
     const DIST = Math.max(55, h * 0.08);
     const VELO = 0.55;
-
     if ((dy < -DIST || (dy < -25 && v > VELO)) && index < count - 1) {
       finishSlide(-1);
-    } else if ((dy > DIST || (dy > 25 && v > VELO)) && index > 0) {
-      finishSlide(1);
-    } else {
-      setTranslate(0, "transform 160ms ease-out");
-      window.setTimeout(() => setTranslate(0, "none"), 170);
+      return;
     }
+    if ((dy > DIST || (dy > 25 && v > VELO)) && index > 0) {
+      finishSlide(1);
+      return;
+    }
+    setTranslate(0, "transform 160ms ease-out");
+    window.setTimeout(() => setTranslate(0, "none"), 170);
   }, [count, finishSlide, h, index, setTranslate]);
 
   const onPointerDown = useCallback(
@@ -432,7 +586,6 @@ export default function VideoFeed({
       if (isInteractiveTarget(e.target)) return;
       if (animatingRef.current) return;
       if (typeof e.button === "number" && e.button !== 0) return;
-
       pointerIdRef.current = e.pointerId;
       beginDrag(e.clientY);
       (e.currentTarget as any).setPointerCapture?.(e.pointerId);
@@ -526,11 +679,9 @@ export default function VideoFeed({
           />
         </div>
       )}
-
       <div className="absolute z-40" data-no-swipe="1" style={{ top: `calc(${safeTop} - 8px)`, right: safeRight }}>
         <MoreMenu />
       </div>
-
       <div ref={trackRef} style={{ position: "relative", height: `${vh}px` }}>
         {windowItems.map(({ item, pos, absIndex }) => (
           <div
