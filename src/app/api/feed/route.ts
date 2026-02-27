@@ -1,34 +1,33 @@
-// src/app/api/feed/route.ts
 import { NextResponse } from "next/server";
 import { getFilteredVideos } from "@/lib/redis";
-import { GENRE_SEO_MAP, type GenreKey } from "@/lib/genres";
 
-export const dynamic = "force-dynamic";
+export const dynamic = "force-dynamic"; // キャッシュを無効化して常に最新データを取得
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
+    
+    // パラメータを正確に取得
     const genresParam = searchParams.get("genres") || "";
     const query = searchParams.get("query") || "";
     const page = parseInt(searchParams.get("page") || "1", 10);
-    const limit = parseInt(searchParams.get("limit") || "15", 10);
+    const limit = parseInt(searchParams.get("limit") || "10", 10); // デフォルト10件
     const seed = parseInt(searchParams.get("seed") || "0", 10);
+    const idsParam = searchParams.get("ids") || "";
 
-    // リクエストされたジャンル（例: ["gal"]）
-    let genreArray = genresParam ? genresParam.split(",").filter(Boolean) : [];
+    // カンマ区切りを配列に変換
+    const genres = genresParam ? genresParam.split(",").filter(Boolean) : [];
+    const targetIds = idsParam ? idsParam.split(",").filter(Boolean) : undefined;
 
-    // ★ 解決策：URLのIDをDB内の日本語ラベルに変換して検索対象を広げる
-    const expandedGenres = [...genreArray];
-    genreArray.forEach((g) => {
-      const seoInfo = GENRE_SEO_MAP[g as GenreKey];
-      if (seoInfo && seoInfo.label) {
-        // "gal" が来たら、DBにあるはずの "ギャル" も一緒に探すように追加
-        expandedGenres.push(seoInfo.label);
-      }
-    });
-
-    // 拡張されたキーワードでDBを検索
-    const videos = await getFilteredVideos(expandedGenres, query, page, limit, seed);
+    // ★ ここが重要：redis.ts の引数の順番と完全に一致させる
+    const videos = await getFilteredVideos(
+      genres,
+      query,
+      page,
+      limit,
+      seed,
+      targetIds
+    );
 
     return NextResponse.json(videos);
   } catch (error) {
