@@ -3,13 +3,16 @@ import { notFound } from "next/navigation";
 import VideoFeed from "../../../components/VideoFeed";
 import { GENRE_SEO_MAP, SLUG_TO_GENRE, GENRE_SLUGS } from "../../../lib/genres";
 
+// ビルドエラーと404を防ぐための重要設定
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type Props = {
   params: { slug: string };
 };
 
 // URL（seisoなど）を日本語ジャンル名（清楚）に変換する
 function getGenreName(slug: string) {
-  // まず英語マップから検索、なければデコードした日本語を試す
   return SLUG_TO_GENRE[slug] || decodeURIComponent(slug);
 }
 
@@ -39,7 +42,6 @@ export default function GenrePage({ params }: Props) {
 }
 
 export async function generateStaticParams() {
-  // 登録した英語スラッグをすべてURLとして事前に書き出す
   return Object.values(GENRE_SLUGS).map((slug) => ({
     slug: slug,
   }));

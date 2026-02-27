@@ -267,11 +267,9 @@ export const GENRE_LIST: GenreItem[] = [
   ...GENRE_GROUPS.flatMap((g) => g.items),
 ];
 
-// ---- SEO説明文テンプレ（薄いページ対策） ----
+// ---- SEO説明文テンプレ ----
 function genreDesc(label: string): string {
-  return `${label}をテーマにした短尺動画をまとめています。
-スマートフォンでの視聴に最適化された縦型動画を中心に掲載し、スワイプ操作で次々に楽しめます。
-テンポよく作品をチェックしたい方におすすめのジャンルです。`;
+  return `${label}をテーマにした短尺動画をまとめています。スマートフォンでの視聴に最適化された縦型動画を中心に掲載し、スワイプ操作で次々に楽しめます。`;
 }
 
 // ---- SEO用マップ（/genre/[slug] 用） ----
@@ -281,7 +279,6 @@ export const GENRE_SEO_MAP: Record<
 > = Object.fromEntries(
   GENRE_GROUPS.flatMap((g) =>
     g.items.map((it) => {
-      // 日本語をそのままキーとして扱う
       const k = String(it.key); 
       return [
         k,
@@ -308,9 +305,10 @@ export function isGenreKey(v: any): v is GenreKey {
 
 export function normalizeGenreKey(v: any): string {
   if (v == null) return "";
-  // 小文字化をやめてトリムのみにする
-  return String(v).trim();
-}// src/lib/genres.ts の一番下に追加
+  return String(v);
+}
+
+// 404を防ぐための「手動スラッグマップ」
 export const GENRE_SLUGS: Record<string, string> = {
   "清楚": "seiso",
   "美少女": "bishoujo",
@@ -324,10 +322,9 @@ export const GENRE_SLUGS: Record<string, string> = {
   "熟女": "milf",
   "人妻": "married-woman",
   "素人": "amateur",
-  // ※他のジャンルも必要に応じて追加できます
 };
 
-// 英語から日本語を引き出す逆引きマップ
-export const SLUG_TO_GENRE = Object.fromEntries(
+// 英語URLから日本語ジャンル名を引くための逆引きマップ
+export const SLUG_TO_GENRE: Record<string, string> = Object.fromEntries(
   Object.entries(GENRE_SLUGS).map(([k, v]) => [v, k])
 );
