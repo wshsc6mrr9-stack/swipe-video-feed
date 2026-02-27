@@ -34,15 +34,15 @@ export default function sitemap(): MetadataRoute.Sitemap {
         : 0.6,
   }));
 
-  // ---- ジャンルページ（GENRE_SLUGS 連動） ----
-  // 実際に動画が表示される「英語スラッグ」の値を抽出
+  // ---- ジャンルページ（英語スラッグ連動） ----
+  // 実際にページが動作する「英語スラッグ（seiso等）」のリストを取得します
   const slugList = Object.values(GENRE_SLUGS || {});
 
   const genrePages: MetadataRoute.Sitemap = Array.from(
     new Set(slugList.map((s) => String(s).trim().toLowerCase()))
   ).map((slug) => ({
-    // ここで英語スラッグを使ってURLを生成（encodeURIComponentは念のため保持）
-    url: `${base}/genre/${encodeURIComponent(slug)}`,
+    // 英語スラッグを使用し、404にならない正しいURLを生成します
+    url: `${base}/genre/${slug}`,
     lastModified: now,
     changeFrequency: "daily",
     priority: 0.7,
