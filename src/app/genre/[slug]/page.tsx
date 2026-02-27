@@ -1,18 +1,29 @@
 import { Metadata } from "next";
 import { notFound } from "next/navigation";
-import VideoFeed from "@/components/VideoFeed";
-import { GENRE_SEO_MAP } from "@/lib/genres";
+// インポート先を相対パスに修正してエラーを回避
+import VideoFeed from "../../../components/VideoFeed";
+import { GENRE_SEO_MAP } from "../../../lib/genres";
 
 type Props = {
   params: { slug: string };
 };
 
-// SEOメタデータを生成
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const slug = decodeURIComponent(params.slug);
-  const info = GENRE_SEO_MAP[slug];
+// URL（スラグ）から情報を取得する共通関数
+function getGenreInfo(slug: string) {
+  try {
+    // ブラウザから送られてくるURL形式（%..）を日本語に戻す
+    const decodedSlug = decodeURIComponent(slug);
+    return GENRE_SEO_MAP[decodedSlug] || null;
+  } catch {
+    return null;
+  }
+}
 
-  if (!info) return { title: "ジャンル未設定" };
+// --- SEOメタデータを生成 ---
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const info = getGenreInfo(params.slug);
+
+  if (!info) return { title: "ジャンルが見つかりません" };
 
   return {
     title: `${info.label}の縦型ショート動画まとめ | Swipe Video Feed`,
@@ -20,10 +31,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-// ジャンル別ページ本体
+// --- ページ本体 ---
 export default function GenrePage({ params }: Props) {
-  const slug = decodeURIComponent(params.slug);
-  const info = GENRE_SEO_MAP[slug];
+  const info = getGenreInfo(params.slug);
 
   if (!info) {
     notFound();
@@ -31,15 +41,15 @@ export default function GenrePage({ params }: Props) {
 
   return (
     <main className="w-full h-full bg-black">
-      {/* 以前作成したVideoFeedコンポーネントをそのまま使用 */}
+      {/* 動画フィードを表示。日本語キーをそのまま渡す */}
       <VideoFeed initialGenre={info.key} />
     </main>
   );
 }
 
-// 静的パスの生成（SEOに重要）
+// --- 重要：全URLの静的生成。日本語URLをVercelに教える ---
 export async function generateStaticParams() {
   return Object.keys(GENRE_SEO_MAP).map((slug) => ({
-    slug: encodeURIComponent(slug),
+    slug: slug, // decodeせずにそのままキーを渡す
   }));
 }
