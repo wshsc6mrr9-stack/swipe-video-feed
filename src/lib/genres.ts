@@ -2,7 +2,7 @@
 
 export const GENRE_ALL = "all" as const;
 export const GENRE_LIKES = "__likes__" as const;
-export const GENRE_FAVORITES = "__favorites__" as const;
+export const GENRE_FAVORITES = "__favorites__" as const; // ★追加
 
 export type GenreKey = string;
 
@@ -281,7 +281,7 @@ export const GENRE_SEO_MAP: Record<
 > = Object.fromEntries(
   GENRE_GROUPS.flatMap((g) =>
     g.items.map((it) => {
-      // ★ 変更点: 日本語をそのままキーとして扱う（toLowerCaseはしない）
+      // 日本語をそのままキーとして扱う
       const k = String(it.key); 
       return [
         k,
@@ -308,6 +308,6 @@ export function isGenreKey(v: any): v is GenreKey {
 
 export function normalizeGenreKey(v: any): string {
   if (v == null) return "";
-  // ★ 変更点: 小文字化をやめてトリムのみにする
+  // 小文字化をやめてトリムのみにする
   return String(v).trim();
 }

@@ -174,6 +174,8 @@ export async function getFilteredVideos(
       );
     }
 
+    // お気に入りモードの場合はシャッフルせずそのまま返す（またはお好みで seed シャッフル）
+    // ここではご提示のロジックに従い、ランキング以外はシャッフルを適用します
     const shuffled = shuffleWithSeed(filtered, seed);
     return shuffled.slice(
       startIndex,

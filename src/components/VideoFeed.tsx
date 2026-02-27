@@ -6,7 +6,7 @@ import GenreMenu from "@/components/GenreMenu";
 import MoreMenu from "@/components/MoreMenu";
 import { GENRE_ALL, GENRE_LIKES, GENRE_FAVORITES, type GenreKey } from "@/lib/genres";
 
-// ===== 日本語ジャンル → DBの実データに完全対応した究極のGENRE_MAP =====
+// ===== 日本語ジャンル → DBの実データに完全対応した究極 of GENRE_MAP =====
 const GENRE_MAP: Record<string, string[]> = {
   // ---- タイプ ----
   "ギャル": ["promiscuous", "hardcore"],
@@ -478,10 +478,29 @@ export default function VideoFeed({
 
   useEffect(() => {
     if (!hasMore) return;
-    if (items.length === 0 || (viewItems.length - index <= 5)) {
+    if (items.length === 0) {
       loadMoreVideos();
+    } else {
+      const remainingViews = viewItems.length - index;
+      if (remainingViews <= 5) {
+        loadMoreVideos();
+      }
     }
   }, [index, items.length, viewItems.length, hasMore, loadMoreVideos]);
+
+  useEffect(() => {
+    if (initialGenre) {
+      let g = initialGenre;
+      try { g = decodeURIComponent(initialGenre); } catch {}
+      setGenres([g]);
+      setItems([]); 
+      setIndex(0);
+      setPage(1);
+      setSeed(Math.floor(Math.random() * 1000000));
+      setHasMore(true);
+      setTranslate(0, "none");
+    }
+  }, [initialGenre, setTranslate]);
 
   useEffect(() => {
     const on = (ev: Event) => {
@@ -526,7 +545,6 @@ export default function VideoFeed({
       window.setTimeout(() => {
         setIndex((cur) => {
           const next = clampIndex(cur + (dir === -1 ? 1 : -1));
-          indexRef.current = next; 
           return next;
         });
         requestAnimationFrame(() => {
@@ -628,7 +646,7 @@ export default function VideoFeed({
           <p className="text-base font-bold mb-6 leading-relaxed">現在、このジャンルの<br/>動画はありません 😢</p>
           <button 
             onClick={() => { setGenres([GENRE_ALL]); setItems([]); setIndex(0); setPage(1); setHasMore(true); }} 
-            className="px-6 py-3 bg-white text-black rounded-full font-bold border-none"
+            style={{ padding: "12px 24px", background: "white", color: "black", borderRadius: "30px", fontWeight: "bold", border: "none" }}
           >すべての動画を見る</button>
         </div>
       )}

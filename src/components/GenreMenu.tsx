@@ -214,6 +214,8 @@ export default function GenreMenu({
               className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-base outline-none text-white placeholder:text-white/40"
               style={{ fontSize: 16 }}
               onPointerDown={(e) => stop(e)}
+              onTouchStart={(e) => stop(e)}
+              onTouchMove={(e) => stop(e)}
             />
             <button
               type="submit"
