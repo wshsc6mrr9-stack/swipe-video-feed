@@ -1,3 +1,4 @@
+// ===== src/components/VideoFeed.tsx =====
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -5,18 +6,7 @@ import VideoCard from "@/components/VideoCard";
 import GenreMenu from "@/components/GenreMenu";
 import MoreMenu from "@/components/MoreMenu";
 import { GENRE_ALL, GENRE_LIKES, GENRE_FAVORITES, type GenreKey } from "@/lib/genres";
-
-// ★ 追加：日本語ジャンル → Redisタグ変換マップ
-const GENRE_MAP: Record<string, string[]> = {
-  "美少女": ["bishoujo"],
-  "巨乳": ["big-breasts"],
-  "主観": ["pov"],
-  "VR": ["vr", "vr-only", "high-quality-vr"],
-  "清楚": ["innocent"],
-  "汗だく": ["sweaty"],
-  "パイパン": ["shaved"],
-  // 必要に応じて追加
-};
+import { GENRE_MAP } from "@/lib/genreMap";
 
 type VideoItem = {
   id: string;
@@ -73,52 +63,15 @@ function normalizeText(s: any) {
     .trim();
 }
 
-// ★ 追加：日本語→英語タグが未登録でも拾えるように、fallbackでslugも投げる/照合する
-function uniqStr(arr: string[]) {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const v of arr) {
-    const s = String(v ?? "").trim();
-    if (!s) continue;
-    if (seen.has(s)) continue;
-    seen.add(s);
-    out.push(s);
-  }
-  return out;
+function uniq<T>(arr: T[]) {
+  return Array.from(new Set(arr));
 }
 
-function slugifyGenre(v: any): string {
-  const s = String(v ?? "").normalize("NFKC").trim();
-  if (!s) return "";
-  return s
-    .toLowerCase()
-    .replace(/[“”"']/g, "")
-    .replace(/[（）()［］[\]【】]/g, "")
-    .replace(/[＿—–]/g, "-")
-    .replace(/_/g, "-")
-    .replace(/[・･／/]/g, "-")
-    .replace(/[、,]/g, "-")
-    .replace(/[。．.]/g, "-")
-    .replace(/[：:]/g, "-")
-    .replace(/[＋+]/g, "-")
-    .replace(/[＆&]/g, "-")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function genreAliases(g: any): string[] {
-  const k = String(g ?? "").trim();
-  if (!k) return [];
-  // 特殊キーはそのまま
-  if (k === GENRE_ALL || k === GENRE_LIKES || k === GENRE_FAVORITES) return [k];
-
-  const mapped = GENRE_MAP[k];
-  if (Array.isArray(mapped) && mapped.length) return uniqStr(mapped.map(String));
-
-  // マップに無いジャンルは「日本語そのまま」+「slug」を両方使う（APIにも投げる/表示フィルタにも使う）
-  const slug = slugifyGenre(k);
-  return uniqStr([k, slug]);
+function expandGenreKey(g: string): string[] {
+  const base = String(g ?? "").trim();
+  if (!base) return [];
+  // ★ 重要：日本語キーもそのまま残しつつ、マップがあれば追加で展開（両方投げる）
+  return uniq([base, ...(GENRE_MAP[base] ?? [])].filter(Boolean));
 }
 
 type Props = {
@@ -204,14 +157,20 @@ export default function VideoFeed({
     try {
       const params = new URLSearchParams();
 
-      // ★ ここで GENRE_MAP + fallback(slug) を使って変換してから送信
-      const activeGenres = uniqStr(
-        genres
+      // ★ APIへ投げるgenres（日本語キーも英語タグも両方投げる）
+      const sel = Array.isArray(genres) ? genres : [GENRE_ALL];
+      const isAll = sel.includes(GENRE_ALL);
+      const isLikes = sel.length === 1 && sel[0] === GENRE_LIKES;
+      const isFav = sel.includes(GENRE_FAVORITES);
+
+      const activeGenres = uniq(
+        (isAll || isLikes || isFav ? [] : sel)
           .filter(Boolean)
-          .flatMap((g) => genreAliases(g))
+          .flatMap((g) => expandGenreKey(String(g)))
       );
 
-      params.append("genres", activeGenres.join(","));
+      // ランダム/likes/favorites以外のみ genres を付与（これで「全件」状態が壊れない）
+      if (activeGenres.length) params.append("genres", activeGenres.join(","));
 
       if (query) params.append("query", query);
 
@@ -219,7 +178,7 @@ export default function VideoFeed({
       params.append("seed", String(seed));
       params.append("_t", Date.now().toString());
 
-      if (genres.includes(GENRE_FAVORITES)) {
+      if (isFav) {
         const likedIds = Array.from(readLikedSet());
         if (likedIds.length === 0) {
           setItems([]);
@@ -230,9 +189,7 @@ export default function VideoFeed({
         params.append("ids", likedIds.join(","));
       }
 
-      const res = await fetch(`/api/feed?${params.toString()}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
       const json = await res.json().catch(() => null);
 
       const list = (Array.isArray(json) ? json : json?.items ?? []) as any[];
@@ -245,12 +202,8 @@ export default function VideoFeed({
 
       const normalized: VideoItem[] = list
         .map((v) => {
-          const affUrl = (v?.affUrl ?? v?.affiliateUrl) as
-            | string
-            | undefined;
-          const affLabel = (v?.affLabel ?? v?.affiliateLabel) as
-            | string
-            | undefined;
+          const affUrl = (v?.affUrl ?? v?.affiliateUrl) as string | undefined;
+          const affLabel = (v?.affLabel ?? v?.affiliateLabel) as string | undefined;
           return {
             id: String(v.id ?? ""),
             title: String(v.title ?? ""),
@@ -272,10 +225,9 @@ export default function VideoFeed({
       try {
         const ids = normalized.map((v) => v.id);
         if (ids.length) {
-          const r2 = await fetch(
-            `/api/likes?ids=${encodeURIComponent(ids.join(","))}`,
-            { cache: "no-store" }
-          );
+          const r2 = await fetch(`/api/likes?ids=${encodeURIComponent(ids.join(","))}`, {
+            cache: "no-store",
+          });
           const j2 = await r2.json().catch(() => null);
           const counts = (j2?.counts ?? {}) as Record<string, number>;
           for (const v of normalized) v.likeCount = Number(counts[v.id] ?? 0);
@@ -333,49 +285,33 @@ export default function VideoFeed({
       const count = e?.detail?.count;
       if (!videoId || !Number.isFinite(count)) return;
 
-      setItems((prev) =>
-        prev.map((v) => (v.id === videoId ? { ...v, likeCount: Number(count) } : v))
-      );
+      setItems((prev) => prev.map((v) => (v.id === videoId ? { ...v, likeCount: Number(count) } : v)));
     };
 
     window.addEventListener(EVT_LIKES, on as any);
     return () => window.removeEventListener(EVT_LIKES, on as any);
   }, []);
 
-  // ★ 表示時のフィルタリングにも GENRE_MAP + fallback(slug) を適用
+  // ★ 表示時フィルタ：日本語キーでも英語タグでも一致させる
   const viewItems = useMemo(() => {
-    // 全件表示ならそのまま
-    if (genres.includes(GENRE_ALL)) return items;
-
-    // 選択ジャンル（日本語/英語/slug）の候補セット
-    const want = new Set<string>(
-      uniqStr(genres.flatMap((g) => genreAliases(g)))
-    );
+    const sel = Array.isArray(genres) ? genres : [GENRE_ALL];
 
     let base = items;
 
-    if (genres.length === 1 && genres[0] === GENRE_LIKES) {
-      base = items
-        .slice()
-        .sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
-    } else if (genres.length === 1 && genres[0] === GENRE_FAVORITES) {
-      base = items;
-    } else {
-      base = items.filter((v) => {
-        const rawTags = [
-          ...(Array.isArray(v.genres) ? v.genres : []),
-          v.genre,
-        ]
-          .filter(Boolean)
-          .map(String);
-
-        // 作品側タグもslug候補を追加して照合幅を広げる
-        const expandedTags = uniqStr(
-          rawTags.flatMap((t) => uniqStr([t, slugifyGenre(t)]))
-        );
-
-        return expandedTags.some((t) => want.has(t));
-      });
+    if (!sel.includes(GENRE_ALL)) {
+      if (sel.length === 1 && sel[0] === GENRE_LIKES) {
+        base = items.slice().sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
+      } else if (sel.length === 1 && sel[0] === GENRE_FAVORITES) {
+        base = items;
+      } else {
+        const want = new Set(sel.flatMap((g) => expandGenreKey(String(g))));
+        base = items.filter((v) => {
+          const tags = [...(Array.isArray(v.genres) ? v.genres : []), v.genre]
+            .filter(Boolean)
+            .map((x) => String(x));
+          return tags.some((t) => want.has(t));
+        });
+      }
     }
 
     const q = normalizeText(query);
@@ -595,9 +531,7 @@ export default function VideoFeed({
             pointerEvents: "auto",
           }}
         >
-          <div style={{ fontSize: 16, fontWeight: "bold", marginBottom: 20 }}>
-            動画を読み込み中...
-          </div>
+          <div style={{ fontSize: 16, fontWeight: "bold", marginBottom: 20 }}>動画を読み込み中...</div>
           <div style={{ fontSize: 13, opacity: 0.8, lineHeight: 2, textAlign: "center" }}>
             <div>⬆︎ 上にスワイプで次の動画</div>
             <div>ダブルタップで5秒スキップ</div>
@@ -632,11 +566,7 @@ export default function VideoFeed({
         </div>
       ) : null}
 
-      <div
-        className="absolute z-40"
-        data-no-swipe="1"
-        style={{ top: `calc(${safeTop} - 8px)`, right: safeRight }}
-      >
+      <div className="absolute z-40" data-no-swipe="1" style={{ top: `calc(${safeTop} - 8px)`, right: safeRight }}>
         <MoreMenu />
       </div>
 
