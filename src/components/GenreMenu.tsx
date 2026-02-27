@@ -60,11 +60,9 @@ export default function GenreMenu({
 }: Props) {
   const [open, setOpen] = useState(false);
 
-  // ★ 修正1: メニュー内で操作中の「仮の選択状態」を持つ
   const [localQuery, setLocalQuery] = useState(query);
   const [localSelected, setLocalSelected] = useState<GenreKey[]>(() => normalizeSelected(value));
 
-  // メニューが開くたびに、親の最新状態（現在適用されている検索条件）と同期する
   useEffect(() => {
     if (open) {
       setLocalQuery(query);
@@ -72,20 +70,18 @@ export default function GenreMenu({
     }
   }, [open, query, value]);
 
-  // 閉じている時の表示用（親の確定した値を表示）
   const activeSelected = useMemo(() => normalizeSelected(value), [value]);
 
-  const summaryText = useMemo(() => {
-    // 閉じている時は「確定済み」のラベルを表示
-    const labels = activeSelected.map(labelOf);
-    if (selected.length <= 1) return [labels[0] ?? "All"];
-    return [`${labels[0]} +${selected.length - 1}`];
-  }, [activeSelected]); // ここは activeSelected 依存に戻すのが自然だが、コード構造上修正
-
-  // 内部ロジック用（編集中か確定済みかで使い分ける）
+  // ★ 修正箇所：順番エラー（クラッシュ）の原因だった変数を上に移動しました！
   const selected = open ? localSelected : activeSelected;
 
-  // 左側のジャンルリスト絞り込み（入力中の文字でリアルタイム反応）
+  const summaryText = useMemo(() => {
+    const labels = selected.map(labelOf);
+    if (open) return labels;
+    if (selected.length <= 1) return [labels[0] ?? "All"];
+    return [`${labels[0]} +${selected.length - 1}`];
+  }, [selected, open]);
+
   const genreQuery = localQuery.trim().toLowerCase();
 
   const filteredGroups = useMemo(() => {
@@ -102,29 +98,27 @@ export default function GenreMenu({
       .filter((g) => g.items.length > 0);
   }, [genreQuery]);
 
-  // ★ 修正2: 即座に onChange を呼ばず、ローカルステートだけ更新する
   function toggle(key: GenreKey) {
     let next: GenreKey[];
 
-    if (key === GENRE_ALL) {
-      next = [GENRE_ALL];
-    } else if (key === GENRE_LIKES) {
-      next = [GENRE_LIKES];
-    } else if (key === GENRE_FAVORITES) {
-      next = [GENRE_FAVORITES];
-    } else {
-      const cur = localSelected.filter(
-        (x) => x !== GENRE_ALL && x !== GENRE_LIKES && x !== GENRE_FAVORITES
-      );
-      const exists = cur.includes(key);
-      const newSelection = exists ? cur.filter((x) => x !== key) : [...cur, key];
-      next = newSelection.length ? newSelection : [GENRE_ALL];
+    if (key === GENRE_ALL || key === GENRE_LIKES || key === GENRE_FAVORITES) {
+      next = [key];
+      onChangeQuery(""); 
+      onChange(normalizeSelected(next));
+      setOpen(false);
+      return;
     }
+
+    const cur = localSelected.filter(
+      (x) => x !== GENRE_ALL && x !== GENRE_LIKES && x !== GENRE_FAVORITES
+    );
+    const exists = cur.includes(key);
+    const newSelection = exists ? cur.filter((x) => x !== key) : [...cur, key];
+    next = newSelection.length ? newSelection : [GENRE_ALL];
     
     setLocalSelected(normalizeSelected(next));
   }
 
-  // ★ 修正3: 「検索」ボタンが押された時だけ親に通知して確定させる
   function executeSearch() {
     onChangeQuery(localQuery);
     onChange(localSelected);
@@ -135,7 +129,6 @@ export default function GenreMenu({
     }
   }
 
-  // ★ 修正4: リセットもローカルステートをクリアするだけ（確定はしない）
   function resetLocal() {
     setLocalQuery("");
     setLocalSelected([GENRE_ALL]);
@@ -143,7 +136,6 @@ export default function GenreMenu({
 
   return (
     <div className="relative" data-no-swipe="1" onClick={(e) => stop(e)}>
-      {/* トリガボタン */}
       <button
         type="button"
         onClick={(e) => {
@@ -168,7 +160,6 @@ export default function GenreMenu({
         </div>
       ) : null}
 
-      {/* パネル */}
       {open ? (
         <div
           className="absolute left-0 mt-3 w-[340px] max-w-[84vw] rounded-2xl bg-black/50 backdrop-blur-xl border border-white/10 shadow-xl p-3"
@@ -179,7 +170,6 @@ export default function GenreMenu({
           }}
           onClick={(e) => stop(e)}
         >
-          {/* ヘッダー */}
           <div className="flex items-center justify-between gap-2 mb-2">
             <div className="text-sm font-bold text-white/90">条件を選択</div>
 
@@ -207,7 +197,6 @@ export default function GenreMenu({
             </div>
           </div>
 
-          {/* 検索フォーム */}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -226,7 +215,6 @@ export default function GenreMenu({
               style={{ fontSize: 16 }}
               onPointerDown={(e) => stop(e)}
             />
-            {/* ★ 検索ボタン（ここで確定） */}
             <button
               type="submit"
               className="rounded-xl bg-white/20 px-4 py-2 text-sm font-bold text-white border border-white/10 whitespace-nowrap active:bg-white/30"
@@ -236,9 +224,7 @@ export default function GenreMenu({
             </button>
           </form>
 
-          {/* 2カラム：左=選択UI / 右=選択中（仮） */}
           <div className="mt-2 grid grid-cols-[1fr_110px] gap-2">
-            {/* 左：選択UI */}
             <div
               className="rounded-xl bg-black/20 border border-white/10 p-2"
               style={{
@@ -337,7 +323,6 @@ export default function GenreMenu({
               </div>
             </div>
 
-            {/* 右：選択中（仮状態を表示） */}
             <div className="rounded-xl bg-black/20 border border-white/10 p-2">
               <div className="text-[11px] text-white/60 mb-2">選択中</div>
 
