@@ -1,4 +1,6 @@
+// src/lib/redis.ts
 import { Redis } from "@upstash/redis";
+import { GENRE_SEO_MAP, type GenreKey } from "./genres";
 
 export const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL!,
@@ -29,12 +31,12 @@ function shuffleWithSeed<T>(array: T[], seedNum: number): T[] {
   return result;
 }
 
-// ★ 引数の順番を route.ts と完全に合わせる
+// ★ 引数の定義を route.ts と完全に一致させる
 export async function getFilteredVideos(
   genres: string[] = [], 
   query: string = "", 
-  page: number = 1,     // さっきまでここが count になっていた可能性があります
-  limit: number = 10,   // これを limit として統一
+  page: number = 1,
+  limit: number = 10,
   seed: number = 0,
   targetIds?: string[]
 ): Promise<any[]> {
@@ -42,23 +44,22 @@ export async function getFilteredVideos(
     const isFavoritesMode = targetIds && targetIds.length > 0;
     const isRankingMode = !isFavoritesMode && (genres.includes("__likes__") || genres.includes("likes"));
     
-    // ジャンル指定がない、または "all" の場合は全件モード
+    // ★ 修正：全件表示の条件を「指定なし」または「all/GENRE_ALL」が含まれる場合に拡大
     const isAll = !isFavoritesMode && !isRankingMode && (
       genres.length === 0 || 
-      genres.some(g => ["all", "GENRE_ALL"].includes(String(g)))
+      genres.some(g => ["all", "GENRE_ALL", "ランダム"].includes(String(g)))
     );
     
-    // 1. 全データ取得（videosリストから）
+    // 1. 全データ取得（キャッシュ or Redis）
     const now = Date.now();
     let allVideos = [];
 
     if (allVideosCache && (now - cacheTimestamp < CACHE_TTL)) {
       allVideos = allVideosCache;
     } else {
-      // リストの長さを取得して全件取ってくる
       const total = await redis.llen("videos");
-      if (total === 0) return [];
-      
+      if (total === 0) return []; // データが無い場合は空配列
+
       const CHUNK_SIZE = 1000;
       const promises = [];
       for (let i = 0; i < total; i += CHUNK_SIZE) {
@@ -66,17 +67,18 @@ export async function getFilteredVideos(
         promises.push(redis.lrange("videos", i, end));
       }
       const chunkedResults = await Promise.all(promises);
+      
       allVideos = chunkedResults.flat().map((r) => {
         try { return typeof r === "string" ? JSON.parse(r) : r; } catch { return null; }
       }).filter(Boolean);
-      
+
       allVideosCache = allVideos;
       cacheTimestamp = now;
     }
 
     let filtered = allVideos;
 
-    // 2. モード別フィルタリング
+    // 2. フィルタリング実行
     if (isFavoritesMode) {
       const idSet = new Set(targetIds);
       filtered = filtered.filter((v: any) => idSet.has(String(v.id)));
@@ -88,19 +90,27 @@ export async function getFilteredVideos(
       filtered.sort((a: any, b: any) => (rankMap.get(String(a.id)) ?? 99999) - (rankMap.get(String(b.id)) ?? 99999));
     }
     else if (!isAll) {
-      // ★ 日本語タグでそのまま検索（余計な変換なし）
-      const searchSet = new Set(genres.map(g => String(g).trim())); // .toLowerCase()も外して完全一致重視
-      
+      // ★ 修正：検索ワードを整理
+      const searchTerms = new Set<string>();
+      genres.forEach(g => {
+        const key = String(g).trim();
+        searchTerms.add(key); // そのままの文字（例：美少女）
+        
+        // SEOマップにあればラベルも追加（念のため）
+        const seoEntry = GENRE_SEO_MAP[key as GenreKey];
+        if (seoEntry?.label) searchTerms.add(seoEntry.label);
+      });
+
       filtered = filtered.filter((v: any) => {
-        // 動画データのタグを全て集める
+        // 動画のタグをすべて取得して文字列化
         const videoTags = [
           ...(Array.isArray(v.genres) ? v.genres : []),
           v.genre,
           v.category
-        ].filter(Boolean).map(t => String(t).trim());
-
-        // どれか一つでも一致すればOK
-        return videoTags.some(t => searchSet.has(t));
+        ].filter(Boolean).map(String);
+        
+        // 動画タグの中に、検索ワードが含まれているか（部分一致も許容するとヒット率が上がるが、一旦は完全一致でSet検索）
+        return videoTags.some(t => searchTerms.has(t));
       });
     }
 
@@ -113,11 +123,14 @@ export async function getFilteredVideos(
       );
     }
 
-    // 4. ページネーション
+    // 4. ページネーション & シャッフル
     const start = (page - 1) * limit;
+    
     if (isRankingMode) {
       return filtered.slice(start, start + limit);
     } 
+    
+    // シード値を使って並び替え
     const shuffled = shuffleWithSeed(filtered, seed);
     return shuffled.slice(start, start + limit);
 
