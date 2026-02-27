@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  trailingSlash: true,
+  // 一旦コメントアウトして試す
+  // trailingSlash: true,
 };
 
 export default nextConfig;
