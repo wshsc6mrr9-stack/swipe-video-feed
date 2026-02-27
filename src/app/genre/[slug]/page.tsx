@@ -7,13 +7,16 @@ import { GENRE_SEO_MAP, SLUG_TO_GENRE, GENRE_SLUGS } from "../../../lib/genres";
 export const dynamic = "force-dynamic";
 
 type Props = {
-  params: Promise<{ slug: string }>; // Next.js 15以降の推奨形式
+  params: Promise<{ slug: string }>;
 };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const genreName = SLUG_TO_GENRE[slug] || decodeURIComponent(slug);
-  const info = GENRE_SEO_MAP[genreName];
+  
+  // スラッグ(restraint)から日本語名(拘束)を取得
+  const genreName = SLUG_TO_GENRE[slug];
+  // 日本語名を使ってSEO情報を取得
+  const info = genreName ? GENRE_SEO_MAP[genreName] : null;
 
   if (!info) return { title: "404 Not Found" };
 
@@ -25,9 +28,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function GenrePage({ params }: Props) {
   const { slug } = await params;
-  const genreName = SLUG_TO_GENRE[slug] || decodeURIComponent(slug);
-  const info = GENRE_SEO_MAP[genreName];
+  
+  // スラッグ(restraint)から日本語名(拘束)を取得
+  const genreName = SLUG_TO_GENRE[slug];
+  // 日本語名を使ってSEO情報を取得
+  const info = genreName ? GENRE_SEO_MAP[genreName] : null;
 
+  // infoが見つからない場合は404を表示
   if (!info) {
     notFound();
   }
@@ -39,7 +46,7 @@ export default async function GenrePage({ params }: Props) {
   );
 }
 
-// 念のため、ビルド時にURLを登録しておく
+// ビルド時に有効なスラッグをすべて登録
 export async function generateStaticParams() {
   return Object.values(GENRE_SLUGS).map((slug) => ({
     slug: slug,
