@@ -1,6 +1,4 @@
-// src/lib/redis.ts
 import { Redis } from "@upstash/redis";
-import { GENRE_SEO_MAP, type GenreKey } from "./genres";
 
 export const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL!,
@@ -31,25 +29,25 @@ function shuffleWithSeed<T>(array: T[], seedNum: number): T[] {
   return result;
 }
 
-// ★ 修正：元の動いていた引数の順番（count が先、page が後）に戻す
+// オリジナルの引数に完全に戻す
 export async function getFilteredVideos(
   genres: string[] = [], 
   query: string = "", 
-  count: number = 50,  // ← countが第3引数
-  page: number = 1,    // ← pageが第4引数
+  count: number = 50,
+  page: number = 1,
   seed: number = 0,
   targetIds?: string[]
 ): Promise<any[]> {
   try {
     const isFavoritesMode = targetIds && targetIds.length > 0;
     const isRankingMode = !isFavoritesMode && (genres.includes("__likes__") || genres.includes("likes"));
-    
     // 全件表示の判定
     const isAll = !isFavoritesMode && !isRankingMode && (
       genres.length === 0 || 
-      genres.some(g => ["all", "GENRE_ALL", "ランダム"].includes(String(g).trim().toLowerCase()))
+      genres.some(g => ["all", "GENRE_ALL"].includes(String(g)))
     );
     
+    const hasQuery = query.trim().length > 0;
     const now = Date.now();
     let allVideos = [];
 
@@ -80,49 +78,48 @@ export async function getFilteredVideos(
     } else if (isRankingMode) {
       const rankedIds = await redis.zrange(RANKING_KEY, 0, 2000, { rev: true });
       const rankMap = new Map<string, number>();
-      rankedIds.forEach((id: any, idx: number) => rankMap.set(String(id), idx));
-      filtered.sort((a: any, b: any) => (rankMap.get(String(a.id)) ?? 99999) - (rankMap.get(String(b.id)) ?? 99999));
+      rankedIds.forEach((id: unknown, idx: number) => rankMap.set(String(id), idx));
+      filtered.sort((a: any, b: any) => {
+        const idA = String(a.id);
+        const idB = String(b.id);
+        const rankA = rankMap.has(idA) ? rankMap.get(idA)! : 999999;
+        const rankB = rankMap.has(idB) ? rankMap.get(idB)! : 999999;
+        return rankA - rankB;
+      });
     } else if (!isAll) {
-      // 日本語ジャンル検索
-      const want = new Set<string>();
-      genres.forEach(g => {
-        const key = String(g).trim();
-        want.add(key);
-        want.add(key.toLowerCase());
-        try {
-          const seo = GENRE_SEO_MAP[key as GenreKey];
-          if (seo?.label) want.add(seo.label);
-        } catch(e) {}
-      });
-
+      // 一番最初にあなたが書いていた、最も安全なオリジナルロジック
+      const want = new Set(genres.map(g => String(g).trim()));
       filtered = filtered.filter((v: any) => {
-        const tags = [
-          ...(Array.isArray(v.genres) ? v.genres : []),
-          v.genre,
-          v.category
-        ].filter(Boolean).map(t => String(t).trim());
-        return tags.some(t => want.has(t) || want.has(t.toLowerCase()));
+        const tags = Array.isArray(v.genres) ? v.genres : (typeof v.genre === "string" ? [v.genre] : []);
+        return tags.some((t: any) => want.has(String(t).trim()));
       });
     }
 
-    if (query.trim()) {
-      const q = query.toLowerCase();
-      filtered = filtered.filter(v => String(v.title || "").toLowerCase().includes(q) || String(v.id || "").toLowerCase().includes(q));
+    if (hasQuery) {
+      const searchWords = query.normalize("NFKC").toLowerCase().replace(/　/g, " ").split(/\s+/).filter(w => w.length > 0);
+      filtered = filtered.filter((v: any) => {
+        const title = String(v.title || "").normalize("NFKC").toLowerCase();
+        const affLabel = String(v.affLabel || v.affiliateLabel || "").normalize("NFKC").toLowerCase();
+        const targetText = title + " " + affLabel;
+        return searchWords.every(word => targetText.includes(word));
+      });
     }
 
-    // ★ 念のための安全装置：万が一 page と count が逆転して送られてきても強制補正する
+    // 念のため、countとpageが逆転していた場合の安全装置
     let safeCount = Math.max(1, count);
     let safePage = Math.max(1, page);
-    if (safePage > 10 && safeCount < 5) {
-        const tmp = safePage; safePage = safeCount; safeCount = tmp;
+    if (safePage > 20 && safeCount < 5) {
+      const tmp = safePage; safePage = safeCount; safeCount = tmp;
     }
 
-    const start = (safePage - 1) * safeCount;
-    if (isRankingMode) return filtered.slice(start, start + safeCount);
-    
-    return shuffleWithSeed(filtered, seed).slice(start, start + safeCount);
+    const startIndex = (safePage - 1) * safeCount;
+    if (isRankingMode) return filtered.slice(startIndex, Math.min(startIndex + safeCount, filtered.length));
+
+    const shuffled = shuffleWithSeed(filtered, seed);
+    return shuffled.slice(startIndex, Math.min(startIndex + safeCount, shuffled.length));
+
   } catch (e) {
-    console.error("Redis Error:", e);
+    console.error("Redis fetch error:", e);
     return [];
   }
 }
