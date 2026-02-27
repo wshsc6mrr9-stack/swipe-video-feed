@@ -35,12 +35,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
   }));
 
   // ---- ジャンルページ（GENRE_SLUGS 連動） ----
-  // 英語スラッグ（seiso, bishoujoなど）を抽出し、ユニークなリストを作成
+  // 実際に動画が表示される「英語スラッグ」のリストを取得します
   const slugList = Object.values(GENRE_SLUGS || {});
 
   const genrePages: MetadataRoute.Sitemap = Array.from(
     new Set(slugList.map((s) => String(s).trim().toLowerCase()))
   ).map((slug) => ({
+    // encodeURIComponentを適用しつつ、英語スラッグでURLを生成
     url: `${base}/genre/${encodeURIComponent(slug)}`,
     lastModified: now,
     changeFrequency: "daily",
