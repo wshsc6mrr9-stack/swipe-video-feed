@@ -609,7 +609,6 @@ export default function VideoPlayer({
         }}
       />
 
-      {/* PR badge */}
       <div
         style={{
           position: "absolute",
@@ -765,6 +764,7 @@ export default function VideoPlayer({
           zIndex: 40,
           opacity: isActive ? 1 : 0,
           pointerEvents: isActive ? "auto" : "none",
+          boxSizing: "border-box",
         }}
       >
         <div
@@ -772,8 +772,10 @@ export default function VideoPlayer({
             display: "grid",
             gridTemplateColumns: "auto 1fr auto",
             marginBottom: 10,
-            maxWidth: 560,
-            margin: "0 auto 10px",
+            width: "min(560px, calc(100vw - 20px))",
+            maxWidth: "100%",
+            marginInline: "auto",
+            boxSizing: "border-box",
           }}
         >
           <button
@@ -809,10 +811,25 @@ export default function VideoPlayer({
           </button>
         </div>
 
-        <div style={panelStyle}>
+        <div
+          style={{
+            ...panelStyle,
+            width: "min(560px, calc(100vw - 20px))",
+            maxWidth: "100%",
+          }}
+        >
           <div style={titleStyle}>{video.title || "Untitled"}</div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              minWidth: 0,
+              width: "100%",
+              boxSizing: "border-box",
+            }}
+          >
             <span style={timeStyle}>{formatTime(current)}</span>
 
             <input
@@ -828,21 +845,32 @@ export default function VideoPlayer({
                 videoRef.current.currentTime = nextTime;
                 setCurrent(nextTime);
               }}
-              style={{ width: "100%", accentColor: "#fff" }}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                width: "100%",
+                accentColor: "#fff",
+              }}
             />
 
             <span style={timeStyle}>{formatDurationOrUnknown(duration)}</span>
           </div>
 
-          <div style={{ textAlign: "center" }}>
+          <div style={{ width: "100%", overflow: "hidden" }}>
             <div
               style={{
-                display: "inline-flex",
+                display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
                 gap: 10,
                 flexWrap: "nowrap",
-                whiteSpace: "nowrap",
+                overflowX: "auto",
+                overflowY: "hidden",
+                WebkitOverflowScrolling: "touch",
+                justifyContent: "flex-start",
+                width: "100%",
+                paddingBottom: 2,
+                scrollbarWidth: "none",
+                msOverflowStyle: "none",
               }}
             >
               <button onClick={toggleLike} style={pillBtnSmall}>
@@ -919,9 +947,9 @@ const panelStyle: React.CSSProperties = {
   border: "1px solid rgba(255,255,255,0.15)",
   display: "grid",
   gap: 10,
-  maxWidth: 560,
   margin: "0 auto",
   backdropFilter: "blur(15px)",
+  boxSizing: "border-box",
 };
 
 const titleStyle: React.CSSProperties = {
@@ -929,12 +957,16 @@ const titleStyle: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 700,
   textAlign: "center",
+  lineHeight: 1.45,
+  wordBreak: "break-word",
+  overflowWrap: "anywhere",
 };
 
 const timeStyle: React.CSSProperties = {
   color: "rgba(255,255,255,0.8)",
   fontSize: 11,
   minWidth: 40,
+  flex: "0 0 auto",
 };
 
 const pillBtnSmall: React.CSSProperties = {
@@ -947,11 +979,12 @@ const pillBtnSmall: React.CSSProperties = {
   fontSize: 12,
   border: "1px solid rgba(255,255,255,0.1)",
   flex: "0 0 auto",
+  whiteSpace: "nowrap",
 };
 
 const productMainBtn: React.CSSProperties = {
-  width: 58,
-  height: 58,
+  width: 56,
+  height: 56,
   borderRadius: 999,
   background: "#fff",
   color: "#000",
@@ -973,4 +1006,5 @@ const outerBtnStyle: React.CSSProperties = {
   fontWeight: 800,
   fontSize: 11,
   border: "1px solid rgba(255,255,255,0.1)",
+  whiteSpace: "nowrap",
 };
