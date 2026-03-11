@@ -11,8 +11,16 @@ export type VideoItem = {
   affLabel?: string;
   genres?: string[];
   createdAt: number;
+  duration?: number;
+  pageUrl?: string;
+  source?: string;
   [key: string]: any;
 };
+
+function toSafeNumber(value: unknown): number | undefined {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
 
 /** ✅ 動画を追加する */
 export async function addVideo(video: any): Promise<VideoItem | null> {
@@ -22,15 +30,28 @@ export async function addVideo(video: any): Promise<VideoItem | null> {
       title: String(video.title || ""),
       url: String(video.url || ""),
       poster: String(video.poster || ""),
-      affUrl: String(video.affUrl || ""),
-      affLabel: String(video.affLabel || "商品を見る"),
+      affUrl: String(video.affUrl ?? video.affiliateUrl ?? ""),
+      affLabel: String(video.affLabel ?? video.affiliateLabel ?? "商品を見る"),
       genres: Array.isArray(video.genres) ? video.genres : ["other"],
-      createdAt: Date.now(),
+      createdAt: Number(video.createdAt ?? Date.now()),
+      duration:
+        toSafeNumber(video.duration) ??
+        toSafeNumber(video.videoDuration) ??
+        toSafeNumber(video.totalDuration) ??
+        toSafeNumber(video.lengthSec) ??
+        toSafeNumber(video.durationSec),
+      pageUrl: String(video.pageUrl || ""),
+      source: String(video.source || ""),
     };
 
-    // LPUSH で Redis のリストの先頭に追加
-    await redis.lpush(KEY, JSON.stringify(normalized));
-    return normalized;
+    // 元データの他フィールドも残す
+    const merged = {
+      ...video,
+      ...normalized,
+    };
+
+    await redis.lpush(KEY, JSON.stringify(merged));
+    return merged;
   } catch (e) {
     console.error("Redis Add Error:", e);
     return null;
@@ -40,8 +61,6 @@ export async function addVideo(video: any): Promise<VideoItem | null> {
 /** ✅ 動画一覧を取得する（最新50件に制限してクラッシュ回避） */
 export async function listVideos(): Promise<VideoItem[]> {
   try {
-    // 🚨 ここを修正しました: -1（全部）ではなく 49（最新50件）を取得
-    // これでデータ量が減り、Admin画面が復活します
     const rows = await redis.lrange(KEY, 0, 49);
     if (!rows) return [];
 

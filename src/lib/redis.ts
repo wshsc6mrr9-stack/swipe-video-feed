@@ -31,6 +31,42 @@ function shuffleWithSeed<T>(array: T[], seedNum: number): T[] {
   return result;
 }
 
+function toSafeNumber(value: unknown): number | undefined {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+function normalizeVideo(raw: any) {
+  const duration =
+    toSafeNumber(raw?.duration) ??
+    toSafeNumber(raw?.videoDuration) ??
+    toSafeNumber(raw?.totalDuration) ??
+    toSafeNumber(raw?.lengthSec) ??
+    toSafeNumber(raw?.durationSec) ??
+    toSafeNumber(raw?.movieDuration) ??
+    toSafeNumber(raw?.playTime) ??
+    toSafeNumber(raw?.seconds) ??
+    undefined;
+
+  return {
+    ...raw,
+    id: String(raw?.id ?? ""),
+    title: String(raw?.title ?? ""),
+    url: raw?.url ?? raw?.src ?? "",
+    src: raw?.src ?? raw?.url ?? "",
+    poster: raw?.poster ?? "",
+    srcType: raw?.srcType ?? undefined,
+    affUrl: raw?.affUrl ?? raw?.affiliateUrl ?? "",
+    affLabel: raw?.affLabel ?? raw?.affiliateLabel ?? "",
+    affiliateUrl: raw?.affiliateUrl ?? raw?.affUrl ?? "",
+    affiliateLabel: raw?.affiliateLabel ?? raw?.affLabel ?? "",
+    genres: Array.isArray(raw?.genres) ? raw.genres : [],
+    genre: typeof raw?.genre === "string" ? raw.genre : "",
+    likeCount: Number(raw?.likeCount ?? 0),
+    duration,
+  };
+}
+
 // ===== getFilteredVideos（最終・実データ耐性MAX） =====
 export async function getFilteredVideos(
   genres: string[] | undefined,
@@ -81,7 +117,9 @@ export async function getFilteredVideos(
             return null;
           }
         })
-        .filter(Boolean);
+        .filter(Boolean)
+        .map(normalizeVideo)
+        .filter((v) => !!v.id);
 
       allVideosCache = allVideos;
       cacheTimestamp = now;
@@ -110,7 +148,7 @@ export async function getFilteredVideos(
 
     // ---- genre filter（ジャンル無し動画は除外しない） ----
     } else if (!isAll && Array.isArray(genres) && genres.length > 0) {
-      const want = genres.map(g =>
+      const want = genres.map((g) =>
         String(g).normalize("NFKC").trim()
       );
 
@@ -127,9 +165,9 @@ export async function getFilteredVideos(
         // ★ ジャンル情報が無い動画は「通す」
         if (candidates.length === 0) return true;
 
-        return candidates.some(c => {
+        return candidates.some((c) => {
           const tag = String(c).normalize("NFKC").trim();
-          return want.some(w => tag.includes(w));
+          return want.some((w) => tag.includes(w));
         });
       });
     }
@@ -174,8 +212,6 @@ export async function getFilteredVideos(
       );
     }
 
-    // お気に入りモードの場合はシャッフルせずそのまま返す（またはお好みで seed シャッフル）
-    // ここではご提示のロジックに従い、ランキング以外はシャッフルを適用します
     const shuffled = shuffleWithSeed(filtered, seed);
     return shuffled.slice(
       startIndex,

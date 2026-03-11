@@ -30,8 +30,8 @@ const GENRE_MAP: Record<string, string[]> = {
   "大人っぽい": ["mature-mother", "seductress"],
   "お姉さん": ["oneesan"],
   "モデル系": ["beautiful-style"],
-  "アジア系": [], 
-  "欧美系": [], 
+  "アジア系": [],
+  "欧美系": [],
   "巨乳フェチ": ["big-breasts-fetish"],
   "尻フェチ": ["butt-fetish"],
   "パイパン": ["shaved"],
@@ -150,7 +150,7 @@ const GENRE_MAP: Record<string, string[]> = {
   "旅行": ["travel"],
   "デート": ["date"],
   "飲み会・合コン": ["drinking-party"],
-  "近所・ご近所": [], 
+  "近所・ご近所": [],
   "カップル": ["couple"],
   "人妻": ["married-woman", "housewife"],
   "熟女": ["milf", "mature-mother"],
@@ -213,8 +213,8 @@ const GENRE_MAP: Record<string, string[]> = {
   // ---- その他 ----
   "VR": ["vr", "vr-only"],
   "ハイクオリティVR": ["high-quality-vr"],
-  "スマホ推奨": [], 
-  "短尺": [], 
+  "スマホ推奨": [],
+  "短尺": [],
   "4時間以上": ["over-4-hours"],
   "16時間以上": ["over-16-hours"],
   "シリーズ": ["set"],
@@ -227,7 +227,7 @@ const GENRE_MAP: Record<string, string[]> = {
   "3D": ["3d"],
   "その他": ["other"],
   "VR専用": ["vr-only"],
-  "縦動画": [], 
+  "縦動画": [],
 };
 
 type VideoItem = {
@@ -248,6 +248,7 @@ type VideoItem = {
 
 const EVT_LIKES = "likes_changed_v1";
 const KEY_LIKED = "liked_videos_v1";
+const EARLY_SWITCH = 0.12;
 
 function readLikedSet(): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -258,23 +259,6 @@ function readLikedSet(): Set<string> {
     if (Array.isArray(arr)) return new Set(arr.map(String));
   } catch {}
   return new Set();
-}
-
-function isInteractiveTarget(target: EventTarget | null) {
-  const el = target as HTMLElement | null;
-  if (!el) return false;
-  return !!el.closest(
-    [
-      "button",
-      "a",
-      "input",
-      "textarea",
-      "select",
-      "[role='button']",
-      "[data-no-swipe='1']",
-      "[data-ui='controls']",
-    ].join(",")
-  );
 }
 
 function normalizeText(s: any) {
@@ -300,101 +284,75 @@ export default function VideoFeed({
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const loadingRef = useRef(false);
-  
-  const [page, setPage] = useState(1);
-  const [seed, setSeed] = useState(() => typeof window !== "undefined" ? Math.floor(Math.random() * 1000000) : 0);
-  const [hasMore, setHasMore] = useState(true);
 
-  const [vh, setVh] = useState<number>(() =>
-    typeof window !== "undefined" ? Math.round(window.innerHeight) : 0
+  const [page, setPage] = useState(1);
+  const [seed, setSeed] = useState(() =>
+    typeof window !== "undefined" ? Math.floor(Math.random() * 1000000) : 0
   );
+  const [hasMore, setHasMore] = useState(true);
 
   const [genres, setGenres] = useState<GenreKey[]>(() => {
     if (initialGenre) {
-      try { return [decodeURIComponent(initialGenre)]; } catch { return [initialGenre]; }
+      try {
+        return [decodeURIComponent(initialGenre)];
+      } catch {
+        return [initialGenre];
+      }
     }
     return [GENRE_ALL];
   });
 
   const [query, setQuery] = useState("");
-
-  const trackRef = useRef<HTMLDivElement | null>(null);
-  const setTranslate = useCallback((y: number, transition?: string) => {
-    const el = trackRef.current;
-    if (!el) return;
-    el.style.transition = transition ?? "none";
-    el.style.transform = `translate3d(0, ${y}px, 0)`;
-  }, []);
-
-  const draggingRef = useRef(false);
-  const animatingRef = useRef(false);
-  const startYRef = useRef(0);
-  const dyRef = useRef(0);
-  const startTimeRef = useRef(0);
-  const pointerIdRef = useRef<number | null>(null);
-  const appliedStartIdRef = useRef<string>("");
-
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const startIdAppliedRef = useRef(false);
   const indexRef = useRef(index);
+
   useEffect(() => {
     indexRef.current = index;
   }, [index]);
 
-  useEffect(() => {
-    const update = () => {
-      if (draggingRef.current) return;
-      const vv = window.visualViewport;
-      setVh(Math.round(vv?.height ?? window.innerHeight));
-    };
-    update();
-    window.addEventListener("resize", update);
-    window.visualViewport?.addEventListener("resize", update);
-    return () => {
-      window.removeEventListener("resize", update);
-      window.visualViewport?.removeEventListener("resize", update);
-    };
-  }, []);
-
   const loadMoreVideos = useCallback(async () => {
-    if (loadingRef.current || !hasMore) return; 
+    if (loadingRef.current || !hasMore) return;
+
     loadingRef.current = true;
     setLoading(true);
 
     try {
       const params = new URLSearchParams();
       const activeGenres = genres.filter(Boolean);
-
       const isFavMode = activeGenres.includes(GENRE_FAVORITES);
+
       if (isFavMode) {
         const likedSet = readLikedSet();
         if (likedSet.size === 0) {
-           setItems([]);
-           setHasMore(false);
-           loadingRef.current = false;
-           setLoading(false);
-           return;
+          setItems([]);
+          setHasMore(false);
+          loadingRef.current = false;
+          setLoading(false);
+          return;
         }
         params.set("ids", Array.from(likedSet).join(","));
       } else {
         const apiGenres = activeGenres.flatMap((g) => {
           if (g === GENRE_FAVORITES || g === GENRE_LIKES) return [g];
-          return GENRE_MAP[g] || []; 
+          return GENRE_MAP[g] || [];
         });
 
         if (apiGenres.length > 0) {
           params.set("genres", apiGenres.join(","));
         }
-        
+
         params.set("page", String(page));
         params.set("seed", String(seed));
       }
-      
+
       if (query) params.set("query", query);
       params.set("_t", Date.now().toString());
 
       const res = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
       const json = await res.json().catch(() => null);
       const list = (Array.isArray(json) ? json : json?.items ?? []) as any[];
-      
+
       if (!list || list.length === 0) {
         setHasMore(false);
         loadingRef.current = false;
@@ -424,19 +382,18 @@ export default function VideoFeed({
       });
 
       setPage((p) => p + 1);
-
     } catch (e) {
       console.error("Load Error:", e);
     } finally {
       loadingRef.current = false;
       setLoading(false);
     }
-  }, [hasMore, genres, query, page, seed]);
+  }, [genres, hasMore, page, query, seed]);
 
   const viewItems = useMemo(() => {
     if (genres.includes(GENRE_FAVORITES)) {
       const likedSet = readLikedSet();
-      return items.filter(v => likedSet.has(v.id));
+      return items.filter((v) => likedSet.has(v.id));
     }
 
     if (genres.includes(GENRE_ALL)) return items;
@@ -444,26 +401,30 @@ export default function VideoFeed({
     let base = items;
 
     if (genres.length === 1 && genres[0] === GENRE_LIKES) {
-       base = items.slice().sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
+      base = items
+        .slice()
+        .sort((a, b) => Number(b.likeCount ?? 0) - Number(a.likeCount ?? 0));
     } else {
-       const wantList = genres.flatMap((g) => GENRE_MAP[g] || []);
-       if (wantList.length > 0) {
-         base = items.filter((v) => {
-           const tags = [
-              ...(Array.isArray(v.genres) ? v.genres : []),
-              v.genre
-           ].filter(Boolean).map(String);
-           
-           return tags.some((t) => {
-             const lowerT = t.toLowerCase();
-             const parts = lowerT.split(/[-_\s]/); 
-             return wantList.some((w) => {
-               const lowerW = w.toLowerCase();
-               return lowerT === lowerW || parts.includes(lowerW);
-             });
-           });
-         });
-       }
+      const wantList = genres.flatMap((g) => GENRE_MAP[g] || []);
+      if (wantList.length > 0) {
+        base = items.filter((v) => {
+          const tags = [
+            ...(Array.isArray(v.genres) ? v.genres : []),
+            v.genre,
+          ]
+            .filter(Boolean)
+            .map(String);
+
+          return tags.some((t) => {
+            const lowerT = t.toLowerCase();
+            const parts = lowerT.split(/[-_\s]/);
+            return wantList.some((w) => {
+              const lowerW = w.toLowerCase();
+              return lowerT === lowerW || parts.includes(lowerW);
+            });
+          });
+        });
+      }
     }
 
     const q = normalizeText(query);
@@ -478,151 +439,125 @@ export default function VideoFeed({
 
   useEffect(() => {
     if (!hasMore) return;
+
     if (items.length === 0) {
       loadMoreVideos();
-    } else {
-      const remainingViews = viewItems.length - index;
-      if (remainingViews <= 5) {
-        loadMoreVideos();
-      }
+      return;
     }
-  }, [index, items.length, viewItems.length, hasMore, loadMoreVideos]);
+
+    const remainingViews = viewItems.length - index;
+    if (remainingViews <= 5) {
+      loadMoreVideos();
+    }
+  }, [hasMore, index, items.length, loadMoreVideos, viewItems.length]);
 
   useEffect(() => {
-    if (initialGenre) {
-      let g = initialGenre;
-      try { g = decodeURIComponent(initialGenre); } catch {}
-      setGenres([g]);
-      setItems([]); 
-      setIndex(0);
-      setPage(1);
-      setSeed(Math.floor(Math.random() * 1000000));
-      setHasMore(true);
-      setTranslate(0, "none");
-    }
-  }, [initialGenre, setTranslate]);
+    if (!initialGenre) return;
+
+    let g = initialGenre;
+    try {
+      g = decodeURIComponent(initialGenre);
+    } catch {}
+
+    setGenres([g]);
+    setItems([]);
+    setIndex(0);
+    setPage(1);
+    setSeed(Math.floor(Math.random() * 1000000));
+    setHasMore(true);
+    startIdAppliedRef.current = false;
+
+    const el = containerRef.current;
+    if (el) el.scrollTo({ top: 0, behavior: "auto" });
+  }, [initialGenre]);
 
   useEffect(() => {
     const on = (ev: Event) => {
       const e = ev as CustomEvent<{ videoId: string; count: number }>;
       if (!e?.detail) return;
+
       setItems((prev) =>
-        prev.map((v) => v.id === e.detail.videoId ? { ...v, likeCount: Number(e.detail.count) } : v)
+        prev.map((v) =>
+          v.id === e.detail.videoId
+            ? { ...v, likeCount: Number(e.detail.count) }
+            : v
+        )
       );
     };
+
     window.addEventListener(EVT_LIKES, on as any);
     return () => window.removeEventListener(EVT_LIKES, on as any);
   }, []);
 
-  const count = viewItems.length;
-  const h = vh || 0;
-  const PEEK = 14;
-  const cardH = Math.max(0, h - PEEK * 2);
+  useEffect(() => {
+    if (!startId || startIdAppliedRef.current || viewItems.length === 0) return;
 
-  const windowItems = useMemo(() => {
-    const cur = viewItems[index];
-    const prevItem = index > 0 ? viewItems[index - 1] : undefined;
-    const nextItem =
-      index + 1 < viewItems.length ? viewItems[index + 1] : undefined;
-    const out: Array<{ item: VideoItem; pos: -1 | 0 | 1; absIndex: number }> =
-      [];
-    if (prevItem) out.push({ item: prevItem, pos: -1, absIndex: index - 1 });
-    if (cur) out.push({ item: cur, pos: 0, absIndex: index });
-    if (nextItem) out.push({ item: nextItem, pos: 1, absIndex: index + 1 });
-    return out;
-  }, [viewItems, index]);
+    const found = viewItems.findIndex((v) => v.id === startId);
+    if (found < 0) return;
 
-  const clampIndex = useCallback((next: number) => {
-      if (!count) return 0;
-      return Math.max(0, Math.min(count - 1, next));
-    }, [count]);
+    const el = containerRef.current;
+    if (!el) return;
 
-  const finishSlide = useCallback((dir: -1 | 1) => {
-      if (!h || animatingRef.current) return;
-      animatingRef.current = true;
-      const dur = 200;
-      setTranslate(dir * h, `transform ${dur}ms cubic-bezier(0.22,0.61,0.36,1)`);
-      window.setTimeout(() => {
-        setIndex((cur) => {
-          const next = clampIndex(cur + (dir === -1 ? 1 : -1));
-          return next;
-        });
-        requestAnimationFrame(() => {
-          setTranslate(0, "none");
-          window.setTimeout(() => setTranslate(0, "none"), 0);
-          animatingRef.current = false;
-        });
-      }, dur);
-    }, [clampIndex, h, setTranslate]);
+    startIdAppliedRef.current = true;
+    setIndex(found);
 
-  const applyRubberBand = useCallback((dy: number) => {
-      if (!h) return dy;
-      const atTop = index <= 0;
-      const atBottom = index >= Math.max(0, count - 1);
-      if (atTop && dy > 0) return dy * 0.35;
-      if (atBottom && dy < 0) return dy * 0.35;
-      return dy;
-    }, [h, index, count]);
+    requestAnimationFrame(() => {
+      const pageHeight = el.clientHeight || window.innerHeight || 1;
+      el.scrollTo({
+        top: found * pageHeight,
+        behavior: "auto",
+      });
+    });
+  }, [startId, viewItems]);
 
-  const beginDrag = useCallback((clientY: number) => {
-      if (animatingRef.current) return;
-      draggingRef.current = true;
-      startYRef.current = clientY;
-      dyRef.current = 0;
-      startTimeRef.current = performance.now();
-      setTranslate(0, "none");
-    }, [setTranslate]);
+  const handleResetFeed = useCallback((nextGenres?: GenreKey[], nextQuery?: string) => {
+    setGenres(nextGenres ?? [GENRE_ALL]);
+    if (typeof nextQuery === "string") setQuery(nextQuery);
+    setItems([]);
+    setIndex(0);
+    setPage(1);
+    setSeed(Math.floor(Math.random() * 1000000));
+    setHasMore(true);
+    startIdAppliedRef.current = false;
 
-  const moveDrag = useCallback((clientY: number) => {
-      if (!draggingRef.current || animatingRef.current) return;
-      const dy = applyRubberBand(clientY - startYRef.current);
-      dyRef.current = dy;
-      setTranslate(dy, "none");
-    }, [applyRubberBand, setTranslate]);
+    const el = containerRef.current;
+    if (el) el.scrollTo({ top: 0, behavior: "auto" });
+  }, []);
 
-  const endDrag = useCallback(() => {
-    if (!draggingRef.current) return;
-    draggingRef.current = false;
-    if (animatingRef.current) { setTranslate(0, "none"); return; }
-    const dy = dyRef.current;
-    const dt = performance.now() - startTimeRef.current;
-    const v = dt > 0 ? Math.abs(dy) / dt : 0;
-    const DIST = Math.max(55, h * 0.08);
-    const VELO = 0.55;
-    if ((dy < -DIST || (dy < -25 && v > VELO)) && index < count - 1) {
-      finishSlide(-1);
-      return;
-    }
-    if ((dy > DIST || (dy > 25 && v > VELO)) && index > 0) {
-      finishSlide(1);
-      return;
-    }
-    setTranslate(0, "transform 160ms ease-out");
-    window.setTimeout(() => setTranslate(0, "none"), 170);
-  }, [count, finishSlide, h, index, setTranslate]);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
 
-  const onPointerDown = useCallback((e: React.PointerEvent) => {
-      if (isInteractiveTarget(e.target)) return;
-      if (animatingRef.current) return;
-      if (typeof e.button === "number" && e.button !== 0) return;
-      pointerIdRef.current = e.pointerId;
-      beginDrag(e.clientY);
-      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
-      e.preventDefault();
-    }, [beginDrag]);
+    let ticking = false;
 
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
-      if (pointerIdRef.current !== e.pointerId || !draggingRef.current) return;
-      moveDrag(e.clientY);
-      e.preventDefault();
-    }, [moveDrag]);
+    const handleScroll = () => {
+      if (ticking) return;
+      ticking = true;
 
-  const onPointerUp = useCallback((e: React.PointerEvent) => {
-      if (pointerIdRef.current !== e.pointerId) return;
-      pointerIdRef.current = null;
-      endDrag();
-      e.preventDefault();
-    }, [endDrag]);
+      requestAnimationFrame(() => {
+        const pageHeight = el.clientHeight || window.innerHeight || 1;
+        const raw = el.scrollTop / pageHeight;
+        const base = Math.floor(raw);
+        const progress = raw - base;
+
+        let nextIndex = base;
+        if (progress >= EARLY_SWITCH) {
+          nextIndex = base + 1;
+        }
+
+        const clamped = Math.max(0, Math.min(nextIndex, Math.max(0, viewItems.length - 1)));
+
+        if (indexRef.current !== clamped) {
+          setIndex(clamped);
+        }
+
+        ticking = false;
+      });
+    };
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [viewItems.length]);
 
   const SAFE_PAD = 12;
   const safeTop = `calc(env(safe-area-inset-top) + ${SAFE_PAD}px)`;
@@ -633,36 +568,151 @@ export default function VideoFeed({
   const isNoResults = !loading && !hasMore && items.length > 0 && viewItems.length === 0;
 
   return (
-    <div className="relative w-full bg-black overflow-hidden" style={{ height: "100svh", touchAction: "none" }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
+    <div
+      className="relative w-full bg-black overflow-hidden"
+      style={{ height: "100svh" }}
+    >
       {isInitialLoading && (
-        <div style={{ position: "absolute", inset: 0, zIndex: 9999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "black", color: "rgba(255,255,255,0.8)", touchAction: "none", pointerEvents: "auto" }}>
-          <div style={{ fontSize: 16, fontWeight: "bold", marginBottom: 20 }}>動画を読み込み中...</div>
-          <div style={{ fontSize: 13, opacity: 0.8, lineHeight: 2, textAlign: "center" }}><div>⬆︎ 上にスワイプで次の動画</div><div>ダブルタップで5秒スキップ</div></div>
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 9999,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "black",
+            color: "rgba(255,255,255,0.8)",
+            pointerEvents: "auto",
+          }}
+        >
+          <div style={{ fontSize: 16, fontWeight: "bold", marginBottom: 20 }}>
+            動画を読み込み中...
+          </div>
+          <div
+            style={{
+              fontSize: 13,
+              opacity: 0.8,
+              lineHeight: 2,
+              textAlign: "center",
+            }}
+          >
+            <div>⬆︎ 上にスワイプで次の動画</div>
+            <div>ダブルタップで5秒スキップ</div>
+          </div>
         </div>
       )}
 
       {isNoResults && (
-        <div className="absolute inset-0 z-9000 flex flex-col items-center justify-center bg-black text-white p-6 text-center touch-none pointer-events-auto">
-          <p className="text-base font-bold mb-6 leading-relaxed">現在、このジャンルの<br/>動画はありません 😢</p>
-          <button 
-            onClick={() => { setGenres([GENRE_ALL]); setItems([]); setIndex(0); setPage(1); setHasMore(true); }} 
-            style={{ padding: "12px 24px", background: "white", color: "black", borderRadius: "30px", fontWeight: "bold", border: "none" }}
-          >すべての動画を見る</button>
+        <div className="absolute inset-0 z-[9000] flex flex-col items-center justify-center bg-black text-white p-6 text-center pointer-events-auto">
+          <p className="text-base font-bold mb-6 leading-relaxed">
+            現在、このジャンルの
+            <br />
+            動画はありません 😢
+          </p>
+          <button
+            onClick={() => handleResetFeed([GENRE_ALL])}
+            style={{
+              padding: "12px 24px",
+              background: "white",
+              color: "black",
+              borderRadius: "30px",
+              fontWeight: "bold",
+              border: "none",
+            }}
+          >
+            すべての動画を見る
+          </button>
         </div>
       )}
 
       {!hideGenreMenu && (
-        <div className="absolute z-40" data-no-swipe="1" style={{ top: safeTop, left: safeLeft }}>
-          <GenreMenu value={genres} onChange={(v) => { setGenres(v); setItems([]); setIndex(0); setPage(1); setSeed(Math.floor(Math.random() * 1000000)); setHasMore(true); setTranslate(0, "none"); }} query={query} onChangeQuery={(s) => { setQuery(s); setItems([]); setIndex(0); setPage(1); setSeed(Math.floor(Math.random() * 1000000)); setHasMore(true); setTranslate(0, "none"); }} />
+        <div
+          className="absolute z-40"
+          data-no-swipe="1"
+          style={{ top: safeTop, left: safeLeft }}
+        >
+          <GenreMenu
+            value={genres}
+            onChange={(v) => handleResetFeed(v)}
+            query={query}
+            onChangeQuery={(s) => handleResetFeed(genres, s)}
+          />
         </div>
       )}
-      <div className="absolute z-40" data-no-swipe="1" style={{ top: `calc(${safeTop} - 8px)`, right: safeRight }}><MoreMenu /></div>
-      <div ref={trackRef} style={{ position: "relative", height: `${vh}px` }}>
-        {windowItems.map(({ item, pos, absIndex }) => (
-          <div key={`${item.id}:${absIndex}`} style={{ position: "absolute", inset: 0, top: `${pos * h + PEEK}px`, height: `${cardH}px` }}>
-            <VideoCard video={item} isActive={absIndex === index} />
+
+      <div
+        className="absolute z-40"
+        data-no-swipe="1"
+        style={{ top: `calc(${safeTop} - 8px)`, right: safeRight }}
+      >
+        <MoreMenu />
+      </div>
+
+      <div
+        ref={containerRef}
+        style={{
+          width: "100%",
+          height: "100%",
+          overflowY: "auto",
+          overflowX: "hidden",
+          scrollSnapType: "y mandatory",
+          WebkitOverflowScrolling: "touch",
+          overscrollBehaviorY: "contain",
+          background: "#000",
+        }}
+      >
+        {viewItems.map((item, absIndex) => {
+          const distance = Math.abs(absIndex - index);
+          const shouldRenderPlayer = distance <= 2;
+
+          return (
+            <section
+              key={`${item.id}:${absIndex}`}
+              style={{
+                position: "relative",
+                width: "100%",
+                height: "100svh",
+                scrollSnapAlign: "start",
+                scrollSnapStop: "always",
+                background: "#000",
+                overflow: "hidden",
+              }}
+            >
+              {shouldRenderPlayer ? (
+                <VideoCard
+                  video={item}
+                  isActive={absIndex === index}
+                  isNeighbor={distance === 1}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    background: "#000",
+                  }}
+                />
+              )}
+            </section>
+          );
+        })}
+
+        {loading && items.length > 0 && (
+          <div
+            style={{
+              height: 80,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "rgba(255,255,255,0.7)",
+              background: "#000",
+            }}
+          >
+            読み込み中...
           </div>
-        ))}
+        )}
       </div>
     </div>
   );

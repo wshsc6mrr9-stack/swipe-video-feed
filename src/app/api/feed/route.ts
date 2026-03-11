@@ -3,7 +3,6 @@ import { getFilteredVideos } from "@/lib/redis";
 
 export const dynamic = "force-dynamic";
 
-// ★ 日本語ジャンル → Redisタグ変換（最新の実データ対応版）
 const GENRE_MAP: Record<string, string[]> = {
   "ギャル": ["promiscuous", "hardcore"],
   "可愛い": ["bishoujo", "beautiful-style", "idol-celebrity", "cute"],
@@ -26,8 +25,8 @@ const GENRE_MAP: Record<string, string[]> = {
   "大人っぽい": ["mature-mother", "seductress"],
   "お姉さん": ["oneesan"],
   "モデル系": ["beautiful-style"],
-  "アジア系": [], 
-  "欧美系": [], 
+  "アジア系": [],
+  "欧美系": [],
   "巨乳フェチ": ["big-breasts-fetish"],
   "尻フェチ": ["butt-fetish"],
   "パイパン": ["shaved"],
@@ -201,6 +200,11 @@ const GENRE_MAP: Record<string, string[]> = {
   "VR専用": ["vr-only"],
 };
 
+function toSafeNumber(value: unknown): number | undefined {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -212,7 +216,7 @@ export async function GET(req: Request) {
 
     const genres = rawGenres
       .split(",")
-      .map(s => {
+      .map((s) => {
         try {
           return decodeURIComponent(s.trim());
         } catch {
@@ -221,24 +225,20 @@ export async function GET(req: Request) {
       })
       .filter(Boolean);
 
-    // ★ 日本語 → Redis用タグに変換
-    // "__favorites__" や "__likes__" などのシステムタグはそのまま通し、
-    // それ以外は GENRE_MAP を使って変換します。
-    const mappedGenres = genres.flatMap(g => {
+    const mappedGenres = genres.flatMap((g) => {
       if (g.startsWith("__")) return [g];
       return GENRE_MAP[g] ?? [];
     });
 
     const query = searchParams.get("query") || "";
-    const count = parseInt(searchParams.get("count") || "50", 10);
-    const page  = parseInt(searchParams.get("page")  || "1", 10);
-    const seed  = parseInt(searchParams.get("seed")  || "0", 10);
-    
-    // ★ 追加: お気に入りIDリストの取得
+    const count = parseInt(searchParams.get("count") || "10", 10);
+    const page = parseInt(searchParams.get("page") || "1", 10);
+    const seed = parseInt(searchParams.get("seed") || "0", 10);
+
     const idsParam = searchParams.get("ids");
     let targetIds: string[] | undefined = undefined;
     if (idsParam) {
-      targetIds = idsParam.split(",").map(s => s.trim()).filter(Boolean);
+      targetIds = idsParam.split(",").map((s) => s.trim()).filter(Boolean);
     }
 
     const videos = await getFilteredVideos(
@@ -247,10 +247,38 @@ export async function GET(req: Request) {
       count,
       page,
       seed,
-      targetIds // ★ 第6引数として渡す
+      targetIds
     );
 
-    return NextResponse.json(videos);
+    const normalized = (Array.isArray(videos) ? videos : []).map((v: any) => ({
+      ...v,
+      id: String(v?.id ?? ""),
+      title: String(v?.title ?? ""),
+      url: v?.url ?? v?.src ?? "",
+      src: v?.src ?? v?.url ?? "",
+      poster: v?.poster ?? "",
+      srcType: v?.srcType ?? undefined,
+      affUrl: v?.affUrl ?? v?.affiliateUrl ?? "",
+      affLabel: v?.affLabel ?? v?.affiliateLabel ?? "",
+      affiliateUrl: v?.affiliateUrl ?? v?.affUrl ?? "",
+      affiliateLabel: v?.affiliateLabel ?? v?.affLabel ?? "",
+      genres: Array.isArray(v?.genres) ? v.genres : [],
+      genre: typeof v?.genre === "string" ? v.genre : "",
+      likeCount: Number(v?.likeCount ?? 0),
+      duration:
+        toSafeNumber(v?.duration) ??
+        toSafeNumber(v?.videoDuration) ??
+        toSafeNumber(v?.totalDuration) ??
+        toSafeNumber(v?.lengthSec) ??
+        toSafeNumber(v?.durationSec) ??
+        undefined,
+    }));
+
+    return NextResponse.json(normalized, {
+      headers: {
+        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=30",
+      },
+    });
   } catch (e) {
     console.error(e);
     return NextResponse.json([], { status: 500 });

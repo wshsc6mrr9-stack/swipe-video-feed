@@ -4,6 +4,11 @@ import { addVideo } from "@/lib/videosStore";
 
 export const runtime = "nodejs";
 
+function toSafeNumber(value: unknown): number | undefined {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 export async function POST(req: Request) {
   try {
     const auth = req.headers.get("authorization") || "";
@@ -26,6 +31,11 @@ export async function POST(req: Request) {
       affUrl,
       affLabel,
       source,
+      duration,
+      videoDuration,
+      totalDuration,
+      lengthSec,
+      durationSec,
     } = body;
 
     if (!title || !videoUrl) {
@@ -34,6 +44,13 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+
+    const normalizedDuration =
+      toSafeNumber(duration) ??
+      toSafeNumber(videoDuration) ??
+      toSafeNumber(totalDuration) ??
+      toSafeNumber(lengthSec) ??
+      toSafeNumber(durationSec);
 
     const id = nanoid();
 
@@ -46,6 +63,7 @@ export async function POST(req: Request) {
       affiliateUrl: affUrl || "",
       affiliateLabel: affLabel || "商品を見る",
       source: source || "import",
+      duration: normalizedDuration,
       createdAt: Date.now(),
     });
 

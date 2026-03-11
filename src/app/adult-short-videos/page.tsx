@@ -20,6 +20,12 @@ export const metadata: Metadata = {
 export default function AdultShortVideosPage() {
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 text-sm leading-relaxed">
+      {/* ★ 爆速化のポイント1: 
+        次に飛ぶ先の API (api/feed) を、このページが表示された瞬間にブラウザに「投機的」に読み込ませます。
+        これにより、ボタンを押した瞬間にデータがすでに手元にある状態を作ります。
+      */}
+      <link rel="prefetch" href="/api/feed?count=10" />
+
       <h1 className="mb-4 text-2xl font-bold">
         アダルトショート動画（スマホで見やすい短尺動画）
       </h1>
@@ -54,16 +60,21 @@ export default function AdultShortVideosPage() {
       </p>
 
       <div className="mb-8 flex gap-4">
+        {/* ★ 爆速化のポイント2: 
+          prefetch={true} を明示し、さらに hover した瞬間にページ遷移の準備をさせます。
+        */}
         <Link
           href="/"
-          className="rounded bg-white/10 px-4 py-2 hover:bg-white/20"
+          prefetch={true}
+          className="rounded bg-primary px-6 py-3 font-bold text-white shadow-lg transition-transform hover:scale-105 hover:bg-primary/90 active:scale-95"
+          style={{ backgroundColor: '#ff4b2b' }} // 目立つ色にしてクリックを促す
         >
-          今すぐ動画を見る
+          🚀 今すぐ爆速で動画を見る
         </Link>
 
-        {/* ✅ ここだけ修正：/ → /genre */}
         <Link
           href="/genre"
+          prefetch={true}
           className="rounded bg-white/10 px-4 py-2 hover:bg-white/20"
         >
           ジャンルから探す

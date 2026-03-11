@@ -14,30 +14,33 @@ type VideoItem = {
   affLabel?: string;
   affiliateUrl?: string;
   affiliateLabel?: string;
+  likeCount?: number;
+  genres?: string[];
+  genre?: string;
 };
 
 type Props = {
   video: VideoItem;
   isActive: boolean;
-  // ★ 追加: 上の階層(VideoFeed)から届く次の動画・前の動画への指示を受け取る
+  isNeighbor?: boolean;
   onNext?: () => void;
   onPrev?: () => void;
 };
 
-export default function VideoCard({ video, isActive, onNext, onPrev }: Props) {
+export default function VideoCard({
+  video,
+  isActive,
+  isNeighbor = false,
+}: Props) {
   const src = (video.url ?? video.src ?? "") as string;
 
-  // 互換：aff / affiliate を VideoPlayer 側が読む形に合わせる
   const affUrl = (video.affUrl ?? video.affiliateUrl ?? "")?.trim() || undefined;
   const affLabel =
     (video.affLabel ?? video.affiliateLabel ?? "商品を見る")?.trim() || "商品を見る";
 
-  // ---------------------------
-  // 🚀 トラッキング（計測）機能
-  // ---------------------------
   const trackSentRef = useRef(false);
 
-  const trackAction = async (type: "play" | "click") => {
+  const trackAction = async (type: "play") => {
     try {
       await fetch("/api/stats/track", {
         method: "POST",
@@ -49,18 +52,16 @@ export default function VideoCard({ video, isActive, onNext, onPrev }: Props) {
     }
   };
 
-  // ✅ 動画がアクティブ（表示）になったら「再生数」をカウント
   useEffect(() => {
     if (isActive && !trackSentRef.current) {
       trackAction("play");
-      trackSentRef.current = true; // 1回の表示につき1回だけカウント
+      trackSentRef.current = true;
     }
     if (!isActive) {
-      trackSentRef.current = false; // 画面から外れたらリセット（再度戻ってきたらカウント）
+      trackSentRef.current = false;
     }
   }, [isActive, video.id]);
 
-  // ✅ VideoPlayer に渡すオブジェクトを安定化
   const playerVideo = useMemo(() => {
     return {
       ...video,
@@ -70,7 +71,7 @@ export default function VideoCard({ video, isActive, onNext, onPrev }: Props) {
       affLabel,
       poster: video.poster,
     };
-  }, [video.id, video.title, src, affUrl, affLabel, video.poster]);
+  }, [video, src, affUrl, affLabel]);
 
   return (
     <div
@@ -89,17 +90,9 @@ export default function VideoCard({ video, isActive, onNext, onPrev }: Props) {
         }}
       >
         <VideoPlayer
-          // @ts-ignore
-          video={playerVideo}
+          video={playerVideo as any}
           isActive={isActive}
-          // ✅ VideoPlayer 側でアフィリンクが押された時に実行
-          // @ts-ignore
-          onAffiliateClick={() => trackAction("click")}
-          // ✅ 動画が最後まで再生されたら自動で次へ行く設定を繋ぎ込む
-          onEnded={onNext}
-          // ✅ コントロール(次へ/前へボタン)がVideoPlayer内にあればそこへ渡す
-          onNext={onNext}
-          onPrev={onPrev}
+          isNeighbor={isNeighbor}
         />
       </div>
     </div>

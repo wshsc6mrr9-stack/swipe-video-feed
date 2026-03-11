@@ -1,31 +1,18 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
 import type { VideoMeta } from "@/lib/types";
 
 type Props = {
   video: VideoMeta & { likeCount?: number };
   isActive?: boolean;
+  isNeighbor?: boolean;
 };
 
-const KEY_MUTED = "audio_muted_v1";
-const EVT_MUTED = "audio_muted_changed_v1";
-
+const START_OFFSET_SEC = 7;
 const KEY_LIKED = "liked_videos_v1";
 const EVT_LIKES = "likes_changed_v1";
-
-const START_OFFSET_SEC = 7;
-const TAP_MOVE_PX = 14;
-const TAP_MAX_MS = 350;
-
-function isHlsUrl(url?: string) {
-  return !!url && url.includes(".m3u8");
-}
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
 
 function formatTime(t: number) {
   if (!Number.isFinite(t) || t < 0) return "0:00";
@@ -34,25 +21,42 @@ function formatTime(t: number) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function readMuted(): boolean {
-  try {
-    const v = localStorage.getItem(KEY_MUTED);
-    if (v === "0") return false;
-    if (v === "1") return true;
-  } catch {}
-  return true;
+function formatDurationOrUnknown(t: number) {
+  if (!Number.isFinite(t) || t <= 0) return "--:--";
+  return formatTime(t);
 }
 
-function writeMuted(muted: boolean) {
-  try {
-    localStorage.setItem(KEY_MUTED, muted ? "1" : "0");
-  } catch {}
-  try {
-    window.dispatchEvent(new Event(EVT_MUTED));
-  } catch {}
+function waitForEvent(
+  el: HTMLVideoElement,
+  eventName: string,
+  timeoutMs = 2000
+) {
+  return new Promise<void>((resolve) => {
+    let done = false;
+
+    const finish = () => {
+      if (done) return;
+      done = true;
+      el.removeEventListener(eventName, onEvent);
+      clearTimeout(timer);
+      resolve();
+    };
+
+    const onEvent = () => finish();
+    const timer = window.setTimeout(finish, timeoutMs);
+
+    el.addEventListener(eventName, onEvent, { once: true });
+  });
+}
+
+function waitNextFrame() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
 }
 
 function readLikedSet(): Set<string> {
+  if (typeof window === "undefined") return new Set();
   try {
     const raw = localStorage.getItem(KEY_LIKED);
     if (!raw) return new Set();
@@ -63,61 +67,29 @@ function readLikedSet(): Set<string> {
 }
 
 function writeLikedSet(set: Set<string>) {
+  if (typeof window === "undefined") return;
   try {
     localStorage.setItem(KEY_LIKED, JSON.stringify(Array.from(set)));
   } catch {}
 }
 
-function track(videoId: string, event: "play" | "aff_click") {
-  try {
-    fetch("/api/track", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ videoId: String(videoId), event }),
-      keepalive: true,
-    }).catch(() => {});
-  } catch {}
-}
-
-function isNotAllowed(err: any) {
-  const name = String(err?.name ?? "");
-  const msg = String(err?.message ?? "");
-  return (
-    name === "NotAllowedError" ||
-    /notallowed/i.test(name) ||
-    /not allowed/i.test(msg)
-  );
-}
-
-export default function VideoPlayer({ video, isActive = false }: Props) {
+export default function VideoPlayer({
+  video,
+  isActive = false,
+  isNeighbor = false,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
-  const seekRef = useRef<HTMLInputElement | null>(null);
+  const sourceKeyRef = useRef("");
+  const primedRef = useRef(false);
 
   const rawSrc = (video.url ?? (video as any).src ?? "") as string;
 
-  const posterUrl = useMemo(() => {
-    const p = (video as any)?.poster;
-    return typeof p === "string" && p.trim() ? p.trim() : "";
-  }, [video]);
-
-  const [ready, setReady] = useState(false);
   const [playing, setPlaying] = useState(false);
-  const [isWaiting, setIsWaiting] = useState(true);
-
-  // ★ 追加: 黒いカバーを外すための状態管理
-  const [frameOk, setFrameOk] = useState(false);
-  const frameOkRef = useRef(false);
-
-  const [muted, setMuted] = useState<boolean>(() => readMuted());
-  const [forcedMuted, setForcedMuted] = useState(false);
-  const forcedMutedRef = useRef(false);
-
-  const effectiveMuted = !isActive ? true : (forcedMutedRef.current ? true : muted);
-
+  const [videoStarted, setVideoStarted] = useState(false);
+  const [muted, setMuted] = useState(true);
   const [duration, setDuration] = useState(0);
-  const [current, setCurrent] = useState(0);
-
+  const [current, setCurrent] = useState(START_OFFSET_SEC);
   const [likeCount, setLikeCount] = useState<number>(() =>
     Number(video.likeCount ?? 0)
   );
@@ -125,656 +97,459 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
     readLikedSet().has(String(video.id))
   );
 
-  const sentPlayRef = useRef(false);
-  const userPausedRef = useRef(false);
-
-  const vAny = video as unknown as { affUrl?: string; affiliateUrl?: string };
-  const affUrl = (vAny.affUrl ?? vAny.affiliateUrl) as string | undefined;
-
   useEffect(() => {
-    sentPlayRef.current = false;
-    userPausedRef.current = false;
-    forcedMutedRef.current = false;
-    setForcedMuted(false);
-    setReady(false);
     setPlaying(false);
-    setIsWaiting(true);
-    setCurrent(0);
+    setCurrent(START_OFFSET_SEC);
     setDuration(0);
-    
-    // カバー状態をリセット
-    frameOkRef.current = false;
-    setFrameOk(false);
-  }, [video.id]);
-
-  useEffect(() => {
-    setLiked(readLikedSet().has(String(video.id)));
     setLikeCount(Number(video.likeCount ?? 0));
+    setLiked(readLikedSet().has(String(video.id)));
+    primedRef.current = false;
   }, [video.id, video.likeCount]);
 
-  useEffect(() => {
-    const on = () => setMuted(readMuted());
-    window.addEventListener(EVT_MUTED, on);
-    window.addEventListener("storage", on);
-    return () => {
-      window.removeEventListener(EVT_MUTED, on);
-      window.removeEventListener("storage", on);
-    };
-  }, []);
+  function getBestDuration(el: HTMLVideoElement) {
+    const candidates: number[] = [];
 
-  const tryResume = async () => {
-    const el = videoRef.current;
-    if (!el || !isActive || document.visibilityState !== "visible" || userPausedRef.current) return;
+    if (Number.isFinite(el.duration) && el.duration > 0) {
+      candidates.push(el.duration);
+    }
 
-    el.muted = effectiveMuted;
+    if (el.seekable && el.seekable.length > 0) {
+      try {
+        const seekableEnd = el.seekable.end(el.seekable.length - 1);
+        if (Number.isFinite(seekableEnd) && seekableEnd > 0) {
+          candidates.push(seekableEnd);
+        }
+      } catch {}
+    }
+
+    const hls = hlsRef.current;
+    const details = hls?.levels?.[hls.currentLevel]?.details as any;
+    if (Number.isFinite(details?.totalduration) && details.totalduration > 0) {
+      candidates.push(details.totalduration);
+    }
+
+    return candidates.length ? Math.max(...candidates) : 0;
+  }
+
+  async function primeAtStartOffset(el: HTMLVideoElement) {
+    if (primedRef.current) return;
+
+    el.muted = true;
+    el.preload = "auto";
+
+    if (el.readyState < 1) {
+      await waitForEvent(el, "loadedmetadata", 2500);
+    }
+
+    try {
+      el.currentTime = START_OFFSET_SEC;
+    } catch {}
+
+    await waitForEvent(el, "seeked", 1500);
 
     try {
       await el.play();
-      setPlaying(true);
-      if (!sentPlayRef.current) {
-        sentPlayRef.current = true;
-        track(String(video.id), "play");
-      }
-    } catch (err: any) {
-      setPlaying(false);
-      if (!effectiveMuted && isNotAllowed(err)) {
-        try {
-          forcedMutedRef.current = true;
-          setForcedMuted(true);
-          el.muted = true;
-          await el.play();
-          setPlaying(true);
-          if (!sentPlayRef.current) {
-            sentPlayRef.current = true;
-            track(String(video.id), "play");
-          }
-        } catch {}
-      }
-    }
-  };
+      await waitNextFrame();
+      await waitNextFrame();
+      el.pause();
+    } catch {}
 
-  useEffect(() => {
-    const onVis = () => {
-      const el = videoRef.current;
-      if (!el) return;
-
-      if (document.visibilityState !== "visible") {
-        try { el.pause(); } catch {}
-        setPlaying(false);
-      } else {
-        if (isActive && !userPausedRef.current) {
-          tryResume();
-        }
-      }
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, muted, forcedMuted, rawSrc]);
+    primedRef.current = true;
+    setVideoStarted(true);
+  }
 
   useEffect(() => {
     const el = videoRef.current;
-    if (!el) return;
+    if (!el || !rawSrc) return;
 
-    setReady(false);
-    setIsWaiting(true);
+    const sourceKey = `${video.id}__${rawSrc}`;
+    if (sourceKeyRef.current === sourceKey) return;
+    sourceKeyRef.current = sourceKey;
 
-    try {
-      hlsRef.current?.destroy();
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
       hlsRef.current = null;
-    } catch {}
+    }
 
-    try {
-      // @ts-ignore
-      el.poster = posterUrl || "";
-      el.preload = "metadata";
-    } catch {}
+    primedRef.current = false;
 
-    if (isHlsUrl(rawSrc)) {
+    el.pause();
+    el.removeAttribute("src");
+    el.load();
+
+    const syncDuration = () => {
+      const next = getBestDuration(el);
+      if (next > 0) {
+        setDuration(next);
+      }
+    };
+
+    const markReady = () => {
+      setVideoStarted(true);
+      syncDuration();
+    };
+
+    const onLoadedMetadata = () => syncDuration();
+    const onDurationChange = () => syncDuration();
+    const onLoadedData = () => markReady();
+    const onCanPlay = () => markReady();
+    const onProgress = () => syncDuration();
+    const onSeeking = () => syncDuration();
+    const onSeeked = () => syncDuration();
+    const onPlaying = () => {
+      setPlaying(true);
+      markReady();
+    };
+    const onPause = () => setPlaying(false);
+    const onTimeUpdate = () => {
+      setCurrent(el.currentTime);
+      syncDuration();
+      if (el.currentTime > 0.1) {
+        markReady();
+      }
+    };
+
+    el.addEventListener("loadedmetadata", onLoadedMetadata);
+    el.addEventListener("durationchange", onDurationChange);
+    el.addEventListener("loadeddata", onLoadedData);
+    el.addEventListener("canplay", onCanPlay);
+    el.addEventListener("progress", onProgress);
+    el.addEventListener("seeking", onSeeking);
+    el.addEventListener("seeked", onSeeked);
+    el.addEventListener("playing", onPlaying);
+    el.addEventListener("pause", onPause);
+    el.addEventListener("timeupdate", onTimeUpdate);
+
+    if (rawSrc.includes(".m3u8")) {
       if (Hls.isSupported()) {
         const hls = new Hls({
-          lowLatencyMode: false,
-          capLevelToPlayerSize: true,
-          startPosition: START_OFFSET_SEC, 
-          maxBufferLength: 5,              
-          autoStartLoad: true,
-        });
+          startPosition: START_OFFSET_SEC,
+          maxBufferLength: 10,
+          maxMaxBufferLength: 20,
+          backBufferLength: 0,
+          enableWorker: true,
+          lowLatencyMode: true,
+        } as any);
+
         hlsRef.current = hls;
         hls.loadSource(rawSrc);
         hls.attachMedia(el);
 
-        hls.on(Hls.Events.MANIFEST_PARSED, () => setReady(true));
-        hls.on(Hls.Events.ERROR, (_evt, data) => {
-          if (data?.fatal) {
-            try { hls.destroy(); } catch {}
-            hlsRef.current = null;
-            try {
-              el.src = rawSrc;
-              setReady(true);
-            } catch {}
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          syncDuration();
+        });
+
+        hls.on(Hls.Events.LEVEL_LOADED, (_event, data: any) => {
+          const total = Number(data?.details?.totalduration ?? 0);
+          if (total > 0) {
+            setDuration(total);
+          } else {
+            syncDuration();
           }
         });
+
+        hls.on(Hls.Events.FRAG_BUFFERED, () => {
+          syncDuration();
+        });
+      } else if (el.canPlayType("application/vnd.apple.mpegurl")) {
+        el.src = rawSrc;
+        el.preload = "auto";
       } else {
-        el.src = rawSrc; 
-        setReady(true);
+        el.src = rawSrc;
+        el.preload = "auto";
       }
     } else {
-      el.src = rawSrc; 
-      setReady(true);
-    }
-
-    return () => {
-      try {
-        hlsRef.current?.destroy();
-        hlsRef.current = null;
-      } catch {}
-    };
-  }, [rawSrc, posterUrl]);
-
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el) return;
-
-    const removeCover = () => {
-      if (!frameOkRef.current) {
-        frameOkRef.current = true;
-        setFrameOk(true);
-      }
-    };
-
-    const onWaiting = () => setIsWaiting(true);
-    const onPlaying = () => {
-      setIsWaiting(false);
-      setPlaying(true);
-      removeCover(); // ★ 再生開始でカバーを外す
-    };
-    const onCanPlay = () => {
-      setIsWaiting(false);
-      removeCover(); // ★ 再生準備完了でカバーを外す
-    };
-    const onLoadedData = () => {
-      removeCover(); // ★ データ読み込み完了でカバーを外す
-    };
-    const onPause = () => setPlaying(false);
-
-    const onLoadedMetadata = () => {
-      setReady(true);
-      if (Number.isFinite(el.duration)) setDuration(el.duration);
-      
-      if (!isHlsUrl(rawSrc) && el.currentTime < START_OFFSET_SEC) {
-        el.currentTime = START_OFFSET_SEC;
-      }
-    };
-
-    const onTimeUpdate = () => {
-      setCurrent(el.currentTime);
-      if (el.currentTime > 0) {
-         removeCover(); // ★ 少しでも進んだらカバーを外す
-      }
-      if (el.currentTime < START_OFFSET_SEC - 0.5 && !userPausedRef.current && isActive) {
-         el.currentTime = START_OFFSET_SEC;
-      }
-    };
-
-    el.addEventListener("waiting", onWaiting);
-    el.addEventListener("playing", onPlaying);
-    el.addEventListener("canplay", onCanPlay);
-    el.addEventListener("loadeddata", onLoadedData);
-    el.addEventListener("pause", onPause);
-    el.addEventListener("loadedmetadata", onLoadedMetadata);
-    el.addEventListener("timeupdate", onTimeUpdate);
-
-    return () => {
-      el.removeEventListener("waiting", onWaiting);
-      el.removeEventListener("playing", onPlaying);
-      el.removeEventListener("canplay", onCanPlay);
-      el.removeEventListener("loadeddata", onLoadedData);
-      el.removeEventListener("pause", onPause);
-      el.removeEventListener("loadedmetadata", onLoadedMetadata);
-      el.removeEventListener("timeupdate", onTimeUpdate);
-    };
-  }, [rawSrc, isActive]);
-
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el) return;
-
-    el.muted = effectiveMuted;
-
-    if (isActive) {
-      if (hlsRef.current) hlsRef.current.config.maxBufferLength = 30;
+      el.src = rawSrc;
       el.preload = "auto";
-      
-      userPausedRef.current = false;
-      tryResume();
-    } else {
-      if (hlsRef.current) hlsRef.current.config.maxBufferLength = 2;
-      try { el.pause(); } catch {}
-      setPlaying(false);
-      
-      if (el.currentTime > 0) {
-        el.currentTime = START_OFFSET_SEC;
-      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, muted, forcedMuted, rawSrc]);
 
-  const stop = (e: any) => {
-    e?.stopPropagation?.();
-    try { e?.nativeEvent?.stopImmediatePropagation?.(); } catch {}
-  };
+    return () => {
+      el.removeEventListener("loadedmetadata", onLoadedMetadata);
+      el.removeEventListener("durationchange", onDurationChange);
+      el.removeEventListener("loadeddata", onLoadedData);
+      el.removeEventListener("canplay", onCanPlay);
+      el.removeEventListener("progress", onProgress);
+      el.removeEventListener("seeking", onSeeking);
+      el.removeEventListener("seeked", onSeeked);
+      el.removeEventListener("playing", onPlaying);
+      el.removeEventListener("pause", onPause);
+      el.removeEventListener("timeupdate", onTimeUpdate);
 
-  const togglePlay = async () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [video.id, rawSrc]);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+
+    let cancelled = false;
+
+    const run = async () => {
+      if (isNeighbor) {
+        try {
+          await primeAtStartOffset(el);
+          if (cancelled) return;
+          el.pause();
+          setPlaying(false);
+        } catch {}
+        return;
+      }
+
+      if (isActive) {
+        el.muted = muted;
+
+        try {
+          if (!primedRef.current) {
+            await primeAtStartOffset(el);
+          } else if (Math.abs(el.currentTime - START_OFFSET_SEC) > 1.5) {
+            el.currentTime = START_OFFSET_SEC;
+            await waitForEvent(el, "seeked", 1200);
+          }
+        } catch {}
+
+        if (cancelled) return;
+
+        try {
+          await el.play();
+          if (cancelled) return;
+          setPlaying(true);
+          setVideoStarted(true);
+        } catch {
+          el.muted = true;
+          el.play()
+            .then(() => {
+              if (cancelled) return;
+              setPlaying(true);
+              setVideoStarted(true);
+            })
+            .catch(() => {});
+        }
+        return;
+      }
+
+      el.pause();
+      setPlaying(false);
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isActive, isNeighbor, muted]);
+
+  const togglePlay = () => {
     const el = videoRef.current;
     if (!el) return;
 
     if (el.paused) {
-      userPausedRef.current = false;
-      tryResume();
+      el.play()
+        .then(() => {
+          setPlaying(true);
+          setVideoStarted(true);
+        })
+        .catch(() => {});
     } else {
-      userPausedRef.current = true;
-      try { el.pause(); } catch {}
+      el.pause();
       setPlaying(false);
     }
   };
 
-  const toggleMute = async () => {
-    const el = videoRef.current;
-    if (!el) return;
+  const toggleLike = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
 
-    const next = !muted;
-    if (!next) {
-      forcedMutedRef.current = false;
-      setForcedMuted(false);
-    }
-
-    setMuted(next);
-    writeMuted(next);
-    el.muted = isActive ? (forcedMutedRef.current ? true : next) : true;
-
-    if (isActive) {
-      try {
-        await el.play();
-        setPlaying(true);
-      } catch {}
-    }
-  };
-
-  const seekTo = (t: number) => {
-    const el = videoRef.current;
-    if (!el) return;
-    const dLike = duration > 0 ? duration : el.duration;
-    const next = clamp(t, 0, dLike || t);
-    try { el.currentTime = next; } catch {}
-  };
-
-  const skip = (sec: number) => {
-    const el = videoRef.current;
-    if (!el) return;
-    seekTo(el.currentTime + sec);
-  };
-
-  const titleText = useMemo(() => video.title || rawSrc || "", [video.title, rawSrc]);
-  const showPR = !!affUrl;
-
-  const onToggleLike = async (e: any) => {
-    stop(e);
     const id = String(video.id);
     const set = readLikedSet();
-    const was = set.has(id);
-    const nextLiked = !was;
-    const nextCount = Math.max(0, (likeCount ?? 0) + (nextLiked ? 1 : -1));
-    
-    setLikeCount(nextCount);
-    setLiked(nextLiked);
+    let nextLiked = liked;
+    let nextCount = likeCount;
 
-    if (nextLiked) set.add(id);
-    else set.delete(id);
-    writeLikedSet(set);
-
-    try {
-      const r = await fetch("/api/likes", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ videoId: id, delta: nextLiked ? 1 : -1 }),
-      });
-      const j = await r.json().catch(() => null);
-      const serverCount = Number(j?.count);
-      if (r.ok && j?.ok && Number.isFinite(serverCount)) {
-        setLikeCount(serverCount);
-        window.dispatchEvent(new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: serverCount } }));
-      } else {
-        window.dispatchEvent(new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } }));
-      }
-    } catch {
-      window.dispatchEvent(new CustomEvent(EVT_LIKES, { detail: { videoId: id, count: nextCount } }));
-    }
-  };
-
-  const onShare = async (e: any) => {
-    stop(e);
-    const shareUrl = `https://swipe-video-feed.vercel.app/video/${encodeURIComponent(String(video.id))}`;
-    const text = titleText || "Swipe Video Feed";
-    try {
-      if (typeof navigator !== "undefined" && "share" in navigator) {
-        // @ts-ignore
-        await navigator.share({ title: text, text, url: shareUrl });
-        return;
-      }
-    } catch {}
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      alert("共有URLをコピーした");
-    } catch {
-      prompt("このURLをコピーして共有してな", shareUrl);
-    }
-  };
-
-  const tapRef = useRef({ 
-    downX: 0, downY: 0, downT: 0, moved: false, lastTapT: 0, singleTapTimer: null as any
-  });
-
-  const onVideoPointerDown = (e: React.PointerEvent) => {
-    tapRef.current.downX = e.clientX;
-    tapRef.current.downY = e.clientY;
-    tapRef.current.downT = performance.now();
-    tapRef.current.moved = false;
-  };
-
-  const onVideoPointerMove = (e: React.PointerEvent) => {
-    const dx = e.clientX - tapRef.current.downX;
-    const dy = e.clientY - tapRef.current.downY;
-    if (Math.abs(dx) + Math.abs(dy) > TAP_MOVE_PX) tapRef.current.moved = true;
-  };
-
-  const onVideoPointerUp = (e: React.PointerEvent) => {
-    const dt = performance.now() - tapRef.current.downT;
-    if (tapRef.current.moved || dt > TAP_MAX_MS) return;
-
-    const now = performance.now();
-    const timeSinceLastTap = now - tapRef.current.lastTapT;
-
-    if (timeSinceLastTap < 400) { 
-      clearTimeout(tapRef.current.singleTapTimer);
-      tapRef.current.lastTapT = 0;
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const clickX = e.clientX - rect.left;
-      if (clickX > rect.width / 2) skip(5);
-      else skip(-5);
+    if (set.has(id)) {
+      set.delete(id);
+      nextLiked = false;
+      nextCount = Math.max(0, likeCount - 1);
     } else {
-      tapRef.current.lastTapT = now;
-      clearTimeout(tapRef.current.singleTapTimer);
-      tapRef.current.singleTapTimer = setTimeout(() => {
-        togglePlay();
-        tapRef.current.lastTapT = 0;
-      }, 400); 
+      set.add(id);
+      nextLiked = true;
+      nextCount = likeCount + 1;
     }
+
+    writeLikedSet(set);
+    setLiked(nextLiked);
+    setLikeCount(nextCount);
+
+    window.dispatchEvent(
+      new CustomEvent(EVT_LIKES, {
+        detail: {
+          videoId: id,
+          count: nextCount,
+        },
+      })
+    );
   };
 
-  const showTapSound = isActive && effectiveMuted;
-
-  const enableSoundFromUser = async (e?: any) => {
-    stop(e);
-    const el = videoRef.current;
-    if (!el) return;
-
-    forcedMutedRef.current = false;
-    setForcedMuted(false);
-    setMuted(false);
-    writeMuted(false);
-    el.muted = false;
-
-    try {
-      await el.play();
-      setPlaying(true);
-      if (!sentPlayRef.current) {
-        sentPlayRef.current = true;
-        track(String(video.id), "play");
-      }
-    } catch {}
-  };
-
-  const spinnerStyle = `
-    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-  `;
-
-  // ★ ここで黒カバーの表示判定をしています
-  const showBlackCover = !posterUrl && !frameOk;
+  const hasDuration = Number.isFinite(duration) && duration > 0;
+  const sliderMin = 0;
+  const sliderMax = hasDuration ? duration : START_OFFSET_SEC;
+  const sliderValue = hasDuration
+    ? Math.min(Math.max(current, sliderMin), sliderMax)
+    : START_OFFSET_SEC;
 
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%", background: "black", overflow: "hidden", touchAction: "pan-y" }}>
-      <style>{spinnerStyle}</style>
-
+    <div
+      style={{
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        background: "#000",
+        overflow: "hidden",
+      }}
+    >
       <video
         ref={videoRef}
         playsInline
-        // @ts-ignore
-        webkit-playsinline="true"
-        muted={effectiveMuted}
         preload="auto"
-        poster={posterUrl || undefined}
+        muted={!isActive || muted}
         style={{
           width: "100%",
           height: "100%",
           objectFit: "contain",
-          objectPosition: "center",
-          background: "black",
           position: "absolute",
           inset: 0,
           zIndex: 1,
+          opacity: videoStarted ? 1 : 0.001,
+          transition: "opacity 0.12s linear",
+          background: "#000",
         }}
-        onPointerDown={onVideoPointerDown}
-        onPointerMove={onVideoPointerMove}
-        onPointerUp={onVideoPointerUp}
+        onClick={togglePlay}
       />
 
-      {showBlackCover ? (
-        <div style={{ position: "absolute", inset: 0, zIndex: 2, background: "black", pointerEvents: "none" }} />
-      ) : null}
-
-      {isActive && isWaiting && (
-        <div style={{
-          position: "absolute", inset: 0, zIndex: 20, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none"
-        }}>
-          <div style={{
-            width: 44, height: 44, borderRadius: "50%",
-            border: "4px solid rgba(255,255,255,0.15)",
-            borderTopColor: "rgba(255,255,255,0.9)",
-            animation: "spin 0.8s linear infinite"
-          }} />
-        </div>
-      )}
-
-      {!ready && (
-        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "rgba(255,255,255,0.65)", zIndex: 10, pointerEvents: "none" }}>
-          Loading...
-        </div>
-      )}
-
-      {showPR ? (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(env(safe-area-inset-top) + 10px)",
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 60,
-            pointerEvents: "none",
-            userSelect: "none",
-          }}
-        >
-          <span
-            style={{
-              display: "inline-block",
-              padding: "4px 10px",
-              borderRadius: 999,
-              fontSize: 11,
-              fontWeight: 800,
-              letterSpacing: 1.6,
-              color: "rgba(255,255,255,0.70)",
-              background: "rgba(0,0,0,0.25)",
-              border: "1px solid rgba(255,255,255,0.14)",
-            }}
-          >
-            PR
-          </span>
-        </div>
-      ) : null}
-
-      {showTapSound ? (
-        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", zIndex: 30, pointerEvents: "auto" }}>
-          <button
-            onPointerDown={enableSoundFromUser}
-            onClick={enableSoundFromUser}
-            style={{
-              padding: "18px 22px",
-              borderRadius: 999,
-              border: "1px solid rgba(255,255,255,0.18)",
-              background: "rgba(0,0,0,0.20)",
-              color: "rgba(255,255,255,0.78)",
-              fontWeight: 900,
-              fontSize: 18,
-              letterSpacing: 0.6,
-              backdropFilter: "blur(10px)",
-              WebkitBackdropFilter: "blur(10px)",
-              boxShadow: "0 14px 40px rgba(0,0,0,0.30)",
-              userSelect: "none",
-            }}
-          >
-            タップで音ON
-          </button>
-        </div>
-      ) : null}
-
       <div
-        data-no-swipe="1"
-        data-ui="controls"
         style={{
           position: "absolute",
-          left: "calc(env(safe-area-inset-left) + 10px)",
-          right: "calc(env(safe-area-inset-right) + 10px)",
-          bottom: "calc(env(safe-area-inset-bottom) + 10px)",
+          left: 10,
+          right: 10,
+          bottom: "calc(env(safe-area-inset-bottom) + 12px)",
           zIndex: 40,
-          overflowX: "hidden",
-          touchAction: "pan-y",
           opacity: isActive ? 1 : 0,
           pointerEvents: isActive ? "auto" : "none",
-          transition: "opacity 160ms ease-out",
         }}
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => e.stopPropagation()}
       >
-        <div style={outerTopBar}>
-          <div style={outerLeft}>
-            <button
-              onPointerDown={(e) => (e.stopPropagation(), e.preventDefault())}
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleMute();
-              }}
-              style={outerBtn}
-            >
-              {effectiveMuted ? "音OFF" : "音ON"}
-            </button>
-          </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "auto 1fr auto",
+            marginBottom: 10,
+            maxWidth: 560,
+            margin: "0 auto 10px",
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setMuted(!muted);
+            }}
+            style={outerBtnStyle}
+          >
+            {muted ? "音OFF" : "音ON"}
+          </button>
 
           <div />
 
-          <div style={outerRight}>
-            <button
-              onPointerDown={(e) => (e.stopPropagation(), e.preventDefault())}
-              onClick={(e) => {
-                e.stopPropagation();
-                togglePlay();
-              }}
-              style={outerBtn}
-            >
-              {playing ? "停止" : "再生"}
-            </button>
-          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePlay();
+            }}
+            style={outerBtnStyle}
+          >
+            {playing ? "停止" : "再生"}
+          </button>
         </div>
 
-        <div style={panel}>
-          <div style={titleClamp}>{titleText}</div>
+        <div style={panelStyle}>
+          <div style={titleStyle}>{video.title || "Untitled"}</div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ color: "rgba(255,255,255,0.85)", fontSize: 12, minWidth: 42 }}>
-              {formatTime(current)}
-            </span>
+            <span style={timeStyle}>{formatTime(current)}</span>
 
             <input
-              ref={seekRef}
-              data-no-swipe="1"
-              data-ui="controls"
               type="range"
-              min={0}
-              max={Math.max(0, duration || 0)}
+              min={sliderMin}
+              max={sliderMax}
               step={0.01}
-              value={Math.min(Math.max(0, current || 0), Math.max(0, duration || 0))}
-              onPointerDown={(e) => (e.stopPropagation(), e.preventDefault())}
-              onClick={(e) => e.stopPropagation()}
-              onChange={(e) => seekTo(Number((e.target as HTMLInputElement).value))}
-              style={{ width: "100%" }}
+              value={sliderValue}
+              onChange={(e) => {
+                if (!hasDuration || !videoRef.current) return;
+                const nextTime = Number(e.target.value);
+                videoRef.current.currentTime = nextTime;
+                setCurrent(nextTime);
+              }}
+              style={{ width: "100%", accentColor: "#fff" }}
             />
 
-            <span style={{ color: "rgba(255,255,255,0.85)", fontSize: 12, minWidth: 42, textAlign: "right" }}>
-              {formatTime(duration)}
-            </span>
+            <span style={timeStyle}>{formatDurationOrUnknown(duration)}</span>
           </div>
 
-          <div style={oneRowWrap}>
-            <div style={oneRowInner}>
-              <button
-                onPointerDown={(e) => (e.stopPropagation(), e.preventDefault())}
-                onClick={onToggleLike}
-                style={{
-                  ...pillBtnSmall,
-                  background: liked ? "rgba(255,255,255,0.92)" : pillBtnSmall.background,
-                  color: liked ? "#000" : pillBtnSmall.color,
-                  border: liked ? "1px solid rgba(255,255,255,0.85)" : pillBtnSmall.border,
-                }}
-              >
+          <div style={{ textAlign: "center" }}>
+            <div style={{ display: "inline-flex", gap: 10 }}>
+              <button onClick={toggleLike} style={pillBtnSmall}>
                 {liked ? "♥" : "♡"} {likeCount}
               </button>
 
-              <button onPointerDown={(e) => (e.stopPropagation(), e.preventDefault())} onClick={() => skip(-10)} style={pillBtnSmall}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (videoRef.current) videoRef.current.currentTime -= 10;
+                }}
+                style={pillBtnSmall}
+              >
                 -10
               </button>
-              <button onPointerDown={(e) => (e.stopPropagation(), e.preventDefault())} onClick={() => skip(-5)} style={pillBtnSmall}>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (videoRef.current) videoRef.current.currentTime -= 5;
+                }}
+                style={pillBtnSmall}
+              >
                 -5
               </button>
 
-              {affUrl ? (
+              {(video as any).affUrl && (
                 <a
-                  onPointerDown={(e) => (e.stopPropagation(), e.preventDefault())}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    track(String(video.id), "aff_click");
-                  }}
-                  href={affUrl}
+                  href={(video as any).affUrl}
                   target="_blank"
                   rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
                   style={productMainBtn}
                 >
                   本編
                 </a>
-              ) : (
-                <div style={{ width: 56, height: 56, flex: "0 0 auto" }} />
               )}
 
-              <button onPointerDown={(e) => (e.stopPropagation(), e.preventDefault())} onClick={() => skip(5)} style={pillBtnSmall}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (videoRef.current) videoRef.current.currentTime += 5;
+                }}
+                style={pillBtnSmall}
+              >
                 +5
-              </button>
-              <button onPointerDown={(e) => (e.stopPropagation(), e.preventDefault())} onClick={() => skip(10)} style={pillBtnSmall}>
-                +10
               </button>
 
               <button
-                onPointerDown={(e) => (e.stopPropagation(), e.preventDefault())}
-                onClick={onShare}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (videoRef.current) videoRef.current.currentTime += 10;
+                }}
                 style={pillBtnSmall}
               >
-                共有
+                +10
               </button>
             </div>
           </div>
@@ -784,115 +559,63 @@ export default function VideoPlayer({ video, isActive = false }: Props) {
   );
 }
 
-const titleClamp: React.CSSProperties = {
-  color: "rgba(255,255,255,0.92)",
-  fontSize: 12,
-  fontWeight: 700,
-  whiteSpace: "normal",
-  overflow: "hidden",
-  display: "-webkit-box",
-  WebkitBoxOrient: "vertical" as any,
-  WebkitLineClamp: 4 as any,
-  textAlign: "center",
-  lineHeight: 1.35,
-};
-
-const panel: React.CSSProperties = {
+const panelStyle: React.CSSProperties = {
   borderRadius: 18,
-  padding: 10,
-  background: "rgba(0,0,0,0.45)",
-  border: "1px solid rgba(255,255,255,0.12)",
-  boxShadow: "0 14px 40px rgba(0,0,0,0.35)",
+  padding: "12px 14px",
+  background: "rgba(0,0,0,0.5)",
+  border: "1px solid rgba(255,255,255,0.15)",
   display: "grid",
-  gap: 8,
-  maxWidth: "min(560px, 100%)",
+  gap: 10,
+  maxWidth: 560,
   margin: "0 auto",
+  backdropFilter: "blur(15px)",
 };
 
-const outerTopBar: React.CSSProperties = {
-  maxWidth: "min(560px, 100%)",
-  margin: "0 auto",
-  marginBottom: 8,
-  display: "grid",
-  gridTemplateColumns: "auto 1fr auto",
-  alignItems: "center",
-};
-
-const outerLeft: React.CSSProperties = {
-  display: "inline-flex",
-  gap: 8,
-  alignItems: "center",
-};
-
-const outerRight: React.CSSProperties = {
-  display: "inline-flex",
-  gap: 8,
-  alignItems: "center",
-  justifyContent: "flex-end",
-};
-
-const outerBtn: React.CSSProperties = {
-  height: 30,
-  padding: "0 12px",
-  borderRadius: 999,
-  background: "rgba(255,255,255,0.12)",
-  color: "rgba(255,255,255,0.95)",
-  border: "1px solid rgba(255,255,255,0.16)",
-  fontWeight: 900,
-  fontSize: 10,
-  lineHeight: 1,
-  backdropFilter: "blur(6px)",
-  WebkitBackdropFilter: "blur(6px)",
-  flex: "0 0 auto",
-};
-
-const oneRowWrap: React.CSSProperties = {
-  overflowX: "hidden",
-  overflowY: "visible",
-  paddingBottom: 2,
+const titleStyle: React.CSSProperties = {
+  color: "#fff",
+  fontSize: 13,
+  fontWeight: 700,
   textAlign: "center",
-  touchAction: "pan-y",
-  overscrollBehaviorX: "none" as any,
 };
 
-const oneRowInner: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 8,
-  flexWrap: "nowrap",
-  minWidth: "max-content",
+const timeStyle: React.CSSProperties = {
+  color: "rgba(255,255,255,0.8)",
+  fontSize: 11,
+  minWidth: 40,
 };
 
 const pillBtnSmall: React.CSSProperties = {
-  minWidth: 16,
-  height: 35,
-  padding: "0 12px",
+  height: 36,
+  padding: "0 14px",
   borderRadius: 999,
-  background: "rgba(255,255,255,0.12)",
-  color: "rgba(255,255,255,0.95)",
-  border: "1px solid rgba(255,255,255,0.16)",
-  fontWeight: 900,
-  fontSize: 11,
-  lineHeight: 1,
-  backdropFilter: "blur(6px)",
-  WebkitBackdropFilter: "blur(6px)",
-  flex: "0 0 auto",
+  background: "rgba(255,255,255,0.15)",
+  color: "#fff",
+  fontWeight: 800,
+  fontSize: 12,
+  border: "1px solid rgba(255,255,255,0.1)",
 };
 
 const productMainBtn: React.CSSProperties = {
-  width: 56,
-  height: 56,
+  width: 58,
+  height: 58,
   borderRadius: 999,
   background: "#fff",
   color: "#000",
-  textDecoration: "none",
   fontWeight: 900,
-  fontSize: 14,
-  display: "inline-flex",
+  fontSize: 15,
+  display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  boxShadow: "0 12px 28px rgba(0,0,0,0.35)",
-  border: "1px solid rgba(0,0,0,0.08)",
-  flex: "0 0 auto",
+  textDecoration: "none",
+};
+
+const outerBtnStyle: React.CSSProperties = {
+  height: 32,
+  padding: "0 14px",
+  borderRadius: 999,
+  background: "rgba(255,255,255,0.15)",
+  color: "#fff",
+  fontWeight: 800,
+  fontSize: 11,
+  border: "1px solid rgba(255,255,255,0.1)",
 };
