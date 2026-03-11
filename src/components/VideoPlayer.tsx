@@ -92,6 +92,8 @@ export default function VideoPlayer({
   const hlsRef = useRef<Hls | null>(null);
   const sourceKeyRef = useRef("");
   const primedRef = useRef(false);
+  const startOffsetAppliedRef = useRef(false);
+  const userSeekedRef = useRef(false);
 
   const rawSrc = (video.url ?? (video as any).src ?? "") as string;
 
@@ -118,6 +120,8 @@ export default function VideoPlayer({
     setLiked(readLikedSet().has(String(video.id)));
     setShowTapToUnmute(false);
     primedRef.current = false;
+    startOffsetAppliedRef.current = false;
+    userSeekedRef.current = false;
   }, [video.id, video.likeCount, (video as any).duration]);
 
   useEffect(() => {
@@ -157,13 +161,23 @@ export default function VideoPlayer({
     return candidates.length ? Math.max(...candidates) : 0;
   }
 
-  async function forceSeekToStartOffset(el: HTMLVideoElement) {
+  async function forceSeekToStartOffset(
+    el: HTMLVideoElement,
+    force = false
+  ) {
+    if (!force && (startOffsetAppliedRef.current || userSeekedRef.current)) {
+      return;
+    }
+
     if (el.readyState < 1) {
       await waitForEvent(el, "loadedmetadata", 2500);
     }
 
     const needsSeek = Math.abs(el.currentTime - START_OFFSET_SEC) > 0.35;
-    if (!needsSeek) return;
+    if (!needsSeek) {
+      startOffsetAppliedRef.current = true;
+      return;
+    }
 
     try {
       el.currentTime = START_OFFSET_SEC;
@@ -179,6 +193,7 @@ export default function VideoPlayer({
     }
 
     setCurrent(el.currentTime);
+    startOffsetAppliedRef.current = true;
   }
 
   async function playWithSafariFallback(
@@ -186,7 +201,6 @@ export default function VideoPlayer({
     wantsAudio: boolean
   ) {
     try {
-      await forceSeekToStartOffset(el);
       el.muted = !wantsAudio;
       await el.play();
       setPlaying(true);
@@ -204,7 +218,6 @@ export default function VideoPlayer({
       return true;
     } catch {
       try {
-        await forceSeekToStartOffset(el);
         el.muted = true;
         await el.play();
         setPlaying(true);
@@ -230,7 +243,7 @@ export default function VideoPlayer({
       await waitForEvent(el, "loadedmetadata", 2500);
     }
 
-    await forceSeekToStartOffset(el);
+    await forceSeekToStartOffset(el, true);
 
     try {
       await el.play();
@@ -392,8 +405,6 @@ export default function VideoPlayer({
         try {
           if (!primedRef.current) {
             await primeAtStartOffset(el);
-          } else {
-            await forceSeekToStartOffset(el);
           }
         } catch {}
 
@@ -645,6 +656,7 @@ export default function VideoPlayer({
               onChange={(e) => {
                 if (!hasDuration || !videoRef.current) return;
                 const nextTime = Number(e.target.value);
+                userSeekedRef.current = true;
                 videoRef.current.currentTime = nextTime;
                 setCurrent(nextTime);
               }}
@@ -663,7 +675,10 @@ export default function VideoPlayer({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (videoRef.current) videoRef.current.currentTime -= 10;
+                  if (videoRef.current) {
+                    userSeekedRef.current = true;
+                    videoRef.current.currentTime -= 10;
+                  }
                 }}
                 style={pillBtnSmall}
               >
@@ -673,7 +688,10 @@ export default function VideoPlayer({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (videoRef.current) videoRef.current.currentTime -= 5;
+                  if (videoRef.current) {
+                    userSeekedRef.current = true;
+                    videoRef.current.currentTime -= 5;
+                  }
                 }}
                 style={pillBtnSmall}
               >
@@ -695,7 +713,10 @@ export default function VideoPlayer({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (videoRef.current) videoRef.current.currentTime += 5;
+                  if (videoRef.current) {
+                    userSeekedRef.current = true;
+                    videoRef.current.currentTime += 5;
+                  }
                 }}
                 style={pillBtnSmall}
               >
@@ -705,7 +726,10 @@ export default function VideoPlayer({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (videoRef.current) videoRef.current.currentTime += 10;
+                  if (videoRef.current) {
+                    userSeekedRef.current = true;
+                    videoRef.current.currentTime += 10;
+                  }
                 }}
                 style={pillBtnSmall}
               >
