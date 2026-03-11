@@ -157,15 +157,41 @@ export default function VideoPlayer({
     return candidates.length ? Math.max(...candidates) : 0;
   }
 
+  async function forceSeekToStartOffset(el: HTMLVideoElement) {
+    if (el.readyState < 1) {
+      await waitForEvent(el, "loadedmetadata", 2500);
+    }
+
+    const needsSeek = Math.abs(el.currentTime - START_OFFSET_SEC) > 0.35;
+    if (!needsSeek) return;
+
+    try {
+      el.currentTime = START_OFFSET_SEC;
+    } catch {}
+
+    await waitForEvent(el, "seeked", 1200);
+
+    if (Math.abs(el.currentTime - START_OFFSET_SEC) > 0.75) {
+      try {
+        el.currentTime = START_OFFSET_SEC;
+      } catch {}
+      await waitForEvent(el, "seeked", 1200);
+    }
+
+    setCurrent(el.currentTime);
+  }
+
   async function playWithSafariFallback(
     el: HTMLVideoElement,
     wantsAudio: boolean
   ) {
     try {
+      await forceSeekToStartOffset(el);
       el.muted = !wantsAudio;
       await el.play();
       setPlaying(true);
       setVideoStarted(true);
+      setCurrent(el.currentTime);
 
       if (wantsAudio) {
         setMuted(false);
@@ -178,10 +204,12 @@ export default function VideoPlayer({
       return true;
     } catch {
       try {
+        await forceSeekToStartOffset(el);
         el.muted = true;
         await el.play();
         setPlaying(true);
         setVideoStarted(true);
+        setCurrent(el.currentTime);
         setMuted(true);
         setShowTapToUnmute(isActive);
         return true;
@@ -202,11 +230,7 @@ export default function VideoPlayer({
       await waitForEvent(el, "loadedmetadata", 2500);
     }
 
-    try {
-      el.currentTime = START_OFFSET_SEC;
-    } catch {}
-
-    await waitForEvent(el, "seeked", 1500);
+    await forceSeekToStartOffset(el);
 
     try {
       await el.play();
@@ -217,6 +241,7 @@ export default function VideoPlayer({
 
     primedRef.current = true;
     setVideoStarted(true);
+    setCurrent(el.currentTime);
   }
 
   useEffect(() => {
@@ -256,7 +281,10 @@ export default function VideoPlayer({
     const onCanPlay = () => markReady();
     const onProgress = () => syncDuration();
     const onSeeking = () => syncDuration();
-    const onSeeked = () => syncDuration();
+    const onSeeked = () => {
+      syncDuration();
+      setCurrent(el.currentTime);
+    };
     const onPlaying = () => {
       setPlaying(true);
       markReady();
@@ -364,9 +392,8 @@ export default function VideoPlayer({
         try {
           if (!primedRef.current) {
             await primeAtStartOffset(el);
-          } else if (Math.abs(el.currentTime - START_OFFSET_SEC) > 1.5) {
-            el.currentTime = START_OFFSET_SEC;
-            await waitForEvent(el, "seeked", 1200);
+          } else {
+            await forceSeekToStartOffset(el);
           }
         } catch {}
 
@@ -439,6 +466,39 @@ export default function VideoPlayer({
         },
       })
     );
+  };
+
+  const handleShare = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+
+    try {
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "";
+      const deepLink = `${origin}/video/${encodeURIComponent(String(video.id))}`;
+      const fallbackUrl =
+        String((video as any).pageUrl || "").trim() || deepLink;
+
+      const shareData = {
+        title: String(video.title || "動画"),
+        text: String(video.title || "動画"),
+        url: deepLink,
+      };
+
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share(shareData);
+        return;
+      }
+
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(deepLink || fallbackUrl);
+        alert("リンクをコピーしました");
+        return;
+      }
+
+      if (typeof window !== "undefined") {
+        window.prompt("このリンクをコピーしてください", deepLink || fallbackUrl);
+      }
+    } catch {}
   };
 
   const hasDuration = Number.isFinite(duration) && duration > 0;
@@ -650,6 +710,10 @@ export default function VideoPlayer({
                 style={pillBtnSmall}
               >
                 +10
+              </button>
+
+              <button onClick={handleShare} style={pillBtnSmall}>
+                共有
               </button>
             </div>
           </div>
