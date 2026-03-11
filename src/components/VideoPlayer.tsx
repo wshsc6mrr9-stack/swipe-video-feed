@@ -14,7 +14,7 @@ const START_OFFSET_SEC = 7;
 const KEY_LIKED = "liked_videos_v1";
 const EVT_LIKES = "likes_changed_v1";
 const KEY_MUTED = "audio_muted_v1";
-const DOUBLE_TAP_MS = 280;
+const DOUBLE_TAP_MS = 220;
 
 function formatTime(t: number) {
   if (!Number.isFinite(t) || t < 0) return "0:00";
@@ -114,6 +114,10 @@ export default function VideoPlayer({
   const [liked, setLiked] = useState<boolean>(() =>
     readLikedSet().has(String(video.id))
   );
+  const [skipToast, setSkipToast] = useState<{
+    id: number;
+    label: string;
+  } | null>(null);
 
   useEffect(() => {
     setPlaying(false);
@@ -122,12 +126,19 @@ export default function VideoPlayer({
     setLikeCount(Number(video.likeCount ?? 0));
     setLiked(readLikedSet().has(String(video.id)));
     setShowTapToUnmute(false);
+    setSkipToast(null);
     primedRef.current = false;
     startOffsetAppliedRef.current = false;
     userSeekedRef.current = false;
     leftTapAtRef.current = 0;
     rightTapAtRef.current = 0;
   }, [video.id, video.likeCount, (video as any).duration]);
+
+  useEffect(() => {
+    if (!skipToast) return;
+    const t = window.setTimeout(() => setSkipToast(null), 650);
+    return () => window.clearTimeout(t);
+  }, [skipToast]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -275,6 +286,10 @@ export default function VideoPlayer({
     try {
       el.currentTime = nextTime;
       setCurrent(nextTime);
+      setSkipToast({
+        id: Date.now(),
+        label: delta > 0 ? `+${Math.abs(delta)}秒` : `-${Math.abs(delta)}秒`,
+      });
     } catch {}
   }
 
@@ -594,6 +609,38 @@ export default function VideoPlayer({
         }}
       />
 
+      {/* PR badge */}
+      <div
+        style={{
+          position: "absolute",
+          top: "calc(env(safe-area-inset-top) + 10px)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 41,
+          pointerEvents: "none",
+        }}
+      >
+        <div
+          style={{
+            height: 34,
+            padding: "0 18px",
+            borderRadius: 999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.28)",
+            border: "1px solid rgba(255,255,255,0.12)",
+            color: "#fff",
+            fontWeight: 800,
+            fontSize: 14,
+            letterSpacing: "0.18em",
+            backdropFilter: "blur(10px)",
+          }}
+        >
+          PR
+        </div>
+      </div>
+
       {isActive && (
         <>
           <div
@@ -635,6 +682,40 @@ export default function VideoPlayer({
             }}
           />
         </>
+      )}
+
+      {isActive && skipToast && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(env(safe-area-inset-top) + 84px)",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 26,
+            pointerEvents: "none",
+          }}
+        >
+          <div
+            style={{
+              minWidth: 120,
+              height: 44,
+              padding: "0 20px",
+              borderRadius: 999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "rgba(0,0,0,0.42)",
+              border: "1px solid rgba(255,255,255,0.16)",
+              color: "#fff",
+              fontWeight: 900,
+              fontSize: 18,
+              backdropFilter: "blur(10px)",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+            }}
+          >
+            {skipToast.label}
+          </div>
+        </div>
       )}
 
       {isActive && showTapToUnmute && (
@@ -754,7 +835,16 @@ export default function VideoPlayer({
           </div>
 
           <div style={{ textAlign: "center" }}>
-            <div style={{ display: "inline-flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10,
+                flexWrap: "nowrap",
+                whiteSpace: "nowrap",
+              }}
+            >
               <button onClick={toggleLike} style={pillBtnSmall}>
                 {liked ? "♥" : "♡"} {likeCount}
               </button>
@@ -856,6 +946,7 @@ const pillBtnSmall: React.CSSProperties = {
   fontWeight: 800,
   fontSize: 12,
   border: "1px solid rgba(255,255,255,0.1)",
+  flex: "0 0 auto",
 };
 
 const productMainBtn: React.CSSProperties = {
@@ -870,6 +961,7 @@ const productMainBtn: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "center",
   textDecoration: "none",
+  flex: "0 0 auto",
 };
 
 const outerBtnStyle: React.CSSProperties = {
