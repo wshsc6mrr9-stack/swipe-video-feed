@@ -244,11 +244,17 @@ type VideoItem = {
   genres?: string[];
   genre?: string;
   likeCount?: number;
+  duration?: number;
+  pageUrl?: string;
 };
 
 const EVT_LIKES = "likes_changed_v1";
 const KEY_LIKED = "liked_videos_v1";
 const EARLY_SWITCH = 0.12;
+const FEED_CACHE_PREFIX = "video_feed_cache_v3";
+const INITIAL_COUNT = 6;
+const NORMAL_COUNT = 10;
+const INITIAL_LOADING_DELAY_MS = 220;
 
 function readLikedSet(): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -269,6 +275,20 @@ function normalizeText(s: any) {
     .trim();
 }
 
+function normalizeGenreKey(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function buildFeedCacheKey(genres: string[], query: string) {
+  const g = [...genres].map(normalizeGenreKey).sort().join("|");
+  const q = normalizeText(query);
+  return `${FEED_CACHE_PREFIX}:${g}::${q}`;
+}
+
 type Props = {
   initialGenre?: GenreKey;
   hideGenreMenu?: boolean;
@@ -283,6 +303,7 @@ export default function VideoFeed({
   const [items, setItems] = useState<VideoItem[]>([]);
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [showInitialLoading, setShowInitialLoading] = useState(false);
   const loadingRef = useRef(false);
 
   const [page, setPage] = useState(1);
@@ -303,13 +324,85 @@ export default function VideoFeed({
   });
 
   const [query, setQuery] = useState("");
+  const [hasWarmCache, setHasWarmCache] = useState(false);
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const startIdAppliedRef = useRef(false);
   const indexRef = useRef(index);
+  const hydratedCacheKeyRef = useRef<string>("");
+  const currentCacheKeyRef = useRef<string>("");
 
   useEffect(() => {
     indexRef.current = index;
   }, [index]);
+
+  const cacheKey = useMemo(() => {
+    return buildFeedCacheKey(genres.map(String), query);
+  }, [genres, query]);
+
+  useEffect(() => {
+    currentCacheKeyRef.current = cacheKey;
+  }, [cacheKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (hydratedCacheKeyRef.current === cacheKey) return;
+
+    hydratedCacheKeyRef.current = cacheKey;
+    setHasWarmCache(false);
+
+    try {
+      const raw = sessionStorage.getItem(cacheKey);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw);
+      const cachedItems = Array.isArray(parsed?.items) ? parsed.items : [];
+      const cachedPage = Number(parsed?.page ?? 1);
+      const cachedSeed = Number(parsed?.seed ?? seed);
+      const cachedHasMore =
+        typeof parsed?.hasMore === "boolean" ? parsed.hasMore : true;
+
+      if (cachedItems.length === 0) return;
+
+      setItems(
+        cachedItems.filter((v: any) => v && typeof v.id === "string")
+      );
+      setPage(Math.max(1, cachedPage));
+      setSeed(Number.isFinite(cachedSeed) ? cachedSeed : seed);
+      setHasMore(cachedHasMore);
+      setHasWarmCache(true);
+    } catch {}
+  }, [cacheKey, seed]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (items.length === 0) return;
+      sessionStorage.setItem(
+        cacheKey,
+        JSON.stringify({
+          items,
+          page,
+          seed,
+          hasMore,
+          savedAt: Date.now(),
+        })
+      );
+    } catch {}
+  }, [cacheKey, items, page, seed, hasMore]);
+
+  useEffect(() => {
+    if (!(items.length === 0 && loading && !hasWarmCache)) {
+      setShowInitialLoading(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setShowInitialLoading(true);
+    }, INITIAL_LOADING_DELAY_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [items.length, loading, hasWarmCache]);
 
   const loadMoreVideos = useCallback(async () => {
     if (loadingRef.current || !hasMore) return;
@@ -346,6 +439,11 @@ export default function VideoFeed({
         params.set("seed", String(seed));
       }
 
+      params.set(
+        "count",
+        String(page === 1 && items.length === 0 ? INITIAL_COUNT : NORMAL_COUNT)
+      );
+
       if (query) params.set("query", query);
       params.set("_t", Date.now().toString());
 
@@ -370,9 +468,13 @@ export default function VideoFeed({
           srcType: v.srcType,
           affUrl: v.affUrl ?? v.affiliateUrl,
           affLabel: v.affLabel ?? v.affiliateLabel,
+          affiliateUrl: v.affiliateUrl ?? v.affUrl,
+          affiliateLabel: v.affiliateLabel ?? v.affLabel,
           genres: Array.isArray(v.genres) ? v.genres : undefined,
           genre: typeof v.genre === "string" ? v.genre : undefined,
           likeCount: Number(v.likeCount ?? 0),
+          duration: Number(v.duration ?? 0) || undefined,
+          pageUrl: typeof v.pageUrl === "string" ? v.pageUrl : undefined,
         }))
         .filter((v) => !!v.id);
 
@@ -388,7 +490,7 @@ export default function VideoFeed({
       loadingRef.current = false;
       setLoading(false);
     }
-  }, [genres, hasMore, page, query, seed]);
+  }, [genres, hasMore, page, query, seed, items.length]);
 
   const viewItems = useMemo(() => {
     if (genres.includes(GENRE_FAVORITES)) {
@@ -465,7 +567,9 @@ export default function VideoFeed({
     setPage(1);
     setSeed(Math.floor(Math.random() * 1000000));
     setHasMore(true);
+    setHasWarmCache(false);
     startIdAppliedRef.current = false;
+    hydratedCacheKeyRef.current = "";
 
     const el = containerRef.current;
     if (el) el.scrollTo({ top: 0, behavior: "auto" });
@@ -511,14 +615,18 @@ export default function VideoFeed({
   }, [startId, viewItems]);
 
   const handleResetFeed = useCallback((nextGenres?: GenreKey[], nextQuery?: string) => {
-    setGenres(nextGenres ?? [GENRE_ALL]);
+    const resolvedGenres = nextGenres ?? [GENRE_ALL];
+
+    setGenres(resolvedGenres);
     if (typeof nextQuery === "string") setQuery(nextQuery);
     setItems([]);
     setIndex(0);
     setPage(1);
     setSeed(Math.floor(Math.random() * 1000000));
     setHasMore(true);
+    setHasWarmCache(false);
     startIdAppliedRef.current = false;
+    hydratedCacheKeyRef.current = "";
 
     const el = containerRef.current;
     if (el) el.scrollTo({ top: 0, behavior: "auto" });
@@ -564,7 +672,7 @@ export default function VideoFeed({
   const safeLeft = `calc(env(safe-area-inset-left) + ${SAFE_PAD}px)`;
   const safeRight = `calc(env(safe-area-inset-right) + ${SAFE_PAD}px)`;
 
-  const isInitialLoading = items.length === 0 && loading;
+  const isInitialLoading = items.length === 0 && loading && !hasWarmCache && showInitialLoading;
   const isNoResults = !loading && !hasMore && items.length > 0 && viewItems.length === 0;
 
   return (
@@ -702,12 +810,13 @@ export default function VideoFeed({
         {loading && items.length > 0 && (
           <div
             style={{
-              height: 80,
+              height: 48,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "rgba(255,255,255,0.7)",
+              color: "rgba(255,255,255,0.55)",
               background: "#000",
+              fontSize: 12,
             }}
           >
             読み込み中...

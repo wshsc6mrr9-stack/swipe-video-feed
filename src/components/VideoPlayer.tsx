@@ -14,6 +14,7 @@ const START_OFFSET_SEC = 7;
 const KEY_LIKED = "liked_videos_v1";
 const EVT_LIKES = "likes_changed_v1";
 const KEY_MUTED = "audio_muted_v1";
+const DOUBLE_TAP_MS = 280;
 
 function formatTime(t: number) {
   if (!Number.isFinite(t) || t < 0) return "0:00";
@@ -94,6 +95,8 @@ export default function VideoPlayer({
   const primedRef = useRef(false);
   const startOffsetAppliedRef = useRef(false);
   const userSeekedRef = useRef(false);
+  const leftTapAtRef = useRef(0);
+  const rightTapAtRef = useRef(0);
 
   const rawSrc = (video.url ?? (video as any).src ?? "") as string;
 
@@ -122,6 +125,8 @@ export default function VideoPlayer({
     primedRef.current = false;
     startOffsetAppliedRef.current = false;
     userSeekedRef.current = false;
+    leftTapAtRef.current = 0;
+    rightTapAtRef.current = 0;
   }, [video.id, video.likeCount, (video as any).duration]);
 
   useEffect(() => {
@@ -255,6 +260,22 @@ export default function VideoPlayer({
     primedRef.current = true;
     setVideoStarted(true);
     setCurrent(el.currentTime);
+  }
+
+  async function seekBy(delta: number) {
+    const el = videoRef.current;
+    if (!el) return;
+
+    const bestDuration = getBestDuration(el);
+    const maxTime = bestDuration > 0 ? bestDuration : Number.POSITIVE_INFINITY;
+    const nextTime = Math.max(0, Math.min(el.currentTime + delta, maxTime));
+
+    userSeekedRef.current = true;
+
+    try {
+      el.currentTime = nextTime;
+      setCurrent(nextTime);
+    } catch {}
   }
 
   useEffect(() => {
@@ -447,6 +468,32 @@ export default function VideoPlayer({
     await playWithSafariFallback(el, true);
   };
 
+  const handleLeftTap = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const now = Date.now();
+
+    if (now - leftTapAtRef.current <= DOUBLE_TAP_MS) {
+      leftTapAtRef.current = 0;
+      void seekBy(-5);
+      return;
+    }
+
+    leftTapAtRef.current = now;
+  };
+
+  const handleRightTap = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const now = Date.now();
+
+    if (now - rightTapAtRef.current <= DOUBLE_TAP_MS) {
+      rightTapAtRef.current = 0;
+      void seekBy(5);
+      return;
+    }
+
+    rightTapAtRef.current = now;
+  };
+
   const toggleLike = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
 
@@ -545,10 +592,50 @@ export default function VideoPlayer({
           transition: "opacity 0.12s linear",
           background: "#000",
         }}
-        onClick={() => {
-          void togglePlay();
-        }}
       />
+
+      {isActive && (
+        <>
+          <div
+            onClick={handleLeftTap}
+            style={{
+              position: "absolute",
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: "34%",
+              zIndex: 12,
+              background: "transparent",
+            }}
+          />
+          <div
+            onClick={handleRightTap}
+            style={{
+              position: "absolute",
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: "34%",
+              zIndex: 12,
+              background: "transparent",
+            }}
+          />
+          <div
+            onClick={() => {
+              void togglePlay();
+            }}
+            style={{
+              position: "absolute",
+              left: "34%",
+              right: "34%",
+              top: 0,
+              bottom: 0,
+              zIndex: 11,
+              background: "transparent",
+            }}
+          />
+        </>
+      )}
 
       {isActive && showTapToUnmute && (
         <button
@@ -667,7 +754,7 @@ export default function VideoPlayer({
           </div>
 
           <div style={{ textAlign: "center" }}>
-            <div style={{ display: "inline-flex", gap: 10 }}>
+            <div style={{ display: "inline-flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
               <button onClick={toggleLike} style={pillBtnSmall}>
                 {liked ? "♥" : "♡"} {likeCount}
               </button>
@@ -675,10 +762,7 @@ export default function VideoPlayer({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (videoRef.current) {
-                    userSeekedRef.current = true;
-                    videoRef.current.currentTime -= 10;
-                  }
+                  void seekBy(-10);
                 }}
                 style={pillBtnSmall}
               >
@@ -688,10 +772,7 @@ export default function VideoPlayer({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (videoRef.current) {
-                    userSeekedRef.current = true;
-                    videoRef.current.currentTime -= 5;
-                  }
+                  void seekBy(-5);
                 }}
                 style={pillBtnSmall}
               >
@@ -713,10 +794,7 @@ export default function VideoPlayer({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (videoRef.current) {
-                    userSeekedRef.current = true;
-                    videoRef.current.currentTime += 5;
-                  }
+                  void seekBy(5);
                 }}
                 style={pillBtnSmall}
               >
@@ -726,10 +804,7 @@ export default function VideoPlayer({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (videoRef.current) {
-                    userSeekedRef.current = true;
-                    videoRef.current.currentTime += 10;
-                  }
+                  void seekBy(10);
                 }}
                 style={pillBtnSmall}
               >
