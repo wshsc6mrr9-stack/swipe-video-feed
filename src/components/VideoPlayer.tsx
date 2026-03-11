@@ -5,7 +5,7 @@ import Hls from "hls.js";
 import type { VideoMeta } from "@/lib/types";
 
 type Props = {
-  video: VideoMeta & { likeCount?: number };
+  video: VideoMeta & { likeCount?: number; duration?: number };
   isActive?: boolean;
   isNeighbor?: boolean;
 };
@@ -13,6 +13,7 @@ type Props = {
 const START_OFFSET_SEC = 7;
 const KEY_LIKED = "liked_videos_v1";
 const EVT_LIKES = "likes_changed_v1";
+const KEY_MUTED = "audio_muted_v1";
 
 function formatTime(t: number) {
   if (!Number.isFinite(t) || t < 0) return "0:00";
@@ -73,6 +74,15 @@ function writeLikedSet(set: Set<string>) {
   } catch {}
 }
 
+function readMutedPreference() {
+  if (typeof window === "undefined") return true;
+  try {
+    return localStorage.getItem(KEY_MUTED) !== "0";
+  } catch {
+    return true;
+  }
+}
+
 export default function VideoPlayer({
   video,
   isActive = false,
@@ -87,8 +97,11 @@ export default function VideoPlayer({
 
   const [playing, setPlaying] = useState(false);
   const [videoStarted, setVideoStarted] = useState(false);
-  const [muted, setMuted] = useState(true);
-  const [duration, setDuration] = useState(0);
+  const [muted, setMuted] = useState<boolean>(() => readMutedPreference());
+  const [showTapToUnmute, setShowTapToUnmute] = useState(false);
+  const [duration, setDuration] = useState<number>(() =>
+    Number((video as any).duration ?? 0)
+  );
   const [current, setCurrent] = useState(START_OFFSET_SEC);
   const [likeCount, setLikeCount] = useState<number>(() =>
     Number(video.likeCount ?? 0)
@@ -100,14 +113,27 @@ export default function VideoPlayer({
   useEffect(() => {
     setPlaying(false);
     setCurrent(START_OFFSET_SEC);
-    setDuration(0);
+    setDuration(Number((video as any).duration ?? 0));
     setLikeCount(Number(video.likeCount ?? 0));
     setLiked(readLikedSet().has(String(video.id)));
+    setShowTapToUnmute(false);
     primedRef.current = false;
-  }, [video.id, video.likeCount]);
+  }, [video.id, video.likeCount, (video as any).duration]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(KEY_MUTED, muted ? "1" : "0");
+    } catch {}
+  }, [muted]);
 
   function getBestDuration(el: HTMLVideoElement) {
     const candidates: number[] = [];
+
+    const incomingDuration = Number((video as any).duration ?? 0);
+    if (Number.isFinite(incomingDuration) && incomingDuration > 0) {
+      candidates.push(incomingDuration);
+    }
 
     if (Number.isFinite(el.duration) && el.duration > 0) {
       candidates.push(el.duration);
@@ -129,6 +155,41 @@ export default function VideoPlayer({
     }
 
     return candidates.length ? Math.max(...candidates) : 0;
+  }
+
+  async function playWithSafariFallback(
+    el: HTMLVideoElement,
+    wantsAudio: boolean
+  ) {
+    try {
+      el.muted = !wantsAudio;
+      await el.play();
+      setPlaying(true);
+      setVideoStarted(true);
+
+      if (wantsAudio) {
+        setMuted(false);
+        setShowTapToUnmute(false);
+      } else {
+        setMuted(true);
+        setShowTapToUnmute(isActive);
+      }
+
+      return true;
+    } catch {
+      try {
+        el.muted = true;
+        await el.play();
+        setPlaying(true);
+        setVideoStarted(true);
+        setMuted(true);
+        setShowTapToUnmute(isActive);
+        return true;
+      } catch {
+        setPlaying(false);
+        return false;
+      }
+    }
   }
 
   async function primeAtStartOffset(el: HTMLVideoElement) {
@@ -300,8 +361,6 @@ export default function VideoPlayer({
       }
 
       if (isActive) {
-        el.muted = muted;
-
         try {
           if (!primedRef.current) {
             await primeAtStartOffset(el);
@@ -313,24 +372,11 @@ export default function VideoPlayer({
 
         if (cancelled) return;
 
-        try {
-          await el.play();
-          if (cancelled) return;
-          setPlaying(true);
-          setVideoStarted(true);
-        } catch {
-          el.muted = true;
-          el.play()
-            .then(() => {
-              if (cancelled) return;
-              setPlaying(true);
-              setVideoStarted(true);
-            })
-            .catch(() => {});
-        }
+        await playWithSafariFallback(el, !muted);
         return;
       }
 
+      setShowTapToUnmute(false);
       el.pause();
       setPlaying(false);
     };
@@ -340,23 +386,27 @@ export default function VideoPlayer({
     return () => {
       cancelled = true;
     };
-  }, [isActive, isNeighbor, muted]);
+  }, [isActive, isNeighbor]);
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     const el = videoRef.current;
     if (!el) return;
 
     if (el.paused) {
-      el.play()
-        .then(() => {
-          setPlaying(true);
-          setVideoStarted(true);
-        })
-        .catch(() => {});
+      await playWithSafariFallback(el, !muted);
     } else {
       el.pause();
       setPlaying(false);
     }
+  };
+
+  const handleTapToUnmute = async () => {
+    const el = videoRef.current;
+    if (!el) return;
+
+    setMuted(false);
+    setShowTapToUnmute(false);
+    await playWithSafariFallback(el, true);
   };
 
   const toggleLike = (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -424,8 +474,48 @@ export default function VideoPlayer({
           transition: "opacity 0.12s linear",
           background: "#000",
         }}
-        onClick={togglePlay}
+        onClick={() => {
+          void togglePlay();
+        }}
       />
+
+      {isActive && showTapToUnmute && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            void handleTapToUnmute();
+          }}
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 25,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+          }}
+        >
+          <div
+            style={{
+              padding: "18px 34px",
+              borderRadius: 999,
+              background: "rgba(80,50,30,0.45)",
+              border: "1px solid rgba(255,255,255,0.18)",
+              color: "#fff",
+              fontWeight: 900,
+              fontSize: 24,
+              letterSpacing: "0.02em",
+              backdropFilter: "blur(12px)",
+              boxShadow: "0 8px 30px rgba(0,0,0,0.28)",
+            }}
+          >
+            タップで音ON
+          </div>
+        </button>
+      )}
 
       <div
         style={{
@@ -450,7 +540,17 @@ export default function VideoPlayer({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              setMuted(!muted);
+              const nextMuted = !muted;
+              setMuted(nextMuted);
+              setShowTapToUnmute(nextMuted);
+
+              const el = videoRef.current;
+              if (el) {
+                el.muted = nextMuted;
+                if (!nextMuted) {
+                  void playWithSafariFallback(el, true);
+                }
+              }
             }}
             style={outerBtnStyle}
           >
@@ -462,7 +562,7 @@ export default function VideoPlayer({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              togglePlay();
+              void togglePlay();
             }}
             style={outerBtnStyle}
           >
