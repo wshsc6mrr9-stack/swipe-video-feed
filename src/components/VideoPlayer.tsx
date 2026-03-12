@@ -31,7 +31,7 @@ function formatDurationOrUnknown(t: number) {
 function waitForEvent(
   el: HTMLVideoElement,
   eventName: string,
-  timeoutMs = 2000
+  timeoutMs = 1600
 ) {
   return new Promise<void>((resolve) => {
     let done = false;
@@ -51,9 +51,9 @@ function waitForEvent(
   });
 }
 
-function waitNextFrame() {
+function waitMs(ms: number) {
   return new Promise<void>((resolve) => {
-    requestAnimationFrame(() => resolve());
+    window.setTimeout(resolve, ms);
   });
 }
 
@@ -92,16 +92,18 @@ export default function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const sourceKeyRef = useRef("");
-  const primedRef = useRef(false);
-  const startOffsetAppliedRef = useRef(false);
-  const userSeekedRef = useRef(false);
   const leftTapAtRef = useRef(0);
   const rightTapAtRef = useRef(0);
+  const startOffsetAppliedRef = useRef(false);
+  const userSeekedRef = useRef(false);
+  const ensureOffsetRunningRef = useRef(false);
+  const neighborPrimedRef = useRef(false);
 
   const rawSrc = (video.url ?? (video as any).src ?? "") as string;
 
   const [playing, setPlaying] = useState(false);
   const [videoStarted, setVideoStarted] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(true);
   const [muted, setMuted] = useState<boolean>(() => readMutedPreference());
   const [showTapToUnmute, setShowTapToUnmute] = useState(false);
   const [duration, setDuration] = useState<number>(() =>
@@ -127,9 +129,12 @@ export default function VideoPlayer({
     setLiked(readLikedSet().has(String(video.id)));
     setShowTapToUnmute(false);
     setSkipToast(null);
-    primedRef.current = false;
+    setVideoStarted(false);
+    setIsBuffering(true);
     startOffsetAppliedRef.current = false;
     userSeekedRef.current = false;
+    ensureOffsetRunningRef.current = false;
+    neighborPrimedRef.current = false;
     leftTapAtRef.current = 0;
     rightTapAtRef.current = 0;
   }, [video.id, video.likeCount, (video as any).duration]);
@@ -177,39 +182,128 @@ export default function VideoPlayer({
     return candidates.length ? Math.max(...candidates) : 0;
   }
 
-  async function forceSeekToStartOffset(
+  function getSeekableStart(el: HTMLVideoElement) {
+    try {
+      if (el.seekable && el.seekable.length > 0) {
+        const v = el.seekable.start(0);
+        if (Number.isFinite(v)) return v;
+      }
+    } catch {}
+    return 0;
+  }
+
+  function getSeekableEnd(el: HTMLVideoElement) {
+    try {
+      if (el.seekable && el.seekable.length > 0) {
+        const v = el.seekable.end(el.seekable.length - 1);
+        if (Number.isFinite(v)) return v;
+      }
+    } catch {}
+    return getBestDuration(el);
+  }
+
+  function getSafeStartTarget(el: HTMLVideoElement) {
+    const seekableStart = getSeekableStart(el);
+    const seekableEnd = getSeekableEnd(el);
+
+    if (Number.isFinite(seekableEnd) && seekableEnd > 0) {
+      return Math.max(
+        seekableStart,
+        Math.min(START_OFFSET_SEC, Math.max(seekableStart, seekableEnd - 0.15))
+      );
+    }
+
+    return START_OFFSET_SEC;
+  }
+
+  async function ensureStartOffsetLocked(
     el: HTMLVideoElement,
-    force = false
+    force = false,
+    retries = 2
   ) {
+    if (!isActive && !force) return;
     if (!force && (startOffsetAppliedRef.current || userSeekedRef.current)) {
       return;
     }
+    if (ensureOffsetRunningRef.current) return;
 
-    if (el.readyState < 1) {
-      await waitForEvent(el, "loadedmetadata", 2500);
+    ensureOffsetRunningRef.current = true;
+
+    try {
+      if (el.readyState < 1) {
+        await waitForEvent(el, "loadedmetadata", 1400);
+      }
+
+      for (let i = 0; i < retries; i++) {
+        if (userSeekedRef.current) return;
+
+        const target = getSafeStartTarget(el);
+        if (Math.abs(el.currentTime - target) <= 0.55) {
+          startOffsetAppliedRef.current = true;
+          setCurrent(el.currentTime);
+          return;
+        }
+
+        try {
+          el.currentTime = target;
+        } catch {}
+
+        await Promise.race([
+          waitForEvent(el, "seeked", 600),
+          waitForEvent(el, "timeupdate", 600),
+          waitMs(90),
+        ]);
+
+        setCurrent(el.currentTime);
+
+        if (Math.abs(el.currentTime - target) <= 0.7) {
+          startOffsetAppliedRef.current = true;
+          return;
+        }
+      }
+    } finally {
+      ensureOffsetRunningRef.current = false;
     }
+  }
 
-    const needsSeek = Math.abs(el.currentTime - START_OFFSET_SEC) > 0.35;
-    if (!needsSeek) {
-      startOffsetAppliedRef.current = true;
+  async function primeNeighborFrame(el: HTMLVideoElement) {
+    if (!isNeighbor) return;
+    if (neighborPrimedRef.current) return;
+    if (rawSrc.includes(".m3u8") && !Hls.isSupported() && !el.canPlayType("application/vnd.apple.mpegurl")) {
       return;
     }
 
     try {
-      el.currentTime = START_OFFSET_SEC;
-    } catch {}
+      if (el.readyState < 1) {
+        await waitForEvent(el, "loadedmetadata", 1800);
+      }
 
-    await waitForEvent(el, "seeked", 1200);
+      const target = getSafeStartTarget(el);
 
-    if (Math.abs(el.currentTime - START_OFFSET_SEC) > 0.75) {
       try {
-        el.currentTime = START_OFFSET_SEC;
+        el.currentTime = target;
       } catch {}
-      await waitForEvent(el, "seeked", 1200);
-    }
 
-    setCurrent(el.currentTime);
-    startOffsetAppliedRef.current = true;
+      await Promise.race([
+        waitForEvent(el, "seeked", 700),
+        waitForEvent(el, "loadeddata", 700),
+        waitForEvent(el, "canplay", 700),
+        waitMs(120),
+      ]);
+
+      el.muted = true;
+
+      try {
+        await el.play();
+        await Promise.race([waitForEvent(el, "timeupdate", 220), waitMs(120)]);
+        el.pause();
+      } catch {}
+
+      setCurrent(el.currentTime || target);
+      setVideoStarted(true);
+      setIsBuffering(false);
+      neighborPrimedRef.current = true;
+    } catch {}
   }
 
   async function playWithSafariFallback(
@@ -221,7 +315,12 @@ export default function VideoPlayer({
       await el.play();
       setPlaying(true);
       setVideoStarted(true);
+      setIsBuffering(false);
       setCurrent(el.currentTime);
+
+      if (!startOffsetAppliedRef.current && !userSeekedRef.current) {
+        void ensureStartOffsetLocked(el, false, 1);
+      }
 
       if (wantsAudio) {
         setMuted(false);
@@ -238,7 +337,13 @@ export default function VideoPlayer({
         await el.play();
         setPlaying(true);
         setVideoStarted(true);
+        setIsBuffering(false);
         setCurrent(el.currentTime);
+
+        if (!startOffsetAppliedRef.current && !userSeekedRef.current) {
+          void ensureStartOffsetLocked(el, false, 1);
+        }
+
         setMuted(true);
         setShowTapToUnmute(isActive);
         return true;
@@ -247,30 +352,6 @@ export default function VideoPlayer({
         return false;
       }
     }
-  }
-
-  async function primeAtStartOffset(el: HTMLVideoElement) {
-    if (primedRef.current) return;
-
-    el.muted = true;
-    el.preload = "auto";
-
-    if (el.readyState < 1) {
-      await waitForEvent(el, "loadedmetadata", 2500);
-    }
-
-    await forceSeekToStartOffset(el, true);
-
-    try {
-      await el.play();
-      await waitNextFrame();
-      await waitNextFrame();
-      el.pause();
-    } catch {}
-
-    primedRef.current = true;
-    setVideoStarted(true);
-    setCurrent(el.currentTime);
   }
 
   async function seekBy(delta: number) {
@@ -306,11 +387,11 @@ export default function VideoPlayer({
       hlsRef.current = null;
     }
 
-    primedRef.current = false;
-
-    el.pause();
-    el.removeAttribute("src");
-    el.load();
+    startOffsetAppliedRef.current = false;
+    userSeekedRef.current = false;
+    ensureOffsetRunningRef.current = false;
+    neighborPrimedRef.current = false;
+    setIsBuffering(true);
 
     const syncDuration = () => {
       const next = getBestDuration(el);
@@ -321,52 +402,104 @@ export default function VideoPlayer({
 
     const markReady = () => {
       setVideoStarted(true);
+      setIsBuffering(false);
       syncDuration();
     };
 
-    const onLoadedMetadata = () => syncDuration();
+    const onLoadedMetadata = () => {
+      syncDuration();
+
+      if (isActive && !userSeekedRef.current && !startOffsetAppliedRef.current) {
+        void ensureStartOffsetLocked(el, false, 2);
+      }
+
+      if (isNeighbor && !neighborPrimedRef.current) {
+        void primeNeighborFrame(el);
+      }
+    };
+
     const onDurationChange = () => syncDuration();
-    const onLoadedData = () => markReady();
-    const onCanPlay = () => markReady();
+
+    const onLoadedData = () => {
+      if (isActive) {
+        markReady();
+      } else if (isNeighbor) {
+        setVideoStarted(true);
+      }
+    };
+
+    const onCanPlay = () => {
+      if (isActive) {
+        markReady();
+      } else if (isNeighbor) {
+        setVideoStarted(true);
+      }
+    };
+
+    const onWaiting = () => {
+      if (isActive) setIsBuffering(true);
+    };
+
+    const onPlaying = () => {
+      setPlaying(true);
+      setVideoStarted(true);
+      setIsBuffering(false);
+      syncDuration();
+    };
+
+    const onPause = () => setPlaying(false);
+
     const onProgress = () => syncDuration();
-    const onSeeking = () => syncDuration();
+
+    const onSeeking = () => {
+      if (isActive) setIsBuffering(true);
+      syncDuration();
+    };
+
     const onSeeked = () => {
       syncDuration();
       setCurrent(el.currentTime);
+      if (isActive) {
+        setIsBuffering(false);
+      }
     };
-    const onPlaying = () => {
-      setPlaying(true);
-      markReady();
-    };
-    const onPause = () => setPlaying(false);
+
     const onTimeUpdate = () => {
       setCurrent(el.currentTime);
-      syncDuration();
       if (el.currentTime > 0.1) {
-        markReady();
+        setVideoStarted(true);
+        if (isActive) setIsBuffering(false);
       }
+    };
+
+    const onEnded = () => {
+      setIsBuffering(false);
     };
 
     el.addEventListener("loadedmetadata", onLoadedMetadata);
     el.addEventListener("durationchange", onDurationChange);
     el.addEventListener("loadeddata", onLoadedData);
     el.addEventListener("canplay", onCanPlay);
+    el.addEventListener("waiting", onWaiting);
+    el.addEventListener("playing", onPlaying);
+    el.addEventListener("pause", onPause);
     el.addEventListener("progress", onProgress);
     el.addEventListener("seeking", onSeeking);
     el.addEventListener("seeked", onSeeked);
-    el.addEventListener("playing", onPlaying);
-    el.addEventListener("pause", onPause);
     el.addEventListener("timeupdate", onTimeUpdate);
+    el.addEventListener("ended", onEnded);
 
     if (rawSrc.includes(".m3u8")) {
       if (Hls.isSupported()) {
         const hls = new Hls({
-          startPosition: START_OFFSET_SEC,
-          maxBufferLength: 10,
-          maxMaxBufferLength: 20,
+          startPosition: isActive || isNeighbor ? START_OFFSET_SEC : -1,
+          maxBufferLength: isActive ? 6 : 3,
+          maxMaxBufferLength: isActive ? 12 : 6,
           backBufferLength: 0,
           enableWorker: true,
           lowLatencyMode: true,
+          startFragPrefetch: isNeighbor,
+          testBandwidth: false,
         } as any);
 
         hlsRef.current = hls;
@@ -375,6 +508,9 @@ export default function VideoPlayer({
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           syncDuration();
+          if (isNeighbor && !neighborPrimedRef.current) {
+            void primeNeighborFrame(el);
+          }
         });
 
         hls.on(Hls.Events.LEVEL_LOADED, (_event, data: any) => {
@@ -385,20 +521,13 @@ export default function VideoPlayer({
             syncDuration();
           }
         });
-
-        hls.on(Hls.Events.FRAG_BUFFERED, () => {
-          syncDuration();
-        });
-      } else if (el.canPlayType("application/vnd.apple.mpegurl")) {
-        el.src = rawSrc;
-        el.preload = "auto";
       } else {
         el.src = rawSrc;
-        el.preload = "auto";
+        el.preload = isActive || isNeighbor ? "auto" : "none";
       }
     } else {
       el.src = rawSrc;
-      el.preload = "auto";
+      el.preload = isActive || isNeighbor ? "auto" : "none";
     }
 
     return () => {
@@ -406,19 +535,21 @@ export default function VideoPlayer({
       el.removeEventListener("durationchange", onDurationChange);
       el.removeEventListener("loadeddata", onLoadedData);
       el.removeEventListener("canplay", onCanPlay);
+      el.removeEventListener("waiting", onWaiting);
+      el.removeEventListener("playing", onPlaying);
+      el.removeEventListener("pause", onPause);
       el.removeEventListener("progress", onProgress);
       el.removeEventListener("seeking", onSeeking);
       el.removeEventListener("seeked", onSeeked);
-      el.removeEventListener("playing", onPlaying);
-      el.removeEventListener("pause", onPause);
       el.removeEventListener("timeupdate", onTimeUpdate);
+      el.removeEventListener("ended", onEnded);
 
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
     };
-  }, [video.id, rawSrc]);
+  }, [video.id, rawSrc, isActive, isNeighbor]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -427,32 +558,32 @@ export default function VideoPlayer({
     let cancelled = false;
 
     const run = async () => {
-      if (isNeighbor) {
-        try {
-          await primeAtStartOffset(el);
-          if (cancelled) return;
-          el.pause();
-          setPlaying(false);
-        } catch {}
+      if (isActive) {
+        if (!startOffsetAppliedRef.current && !userSeekedRef.current) {
+          try {
+            await ensureStartOffsetLocked(el, false, 1);
+          } catch {}
+        }
+
+        if (cancelled) return;
+        await playWithSafariFallback(el, !muted);
         return;
       }
 
-      if (isActive) {
-        try {
-          if (!primedRef.current) {
-            await primeAtStartOffset(el);
-          }
-        } catch {}
-
-        if (cancelled) return;
-
-        await playWithSafariFallback(el, !muted);
+      if (isNeighbor) {
+        setShowTapToUnmute(false);
+        el.pause();
+        setPlaying(false);
+        if (!neighborPrimedRef.current) {
+          void primeNeighborFrame(el);
+        }
         return;
       }
 
       setShowTapToUnmute(false);
       el.pause();
       setPlaying(false);
+      setIsBuffering(false);
     };
 
     run();
@@ -594,8 +725,9 @@ export default function VideoPlayer({
       <video
         ref={videoRef}
         playsInline
-        preload="auto"
+        preload={isActive || isNeighbor ? "auto" : "none"}
         muted={!isActive || muted}
+        poster=""
         style={{
           width: "100%",
           height: "100%",
@@ -603,11 +735,24 @@ export default function VideoPlayer({
           position: "absolute",
           inset: 0,
           zIndex: 1,
-          opacity: videoStarted ? 1 : 0.001,
+          opacity: videoStarted || isNeighbor ? 1 : 0.08,
           transition: "opacity 0.12s linear",
           background: "#000",
         }}
       />
+
+      {isActive && isBuffering && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 2,
+            background:
+              "linear-gradient(to bottom, rgba(0,0,0,0.10), rgba(0,0,0,0.22))",
+            pointerEvents: "none",
+          }}
+        />
+      )}
 
       <div
         style={{
@@ -788,8 +933,8 @@ export default function VideoPlayer({
               const el = videoRef.current;
               if (el) {
                 el.muted = nextMuted;
-                if (!nextMuted) {
-                  void playWithSafariFallback(el, true);
+                if (!nextMuted && !el.paused) {
+                  el.muted = false;
                 }
               }
             }}
