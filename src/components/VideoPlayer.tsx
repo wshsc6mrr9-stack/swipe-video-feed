@@ -57,6 +57,12 @@ function waitMs(ms: number) {
   });
 }
 
+function waitNextFrame() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
 function readLikedSet(): Set<string> {
   if (typeof window === "undefined") return new Set();
   try {
@@ -174,12 +180,22 @@ export default function VideoPlayer({
     }
 
     const hls = hlsRef.current;
-    const details = hls?.levels?.[hls.currentLevel]?.details as any;
+    const currentLevel = hls?.currentLevel ?? -1;
+    const level =
+      currentLevel >= 0 ? hls?.levels?.[currentLevel] : hls?.levels?.[0];
+    const details = level?.details as any;
     if (Number.isFinite(details?.totalduration) && details.totalduration > 0) {
       candidates.push(details.totalduration);
     }
 
     return candidates.length ? Math.max(...candidates) : 0;
+  }
+
+  function syncDurationFromElement(el: HTMLVideoElement) {
+    const next = getBestDuration(el);
+    if (next > 0) {
+      setDuration((prev) => (Math.abs(prev - next) > 0.01 ? next : prev));
+    }
   }
 
   function getSeekableStart(el: HTMLVideoElement) {
@@ -219,10 +235,11 @@ export default function VideoPlayer({
   async function ensureStartOffsetLocked(
     el: HTMLVideoElement,
     force = false,
-    retries = 2
+    retries = 3
   ) {
-    if (!isActive && !force) return;
-    if (!force && (startOffsetAppliedRef.current || userSeekedRef.current)) {
+    if (!isActive && !isNeighbor && !force) return;
+    if (!force && userSeekedRef.current) return;
+    if (!force && startOffsetAppliedRef.current && el.currentTime >= START_OFFSET_SEC - 0.7) {
       return;
     }
     if (ensureOffsetRunningRef.current) return;
@@ -231,16 +248,18 @@ export default function VideoPlayer({
 
     try {
       if (el.readyState < 1) {
-        await waitForEvent(el, "loadedmetadata", 1400);
+        await waitForEvent(el, "loadedmetadata", 1600);
       }
 
       for (let i = 0; i < retries; i++) {
-        if (userSeekedRef.current) return;
+        if (userSeekedRef.current && !force) return;
 
         const target = getSafeStartTarget(el);
+
         if (Math.abs(el.currentTime - target) <= 0.55) {
           startOffsetAppliedRef.current = true;
-          setCurrent(el.currentTime);
+          setCurrent(target);
+          syncDurationFromElement(el);
           return;
         }
 
@@ -249,17 +268,25 @@ export default function VideoPlayer({
         } catch {}
 
         await Promise.race([
-          waitForEvent(el, "seeked", 600),
-          waitForEvent(el, "timeupdate", 600),
-          waitMs(90),
+          waitForEvent(el, "seeked", 700),
+          waitForEvent(el, "timeupdate", 700),
+          waitMs(100),
         ]);
 
-        setCurrent(el.currentTime);
+        syncDurationFromElement(el);
+        setCurrent(el.currentTime || target);
 
-        if (Math.abs(el.currentTime - target) <= 0.7) {
+        if (Math.abs(el.currentTime - target) <= 0.75) {
           startOffsetAppliedRef.current = true;
+          setCurrent(target);
           return;
         }
+      }
+
+      const fallbackTarget = getSafeStartTarget(el);
+      if (Math.abs(el.currentTime - fallbackTarget) <= 1.0) {
+        startOffsetAppliedRef.current = true;
+        setCurrent(fallbackTarget);
       }
     } finally {
       ensureOffsetRunningRef.current = false;
@@ -269,37 +296,30 @@ export default function VideoPlayer({
   async function primeNeighborFrame(el: HTMLVideoElement) {
     if (!isNeighbor) return;
     if (neighborPrimedRef.current) return;
-    if (rawSrc.includes(".m3u8") && !Hls.isSupported() && !el.canPlayType("application/vnd.apple.mpegurl")) {
-      return;
-    }
 
     try {
       if (el.readyState < 1) {
         await waitForEvent(el, "loadedmetadata", 1800);
       }
 
-      const target = getSafeStartTarget(el);
-
-      try {
-        el.currentTime = target;
-      } catch {}
-
-      await Promise.race([
-        waitForEvent(el, "seeked", 700),
-        waitForEvent(el, "loadeddata", 700),
-        waitForEvent(el, "canplay", 700),
-        waitMs(120),
-      ]);
+      await ensureStartOffsetLocked(el, true, 2);
 
       el.muted = true;
 
       try {
         await el.play();
-        await Promise.race([waitForEvent(el, "timeupdate", 220), waitMs(120)]);
+        await waitNextFrame();
+        await Promise.race([
+          waitForEvent(el, "timeupdate", 240),
+          waitForEvent(el, "loadeddata", 240),
+          waitMs(120),
+        ]);
         el.pause();
       } catch {}
 
-      setCurrent(el.currentTime || target);
+      const target = getSafeStartTarget(el);
+      setCurrent(el.currentTime >= target - 1 ? target : el.currentTime || target);
+      syncDurationFromElement(el);
       setVideoStarted(true);
       setIsBuffering(false);
       neighborPrimedRef.current = true;
@@ -310,16 +330,26 @@ export default function VideoPlayer({
     el: HTMLVideoElement,
     wantsAudio: boolean
   ) {
+    if (!userSeekedRef.current) {
+      await ensureStartOffsetLocked(el, true, 2);
+    }
+
     try {
       el.muted = !wantsAudio;
       await el.play();
       setPlaying(true);
       setVideoStarted(true);
       setIsBuffering(false);
-      setCurrent(el.currentTime);
+      syncDurationFromElement(el);
 
-      if (!startOffsetAppliedRef.current && !userSeekedRef.current) {
-        void ensureStartOffsetLocked(el, false, 1);
+      if (!userSeekedRef.current) {
+        const target = getSafeStartTarget(el);
+        if (el.currentTime < target - 0.8) {
+          await ensureStartOffsetLocked(el, true, 2);
+        }
+        setCurrent(target);
+      } else {
+        setCurrent(el.currentTime);
       }
 
       if (wantsAudio) {
@@ -338,10 +368,16 @@ export default function VideoPlayer({
         setPlaying(true);
         setVideoStarted(true);
         setIsBuffering(false);
-        setCurrent(el.currentTime);
+        syncDurationFromElement(el);
 
-        if (!startOffsetAppliedRef.current && !userSeekedRef.current) {
-          void ensureStartOffsetLocked(el, false, 1);
+        if (!userSeekedRef.current) {
+          const target = getSafeStartTarget(el);
+          if (el.currentTime < target - 0.8) {
+            await ensureStartOffsetLocked(el, true, 2);
+          }
+          setCurrent(target);
+        } else {
+          setCurrent(el.currentTime);
         }
 
         setMuted(true);
@@ -367,6 +403,7 @@ export default function VideoPlayer({
     try {
       el.currentTime = nextTime;
       setCurrent(nextTime);
+      syncDurationFromElement(el);
       setSkipToast({
         id: Date.now(),
         label: delta > 0 ? `+${Math.abs(delta)}秒` : `-${Math.abs(delta)}秒`,
@@ -393,24 +430,11 @@ export default function VideoPlayer({
     neighborPrimedRef.current = false;
     setIsBuffering(true);
 
-    const syncDuration = () => {
-      const next = getBestDuration(el);
-      if (next > 0) {
-        setDuration(next);
-      }
-    };
-
-    const markReady = () => {
-      setVideoStarted(true);
-      setIsBuffering(false);
-      syncDuration();
-    };
-
     const onLoadedMetadata = () => {
-      syncDuration();
+      syncDurationFromElement(el);
 
-      if (isActive && !userSeekedRef.current && !startOffsetAppliedRef.current) {
-        void ensureStartOffsetLocked(el, false, 2);
+      if (isActive && !userSeekedRef.current) {
+        void ensureStartOffsetLocked(el, true, 2);
       }
 
       if (isNeighbor && !neighborPrimedRef.current) {
@@ -418,19 +442,25 @@ export default function VideoPlayer({
       }
     };
 
-    const onDurationChange = () => syncDuration();
+    const onDurationChange = () => {
+      syncDurationFromElement(el);
+    };
 
     const onLoadedData = () => {
+      syncDurationFromElement(el);
       if (isActive) {
-        markReady();
+        setVideoStarted(true);
+        setIsBuffering(false);
       } else if (isNeighbor) {
         setVideoStarted(true);
       }
     };
 
     const onCanPlay = () => {
+      syncDurationFromElement(el);
       if (isActive) {
-        markReady();
+        setVideoStarted(true);
+        setIsBuffering(false);
       } else if (isNeighbor) {
         setVideoStarted(true);
       }
@@ -444,28 +474,61 @@ export default function VideoPlayer({
       setPlaying(true);
       setVideoStarted(true);
       setIsBuffering(false);
-      syncDuration();
+      syncDurationFromElement(el);
+
+      if (!userSeekedRef.current) {
+        const target = getSafeStartTarget(el);
+        if (el.currentTime < target - 0.8) {
+          void ensureStartOffsetLocked(el, true, 2);
+        } else {
+          setCurrent(target);
+          startOffsetAppliedRef.current = true;
+        }
+      }
     };
 
     const onPause = () => setPlaying(false);
 
-    const onProgress = () => syncDuration();
+    const onProgress = () => syncDurationFromElement(el);
 
     const onSeeking = () => {
       if (isActive) setIsBuffering(true);
-      syncDuration();
+      syncDurationFromElement(el);
     };
 
     const onSeeked = () => {
-      syncDuration();
-      setCurrent(el.currentTime);
+      syncDurationFromElement(el);
+      if (!userSeekedRef.current && (isActive || isNeighbor)) {
+        const target = getSafeStartTarget(el);
+        if (Math.abs(el.currentTime - target) <= 1.0) {
+          setCurrent(target);
+          startOffsetAppliedRef.current = true;
+        } else {
+          setCurrent(el.currentTime);
+        }
+      } else {
+        setCurrent(el.currentTime);
+      }
       if (isActive) {
         setIsBuffering(false);
       }
     };
 
     const onTimeUpdate = () => {
-      setCurrent(el.currentTime);
+      syncDurationFromElement(el);
+
+      if (!userSeekedRef.current && (isActive || isNeighbor)) {
+        const target = getSafeStartTarget(el);
+        if (el.currentTime >= target - 0.8) {
+          setCurrent(target);
+          startOffsetAppliedRef.current = true;
+        } else {
+          setCurrent(el.currentTime);
+        }
+      } else {
+        setCurrent(el.currentTime);
+      }
+
       if (el.currentTime > 0.1) {
         setVideoStarted(true);
         if (isActive) setIsBuffering(false);
@@ -507,7 +570,7 @@ export default function VideoPlayer({
         hls.attachMedia(el);
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          syncDuration();
+          syncDurationFromElement(el);
           if (isNeighbor && !neighborPrimedRef.current) {
             void primeNeighborFrame(el);
           }
@@ -518,8 +581,16 @@ export default function VideoPlayer({
           if (total > 0) {
             setDuration(total);
           } else {
-            syncDuration();
+            syncDurationFromElement(el);
           }
+        });
+
+        hls.on(Hls.Events.FRAG_BUFFERED, () => {
+          syncDurationFromElement(el);
+        });
+
+        hls.on(Hls.Events.BUFFER_APPENDED, () => {
+          syncDurationFromElement(el);
         });
       } else {
         el.src = rawSrc;
@@ -559,9 +630,9 @@ export default function VideoPlayer({
 
     const run = async () => {
       if (isActive) {
-        if (!startOffsetAppliedRef.current && !userSeekedRef.current) {
+        if (!userSeekedRef.current) {
           try {
-            await ensureStartOffsetLocked(el, false, 1);
+            await ensureStartOffsetLocked(el, true, 2);
           } catch {}
         }
 
@@ -705,9 +776,15 @@ export default function VideoPlayer({
     } catch {}
   };
 
-  const hasDuration = Number.isFinite(duration) && duration > 0;
+  const displayDuration = duration > 0
+    ? duration
+    : Number((video as any).duration ?? 0) > 0
+      ? Number((video as any).duration ?? 0)
+      : 0;
+
+  const hasDuration = Number.isFinite(displayDuration) && displayDuration > 0;
   const sliderMin = 0;
-  const sliderMax = hasDuration ? duration : START_OFFSET_SEC;
+  const sliderMax = hasDuration ? displayDuration : START_OFFSET_SEC;
   const sliderValue = hasDuration
     ? Math.min(Math.max(current, sliderMin), sliderMax)
     : START_OFFSET_SEC;
@@ -998,7 +1075,9 @@ export default function VideoPlayer({
               }}
             />
 
-            <span style={timeStyle}>{formatDurationOrUnknown(duration)}</span>
+            <span style={timeStyle}>
+              {formatDurationOrUnknown(displayDuration)}
+            </span>
           </div>
 
           <div style={{ width: "100%", overflow: "hidden" }}>
