@@ -250,11 +250,11 @@ type VideoItem = {
 
 const EVT_LIKES = "likes_changed_v1";
 const KEY_LIKED = "liked_videos_v1";
-const EARLY_SWITCH = 0.12;
 const FEED_CACHE_PREFIX = "video_feed_cache_v3";
 const INITIAL_COUNT = 6;
 const NORMAL_COUNT = 10;
 const INITIAL_LOADING_DELAY_MS = 220;
+const SCROLL_SETTLE_MS = 90;
 
 function readLikedSet(): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -331,6 +331,7 @@ export default function VideoFeed({
   const indexRef = useRef(index);
   const hydratedCacheKeyRef = useRef<string>("");
   const currentCacheKeyRef = useRef<string>("");
+  const settleTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     indexRef.current = index;
@@ -636,6 +637,17 @@ export default function VideoFeed({
     const el = containerRef.current;
     if (!el) return;
 
+    const resolveNearestIndex = () => {
+      const pageHeight = el.clientHeight || window.innerHeight || 1;
+      const raw = el.scrollTop / pageHeight;
+      const nearest = Math.round(raw);
+      const clamped = Math.max(0, Math.min(nearest, Math.max(0, viewItems.length - 1)));
+
+      if (indexRef.current !== clamped) {
+        setIndex(clamped);
+      }
+    };
+
     let ticking = false;
 
     const handleScroll = () => {
@@ -643,28 +655,28 @@ export default function VideoFeed({
       ticking = true;
 
       requestAnimationFrame(() => {
-        const pageHeight = el.clientHeight || window.innerHeight || 1;
-        const raw = el.scrollTop / pageHeight;
-        const base = Math.floor(raw);
-        const progress = raw - base;
-
-        let nextIndex = base;
-        if (progress >= EARLY_SWITCH) {
-          nextIndex = base + 1;
-        }
-
-        const clamped = Math.max(0, Math.min(nextIndex, Math.max(0, viewItems.length - 1)));
-
-        if (indexRef.current !== clamped) {
-          setIndex(clamped);
-        }
-
+        resolveNearestIndex();
         ticking = false;
       });
+
+      if (settleTimerRef.current) {
+        window.clearTimeout(settleTimerRef.current);
+      }
+
+      settleTimerRef.current = window.setTimeout(() => {
+        resolveNearestIndex();
+      }, SCROLL_SETTLE_MS);
     };
 
     el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => el.removeEventListener("scroll", handleScroll);
+
+    return () => {
+      el.removeEventListener("scroll", handleScroll);
+      if (settleTimerRef.current) {
+        window.clearTimeout(settleTimerRef.current);
+        settleTimerRef.current = null;
+      }
+    };
   }, [viewItems.length]);
 
   const SAFE_PAD = 12;
@@ -773,7 +785,7 @@ export default function VideoFeed({
       >
         {viewItems.map((item, absIndex) => {
           const distance = Math.abs(absIndex - index);
-          const shouldRenderPlayer = distance <= 2;
+          const shouldRenderPlayer = distance <= 1;
 
           return (
             <section
