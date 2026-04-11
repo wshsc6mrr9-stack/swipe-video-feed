@@ -28,9 +28,9 @@ type VideoItem = {
 const EVT_LIKES = "likes_changed_v1";
 const KEY_LIKED = "liked_videos_v1";
 const FEED_CACHE_PREFIX = "video_feed_cache_v3";
-const INITIAL_COUNT = 6;
+const INITIAL_COUNT = 3;
 const NORMAL_COUNT = 10;
-const INITIAL_LOADING_DELAY_MS = 220;
+const INITIAL_LOADING_DELAY_MS = 100;
 const SCROLL_SETTLE_MS = 90;
 
 function readLikedSet(): Set<string> {
@@ -223,9 +223,8 @@ export default function VideoFeed({
       );
 
       if (query) params.set("query", query);
-      params.set("_t", Date.now().toString());
 
-      const res = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
+      const res = await fetch(`/api/feed?${params.toString()}`, { cache: "default" });
       const json = await res.json().catch(() => null);
       const list = (Array.isArray(json) ? json : json?.items ?? []) as any[];
 
@@ -549,6 +548,7 @@ export default function VideoFeed({
 
       <div
         ref={containerRef}
+        className="hide-scrollbar"
         style={{
           width: "100%",
           height: "100%",
@@ -562,7 +562,8 @@ export default function VideoFeed({
       >
         {viewItems.map((item, absIndex) => {
           const distance = Math.abs(absIndex - index);
-          const shouldRenderPlayer = distance <= 1;
+          // 2枚先までレンダリングしてプリロード（黒画面体験をなくす）
+          const shouldRenderPlayer = distance <= 2;
 
           return (
             <section
@@ -581,7 +582,7 @@ export default function VideoFeed({
                 <VideoCard
                   video={item}
                   isActive={absIndex === index}
-                  isNeighbor={distance === 1}
+                  isNeighbor={distance >= 1}
                 />
               ) : (
                 <div

@@ -29,6 +29,15 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
+/* スクロールバー非表示 */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* ✅ “VideoFeedのページだけ” ページスクロールを完全に無効化したい時に使う
    使い方：Feedを表示するクライアント側で body に class="app-body" を付ける */
 body.app-body {
