@@ -49,6 +49,9 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
   const seekRetryRef          = useRef<number | null>(null);
   const seekDebounceRef       = useRef<number | null>(null);
   const seekPendingRef        = useRef<number | null>(null);
+  const intentionalPauseRef   = useRef(false);  // ユーザーが意図的にポーズしたか
+  const isActiveRef           = useRef(isActive);
+  const mutedRef              = useRef<boolean>(true);
   const leftTapAtRef          = useRef(0);
   const rightTapAtRef         = useRef(0);
 
@@ -64,6 +67,10 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
   const [skipToast,       setSkipToast]        = useState<{ id: number; label: string } | null>(null);
   const [liked,           setLiked]            = useState<boolean>(() => readLikedSet().has(String(video.id)));
   const [likeCount,       setLikeCount]        = useState<number>(() => Number(video.likeCount ?? 0));
+
+  // refを常に最新の値に同期
+  useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
+  useEffect(() => { mutedRef.current    = muted;    }, [muted]);
 
   useEffect(() => {
     setLiked(readLikedSet().has(String(video.id)));
@@ -81,6 +88,7 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
     startOffsetAppliedRef.current   = false;
     neighborPrimedRef.current       = false;
     isDraggingRef.current           = false;
+    intentionalPauseRef.current     = false;
     leftTapAtRef.current            = 0;
     rightTapAtRef.current           = 0;
     if (seekRetryRef.current)    { window.clearTimeout(seekRetryRef.current);    seekRetryRef.current    = null; }
@@ -184,8 +192,31 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
       if (!isDraggingRef.current) setCurrent(el.currentTime);
     };
     const onPlaying = () => { setPlaying(true); setIsBuffering(false); enforceStartOffset(el); };
-    const onPause   = () => setPlaying(false);
+    const onPause   = () => {
+      setPlaying(false);
+      // 意図しないポーズ（音声セッション割り込みなど）は自動復帰
+      if (isActiveRef.current && !intentionalPauseRef.current) {
+        window.setTimeout(() => {
+          const v = videoRef.current;
+          if (v && v.paused && isActiveRef.current && !intentionalPauseRef.current) {
+            v.muted = mutedRef.current;
+            v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
+          }
+        }, 400);
+      }
+    };
     const onWaiting = () => setIsBuffering(true);
+    const onStalled = () => {
+      // バッファストール時もアクティブなら復帰を試みる
+      if (isActiveRef.current) {
+        window.setTimeout(() => {
+          const v = videoRef.current;
+          if (v && v.paused && isActiveRef.current) {
+            v.play().catch(() => {});
+          }
+        }, 800);
+      }
+    };
 
     el.addEventListener("loadedmetadata", onLoadedMetadata);
     el.addEventListener("canplay",        onCanPlay);
@@ -193,6 +224,7 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
     el.addEventListener("pause",          onPause);
     el.addEventListener("timeupdate",     onTimeUpdate);
     el.addEventListener("waiting",        onWaiting);
+    el.addEventListener("stalled",        onStalled);
 
     if (rawSrc.includes(".m3u8")) {
       if (Hls.isSupported()) {
@@ -230,6 +262,7 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
       el.removeEventListener("playing",        onPlaying);
       el.removeEventListener("pause",          onPause);
       el.removeEventListener("timeupdate",     onTimeUpdate);
+      el.removeEventListener("stalled",        onStalled);
       el.removeEventListener("waiting",        onWaiting);
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
       if (seekRetryRef.current) { window.clearTimeout(seekRetryRef.current); seekRetryRef.current = null; }
@@ -279,6 +312,21 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
     }
   }, [isActive, isNeighbor, muted]);
 
+  // --- バックグラウンド復帰時の自動再生再開 ---
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!isActiveRef.current) return;
+      const el = videoRef.current;
+      if (!el || !el.paused) return;
+      if (intentionalPauseRef.current) return; // ユーザーがポーズ中なら再開しない
+      el.muted = mutedRef.current;
+      el.play().catch(() => { el.muted = true; el.play().catch(() => {}); });
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
   // --- ハートボタン ---
   const handleLike = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
@@ -309,8 +357,16 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
     e.stopPropagation();
     const el = videoRef.current;
     if (!el) return;
-    if (el.paused) { el.muted = muted; setPlaying(true); el.play().catch(() => setPlaying(false)); }
-    else           { setPlaying(false); el.pause(); }
+    if (el.paused) {
+      intentionalPauseRef.current = false; // 再開なので意図的ポーズ解除
+      el.muted = muted;
+      setPlaying(true);
+      el.play().catch(() => setPlaying(false));
+    } else {
+      intentionalPauseRef.current = true;  // ユーザーが意図的にポーズ
+      setPlaying(false);
+      el.pause();
+    }
   };
   const handleTapToUnmute = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();

@@ -55,6 +55,5 @@ export default async function HomePage({
   const v = sp?.v;
   const startId = Array.isArray(v) ? String(v[0] ?? "").trim() : String(v ?? "").trim();
 
-  // トップページなのでジャンル指定はなし (initialGenreは渡さない)
   return <VideoFeedNoSSR startId={startId} />;
 }

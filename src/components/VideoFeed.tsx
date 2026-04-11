@@ -28,8 +28,9 @@ type VideoItem = {
 const EVT_LIKES = "likes_changed_v1";
 const KEY_LIKED = "liked_videos_v1";
 const FEED_CACHE_PREFIX = "video_feed_cache_v3";
+const LAST_FEED_KEY = "video_feed_last_v1"; // 直近フィードのlocalStorageキー
 const INITIAL_COUNT = 3;
-const NORMAL_COUNT = 10;
+const NORMAL_COUNT = 15;
 const INITIAL_LOADING_DELAY_MS = 100;
 const SCROLL_SETTLE_MS = 90;
 
@@ -66,18 +67,48 @@ function buildFeedCacheKey(genres: string[], query: string) {
   return `${FEED_CACHE_PREFIX}:${g}::${q}`;
 }
 
+// 直近フィード（全ジャンル）をlocalStorageに保存・読み込み
+function saveLastFeed(items: any[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(LAST_FEED_KEY, JSON.stringify(items.slice(0, 10)));
+  } catch {}
+}
+function readLastFeed(): any[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(LAST_FEED_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+
 type Props = {
   initialGenre?: GenreKey;
   hideGenreMenu?: boolean;
   startId?: string;
+  initialVideos?: any[];   // SSRで先読みした初回動画
+  initialSeed?: number;    // SSRで使ったseed（ページネーション一貫性のため）
 };
 
 export default function VideoFeed({
   initialGenre,
   hideGenreMenu,
   startId,
+  initialVideos,
+  initialSeed,
 }: Props = {}) {
-  const [items, setItems] = useState<VideoItem[]>([]);
+  // 全ジャンル・クエリなしの時だけ直前キャッシュが使える
+  const isTopFeed = !initialGenre;
+
+  // 直前訪問のキャッシュ（localStorage）を初期値として使う → 初回ロード待ちゼロ
+  // useState内で呼ぶことでStrictModeの二重実行でも安全
+  const [items, setItems] = useState<VideoItem[]>(() => {
+    if (!isTopFeed) return [];
+    return readLastFeed();
+  });
+  const hasInstantCache = items.length > 0;
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [showInitialLoading, setShowInitialLoading] = useState(false);
@@ -85,7 +116,7 @@ export default function VideoFeed({
 
   const [page, setPage] = useState(1);
   const [seed, setSeed] = useState(() =>
-    typeof window !== "undefined" ? Math.floor(Math.random() * 1000000) : 0
+    initialSeed ?? (typeof window !== "undefined" ? Math.floor(Math.random() * 1000000) : 0)
   );
   const [hasMore, setHasMore] = useState(true);
 
@@ -101,7 +132,8 @@ export default function VideoFeed({
   });
 
   const [query, setQuery] = useState("");
-  const [hasWarmCache, setHasWarmCache] = useState(false);
+  // 直前キャッシュがあればウォームキャッシュ扱い（ローディングスクリーン非表示）
+  const [hasWarmCache, setHasWarmCache] = useState(() => hasInstantCache);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const startIdAppliedRef = useRef(false);
@@ -127,7 +159,8 @@ export default function VideoFeed({
     if (hydratedCacheKeyRef.current === cacheKey) return;
 
     hydratedCacheKeyRef.current = cacheKey;
-    setHasWarmCache(false);
+    // 直前キャッシュがある場合はhasWarmCacheをリセットしない
+    if (!hasInstantCache) setHasWarmCache(false);
 
     try {
       const raw = sessionStorage.getItem(cacheKey);
@@ -224,7 +257,7 @@ export default function VideoFeed({
 
       if (query) params.set("query", query);
 
-      const res = await fetch(`/api/feed?${params.toString()}`, { cache: "default" });
+      const res = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
       const json = await res.json().catch(() => null);
       const list = (Array.isArray(json) ? json : json?.items ?? []) as any[];
 
@@ -259,6 +292,12 @@ export default function VideoFeed({
         const existingIds = new Set(prev.map((p) => p.id));
         return [...prev, ...normalized.filter((n) => !existingIds.has(n.id))];
       });
+
+      // 全ジャンル・クエリなしの最初のページはlocalStorageへ保存（次回即表示用）
+      // ※ state updater の外で行う（副作用はsetItems外で）
+      if (isTopFeed && !query && page <= 2) {
+        saveLastFeed(normalized);
+      }
 
       setPage((p) => p + 1);
     } catch (e) {
@@ -325,7 +364,7 @@ export default function VideoFeed({
     }
 
     const remainingViews = viewItems.length - index;
-    if (remainingViews <= 5) {
+    if (remainingViews <= 8) {
       loadMoreVideos();
     }
   }, [hasMore, index, items.length, loadMoreVideos, viewItems.length]);
