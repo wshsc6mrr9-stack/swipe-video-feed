@@ -1,4 +1,3 @@
-// ===== src/lib/redis.ts =====
 import { Redis } from "@upstash/redis";
 
 export const redis = new Redis({
@@ -6,9 +5,15 @@ export const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
+// ---- in-process cache（同一インスタンス内で有効） ----
 let allVideosCache: any[] | null = null;
 let cacheTimestamp = 0;
-const CACHE_TTL = 1000 * 60 * 5;
+const IN_PROCESS_CACHE_TTL = 1000 * 60 * 2; // 2分
+
+// ---- Redis上のキャッシュキー（コールドスタート対策） ----
+const REDIS_CACHE_KEY = "videos:cache:normalized:v2";
+const REDIS_CACHE_TTL_SEC = 60 * 5; // 5分
+
 const RANKING_KEY = "video:ranking";
 
 // ---- seeded shuffle ----
@@ -67,7 +72,78 @@ function normalizeVideo(raw: any) {
   };
 }
 
-// ===== getFilteredVideos（最終・実データ耐性MAX） =====
+/**
+ * 全動画リストを取得する。
+ * 優先順位：① in-process cache → ② Redis cache → ③ Redis lrange（全件フェッチ）
+ * コールドスタート時でも ② で 1回の GET に収まる。
+ */
+async function loadAllVideos(): Promise<any[]> {
+  const now = Date.now();
+
+  // ① in-process cache（同じサーバーレスインスタンス内なら最速）
+  if (allVideosCache && now - cacheTimestamp < IN_PROCESS_CACHE_TTL) {
+    return allVideosCache;
+  }
+
+  // ② Redis cache（コールドスタート後の1発目も高速）
+  try {
+    const cached = await redis.get<string>(REDIS_CACHE_KEY);
+    if (cached) {
+      const parsed: any[] = typeof cached === "string" ? JSON.parse(cached) : cached;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        allVideosCache = parsed;
+        cacheTimestamp = now;
+        return parsed;
+      }
+    }
+  } catch {
+    // Redis cache miss はフォールスルーする
+  }
+
+  // ③ 全件フェッチ（キャッシュが完全に切れた場合のみ）
+  const total = await redis.llen("videos");
+  if (total === 0) return [];
+
+  const CHUNK_SIZE = 1000;
+  const promises: Promise<any[]>[] = [];
+  for (let i = 0; i < total; i += CHUNK_SIZE) {
+    promises.push(redis.lrange("videos", i, Math.min(i + CHUNK_SIZE - 1, total - 1)));
+  }
+
+  const chunks = await Promise.all(promises);
+  const allVideos = chunks
+    .flat()
+    .map((r) => {
+      try {
+        return typeof r === "string" ? JSON.parse(r) : r;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .map(normalizeVideo)
+    .filter((v) => !!v.id);
+
+  // in-process cache を更新
+  allVideosCache = allVideos;
+  cacheTimestamp = now;
+
+  // Redis cache も非同期で更新（レスポンスをブロックしない）
+  redis
+    .set(REDIS_CACHE_KEY, JSON.stringify(allVideos), { ex: REDIS_CACHE_TTL_SEC })
+    .catch(() => {});
+
+  return allVideos;
+}
+
+/** Redis cache を強制クリアする（動画追加・削除時に呼ぶ） */
+export async function invalidateVideosCache(): Promise<void> {
+  allVideosCache = null;
+  cacheTimestamp = 0;
+  await redis.del(REDIS_CACHE_KEY).catch(() => {});
+}
+
+// ===== getFilteredVideos =====
 export async function getFilteredVideos(
   genres: string[] | undefined,
   query: string = "",
@@ -90,41 +166,7 @@ export async function getFilteredVideos(
 
     const hasQuery = query.trim().length > 0;
 
-    // ---- load cache / redis ----
-    const now = Date.now();
-    let allVideos: any[] = [];
-
-    if (allVideosCache && now - cacheTimestamp < CACHE_TTL) {
-      allVideos = allVideosCache;
-    } else {
-      const total = await redis.llen("videos");
-      if (total === 0) return [];
-
-      const CHUNK_SIZE = 1000;
-      const promises: Promise<any[]>[] = [];
-      for (let i = 0; i < total; i += CHUNK_SIZE) {
-        const end = Math.min(i + CHUNK_SIZE - 1, total - 1);
-        promises.push(redis.lrange("videos", i, end));
-      }
-
-      const chunkedResults = await Promise.all(promises);
-      allVideos = chunkedResults
-        .flat()
-        .map((r) => {
-          try {
-            return typeof r === "string" ? JSON.parse(r) : r;
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean)
-        .map(normalizeVideo)
-        .filter((v) => !!v.id);
-
-      allVideosCache = allVideos;
-      cacheTimestamp = now;
-    }
-
+    const allVideos = await loadAllVideos();
     let filtered = allVideos;
 
     // ---- favorites ----
@@ -139,7 +181,6 @@ export async function getFilteredVideos(
       rankedIds.forEach((id: unknown, idx: number) =>
         rankMap.set(String(id), idx)
       );
-
       filtered = [...filtered].sort((a: any, b: any) => {
         const ra = rankMap.get(String(a.id)) ?? 999999;
         const rb = rankMap.get(String(b.id)) ?? 999999;
@@ -148,13 +189,10 @@ export async function getFilteredVideos(
 
     // ---- genre filter（ジャンル無し動画は除外しない） ----
     } else if (!isAll && Array.isArray(genres) && genres.length > 0) {
-      const want = genres.map((g) =>
-        String(g).normalize("NFKC").trim()
-      );
+      const want = genres.map((g) => String(g).normalize("NFKC").trim());
 
       filtered = filtered.filter((v: any) => {
         const candidates: string[] = [];
-
         if (Array.isArray(v.genres)) candidates.push(...v.genres);
         if (typeof v.genre === "string") candidates.push(v.genre);
         if (Array.isArray(v.tags)) candidates.push(...v.tags);
@@ -162,7 +200,6 @@ export async function getFilteredVideos(
         if (typeof v.category === "string") candidates.push(v.category);
         if (Array.isArray(v.categories)) candidates.push(...v.categories);
 
-        // ★ ジャンル情報が無い動画は「通す」
         if (candidates.length === 0) return true;
 
         return candidates.some((c) => {
@@ -189,7 +226,6 @@ export async function getFilteredVideos(
         )
           .normalize("NFKC")
           .toLowerCase();
-
         return words.every((w) => text.includes(w));
       });
     }
@@ -206,17 +242,11 @@ export async function getFilteredVideos(
     const startIndex = (safePage - 1) * safeCount;
 
     if (isRankingMode) {
-      return filtered.slice(
-        startIndex,
-        Math.min(startIndex + safeCount, filtered.length)
-      );
+      return filtered.slice(startIndex, startIndex + safeCount);
     }
 
     const shuffled = shuffleWithSeed(filtered, seed);
-    return shuffled.slice(
-      startIndex,
-      Math.min(startIndex + safeCount, shuffled.length)
-    );
+    return shuffled.slice(startIndex, startIndex + safeCount);
   } catch (e) {
     console.error("Redis fetch error:", e);
     return [];

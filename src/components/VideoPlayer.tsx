@@ -10,7 +10,7 @@ type Props = {
   isNeighbor?: boolean;
 };
 
-const START_OFFSET_SEC = 7;
+const START_OFFSET_SEC = 0;
 const START_TOLERANCE_SEC = 0.5;
 const KEY_MUTED = "audio_muted_v1";
 const DOUBLE_TAP_MS = 240; 
@@ -49,7 +49,7 @@ export default function VideoPlayer({
   const [showTapToUnmute, setShowTapToUnmute] = useState(false);
 
   const [duration, setDuration] = useState<number>(() => Number(video.duration ?? 0));
-  const [current, setCurrent] = useState(START_OFFSET_SEC);
+  const [current, setCurrent] = useState(0);
   const [skipToast, setSkipToast] = useState<{ id: number; label: string; } | null>(null);
 
   useEffect(() => {
@@ -57,7 +57,7 @@ export default function VideoPlayer({
     setShowTapToUnmute(false);
     setIsBuffering(true);
     setShowLoader(false);
-    setCurrent(START_OFFSET_SEC);
+    setCurrent(0);
     setDuration(Number(video.duration ?? 0));
     setSkipToast(null);
     startOffsetAppliedRef.current = false;
@@ -169,9 +169,9 @@ export default function VideoPlayer({
     if (rawSrc.includes(".m3u8")) {
       if (Hls.isSupported()) {
         const hls = new Hls({
-          startPosition: START_OFFSET_SEC, 
-          maxBufferLength: isActive ? 10 : 4,
-          maxMaxBufferLength: isActive ? 20 : 8,
+          startPosition: 0,
+          maxBufferLength: isActive ? 15 : 6,
+          maxMaxBufferLength: isActive ? 30 : 12,
           capLevelToPlayerSize: true, 
           startFragPrefetch: true,    
           enableWorker: true,
@@ -227,7 +227,7 @@ export default function VideoPlayer({
       if (!neighborPrimedRef.current) {
         el.preload = "auto";
         el.muted = true;
-        try { el.currentTime = START_OFFSET_SEC; } catch {}
+        try { el.currentTime = 0; } catch {}
         const p = el.play();
         if (p !== undefined) {
           p.then(() => {
