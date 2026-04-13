@@ -54,12 +54,15 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
   const mutedRef              = useRef<boolean>(true);
   const leftTapAtRef          = useRef(0);
   const rightTapAtRef         = useRef(0);
+  const hasErrorRef           = useRef(false);  // 致命的エラー発生フラグ
+  const hlsRetryCountRef      = useRef(0);      // HLSリトライ回数
 
   const rawSrc = (video.url ?? (video as any).src ?? "") as string;
 
   const [playing,         setPlaying]         = useState(false);
   const [isBuffering,     setIsBuffering]      = useState(true);
   const [showLoader,      setShowLoader]       = useState(false);
+  const [hasVideoError,   setHasVideoError]    = useState(false);
   const [muted,           setMuted]            = useState<boolean>(() => readMutedPreference());
   const [showTapToUnmute, setShowTapToUnmute]  = useState(false);
   const [duration,        setDuration]         = useState<number>(() => Number(video.duration ?? 0));
@@ -82,6 +85,7 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
     setShowTapToUnmute(false);
     setIsBuffering(true);
     setShowLoader(false);
+    setHasVideoError(false);
     setCurrent(0);
     setDuration(Number(video.duration ?? 0));
     setSkipToast(null);
@@ -89,6 +93,8 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
     neighborPrimedRef.current       = false;
     isDraggingRef.current           = false;
     intentionalPauseRef.current     = false;
+    hasErrorRef.current             = false;
+    hlsRetryCountRef.current        = 0;
     leftTapAtRef.current            = 0;
     rightTapAtRef.current           = 0;
     if (seekRetryRef.current)    { window.clearTimeout(seekRetryRef.current);    seekRetryRef.current    = null; }
@@ -156,6 +162,7 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
   // ---- 7秒シーク（バッファが準備できてからリトライ） ----
   const enforceStartOffset = (el: HTMLVideoElement) => {
     if (startOffsetAppliedRef.current) return;
+    if (hasErrorRef.current) return; // エラー発生時はリトライしない
     if (seekRetryRef.current) { window.clearTimeout(seekRetryRef.current); seekRetryRef.current = null; }
 
     if (el.currentTime >= START_OFFSET_SEC - START_TOLERANCE_SEC) {
@@ -167,7 +174,7 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
     } else {
       seekRetryRef.current = window.setTimeout(() => {
         const v = videoRef.current;
-        if (v) enforceStartOffset(v);
+        if (v && !hasErrorRef.current) enforceStartOffset(v);
       }, 150);
     }
   };
@@ -194,28 +201,36 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
     const onPlaying = () => { setPlaying(true); setIsBuffering(false); enforceStartOffset(el); };
     const onPause   = () => {
       setPlaying(false);
-      // 意図しないポーズ（音声セッション割り込みなど）は自動復帰
-      if (isActiveRef.current && !intentionalPauseRef.current) {
+      // 意図しないポーズ（音声セッション割り込みなど）は自動復帰（エラー時は除く）
+      if (isActiveRef.current && !intentionalPauseRef.current && !hasErrorRef.current) {
         window.setTimeout(() => {
           const v = videoRef.current;
-          if (v && v.paused && isActiveRef.current && !intentionalPauseRef.current) {
+          if (v && v.paused && isActiveRef.current && !intentionalPauseRef.current && !hasErrorRef.current) {
             v.muted = mutedRef.current;
             v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
           }
         }, 400);
       }
     };
-    const onWaiting = () => setIsBuffering(true);
+    const onWaiting = () => { if (!hasErrorRef.current) setIsBuffering(true); };
     const onStalled = () => {
-      // バッファストール時もアクティブなら復帰を試みる
-      if (isActiveRef.current) {
+      // バッファストール時もアクティブなら復帰を試みる（エラー時は除く）
+      if (isActiveRef.current && !hasErrorRef.current) {
         window.setTimeout(() => {
           const v = videoRef.current;
-          if (v && v.paused && isActiveRef.current) {
+          if (v && v.paused && isActiveRef.current && !hasErrorRef.current) {
             v.play().catch(() => {});
           }
         }, 800);
       }
+    };
+    const onVideoError = () => {
+      // <video> 自体のエラー（src読み込み失敗など）
+      hasErrorRef.current = true;
+      setIsBuffering(false);
+      setHasVideoError(true);
+      setPlaying(false);
+      if (seekRetryRef.current) { window.clearTimeout(seekRetryRef.current); seekRetryRef.current = null; }
     };
 
     el.addEventListener("loadedmetadata", onLoadedMetadata);
@@ -225,6 +240,7 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
     el.addEventListener("timeupdate",     onTimeUpdate);
     el.addEventListener("waiting",        onWaiting);
     el.addEventListener("stalled",        onStalled);
+    el.addEventListener("error",          onVideoError);
 
     if (rawSrc.includes(".m3u8")) {
       if (Hls.isSupported()) {
@@ -247,6 +263,38 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
         hls.loadSource(rawSrc);
         hls.attachMedia(el);
         hls.on(Hls.Events.MANIFEST_PARSED, () => enforceStartOffset(el));
+
+        // HLSエラーハンドリング：致命的エラーは1回リトライ、それでも駄目なら諦める
+        hls.on(Hls.Events.ERROR, (_evt: any, data: any) => {
+          if (!data.fatal) return; // 非致命的エラーはHLS.jsが自動リカバリー
+          console.warn("[HLS] fatal error:", data.type, data.details);
+
+          if (hlsRetryCountRef.current < 1) {
+            // 1回だけリトライ（マニフェスト再読み込み）
+            hlsRetryCountRef.current += 1;
+            window.setTimeout(() => {
+              if (hlsRef.current && !hasErrorRef.current) {
+                try { hlsRef.current.startLoad(); } catch {
+                  // startLoad失敗時はソース再読み込み
+                  try {
+                    hlsRef.current.loadSource(rawSrc);
+                    hlsRef.current.startLoad();
+                  } catch {}
+                }
+              }
+            }, 1000);
+          } else {
+            // リトライ済み → 諦めてエラー状態にする
+            hasErrorRef.current = true;
+            setIsBuffering(false);
+            setHasVideoError(true);
+            setPlaying(false);
+            if (seekRetryRef.current) { window.clearTimeout(seekRetryRef.current); seekRetryRef.current = null; }
+            // HLSインスタンスをリセット（次のビデオに影響させない）
+            hls.destroy();
+            hlsRef.current = null;
+          }
+        });
       } else {
         el.src = rawSrc;
         el.preload = isActive || isNeighbor ? "auto" : "none";
@@ -264,6 +312,7 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
       el.removeEventListener("timeupdate",     onTimeUpdate);
       el.removeEventListener("stalled",        onStalled);
       el.removeEventListener("waiting",        onWaiting);
+      el.removeEventListener("error",          onVideoError);
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
       if (seekRetryRef.current) { window.clearTimeout(seekRetryRef.current); seekRetryRef.current = null; }
     };
@@ -317,6 +366,7 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
     const handleVisibilityChange = () => {
       if (document.visibilityState !== "visible") return;
       if (!isActiveRef.current) return;
+      if (hasErrorRef.current) return; // エラー動画は再開しない
       const el = videoRef.current;
       if (!el || !el.paused) return;
       if (intentionalPauseRef.current) return; // ユーザーがポーズ中なら再開しない
@@ -326,6 +376,18 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
+
+  // --- アフィリエイトクリックトラッキング ---
+  const handleAffClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.stopPropagation();
+    try {
+      fetch("/api/stats/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId: String(video.id), type: "click" }),
+      }).catch(() => {});
+    } catch {}
+  };
 
   // --- ハートボタン ---
   const handleLike = (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -489,8 +551,20 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
           }}
         />
 
+        {/* 読み込みエラー表示 */}
+        {isActive && hasVideoError && (
+          <div style={{
+            position: "absolute", inset: 0, zIndex: 15,
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            pointerEvents: "none", gap: 8,
+          }}>
+            <div style={{ fontSize: 32 }}>⚠️</div>
+            <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, fontWeight: 700 }}>動画を読み込めませんでした</div>
+          </div>
+        )}
+
         {/* 中央スピナー（1.2秒以上かかる時だけ） */}
-        {isActive && showLoader && (
+        {isActive && showLoader && !hasVideoError && (
           <div style={{
             position: "absolute", inset: 0, zIndex: 15,
             display: "flex", alignItems: "center", justifyContent: "center",
@@ -542,7 +616,7 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
             <div style={{ padding: "0 16px 12px 16px", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "10px", pointerEvents: "auto" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 {video.affUrl && (
-                  <a href={video.affUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="aff-btn">
+                  <a href={video.affUrl} target="_blank" rel="noreferrer" onClick={handleAffClick} className="aff-btn">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86a1 1 0 0 0-1.5.86z"/>
                     </svg>

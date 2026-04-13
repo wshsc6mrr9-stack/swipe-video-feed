@@ -29,8 +29,8 @@ const EVT_LIKES = "likes_changed_v1";
 const KEY_LIKED = "liked_videos_v1";
 const FEED_CACHE_PREFIX = "video_feed_cache_v3";
 const LAST_FEED_KEY = "video_feed_last_v1"; // 直近フィードのlocalStorageキー
-const INITIAL_COUNT = 3;
-const NORMAL_COUNT = 15;
+const INITIAL_COUNT = 5;   // 初回をもう少し増やして最初の詰まりを防ぐ
+const NORMAL_COUNT = 20;   // 1回の取得を増やして補充頻度を下げる
 const INITIAL_LOADING_DELAY_MS = 100;
 const SCROLL_SETTLE_MS = 90;
 
@@ -364,7 +364,7 @@ export default function VideoFeed({
     }
 
     const remainingViews = viewItems.length - index;
-    if (remainingViews <= 8) {
+    if (remainingViews <= 15) {  // 残り15本で次を取得（詰まる前に先読み）
       loadMoreVideos();
     }
   }, [hasMore, index, items.length, loadMoreVideos, viewItems.length]);

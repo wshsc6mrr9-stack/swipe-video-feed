@@ -1,21 +1,26 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 
+export const dynamic = "force-dynamic"; // Turbopack dev環境でPOSTが無視されるのを防ぐ
+
 export async function POST(req: Request) {
   try {
-    const { videoId, type } = await req.json();
-    if (!videoId || !type) return NextResponse.json({ ok: false }, { status: 400 });
+    const body = await req.json().catch(() => null);
+    const videoId = String(body?.videoId ?? "").trim();
+    const type    = String(body?.type    ?? "").trim();
 
-    // 🚨 どんな型で送られてきても「純粋な文字列」に強制変換して保存
-    const cleanId = String(videoId).trim();
+    if (!videoId || !type) {
+      return NextResponse.json({ ok: false, reason: "missing videoId or type" }, { status: 400 });
+    }
 
-    // 個別カウント
-    await redis.hincrby(`stats:video:${cleanId}`, type, 1);
+    // 個別カウント（hash: stats:video:{id} → field: play / click）
+    await redis.hincrby(`stats:video:${videoId}`, type, 1);
     // 全体カウント
     await redis.hincrby("stats:global", type, 1);
 
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    return NextResponse.json({ ok: false }, { status: 500 });
+    return NextResponse.json({ ok: true, videoId, type });
+  } catch (e: any) {
+    console.error("[stats/track] error:", e?.message ?? e);
+    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }
 }

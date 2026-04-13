@@ -41,14 +41,19 @@ export default function VideoCard({
   const trackSentRef = useRef(false);
 
   const trackAction = async (type: "play") => {
+    if (!video.id) return; // IDが空なら送らない
     try {
-      await fetch("/api/stats/track", {
+      const res = await fetch("/api/stats/track", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ videoId: video.id, type }),
+        body: JSON.stringify({ videoId: String(video.id).trim(), type }),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        console.warn("[track] failed:", res.status, body);
+      }
     } catch (e) {
-      console.error("Tracking failed", e);
+      console.error("[track] fetch error:", e);
     }
   };
 

@@ -1,7 +1,24 @@
 "use client";
 
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import Link from "next/link";
+
+const AUTO_REFRESH_SEC = 30;
+const CACHE_KEY = "analytics_cache_v1";
+
+function saveCache(d: any) {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data: d, at: Date.now() })); } catch {}
+}
+function loadCache(): any | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const { data, at } = JSON.parse(raw);
+    // 10分以内のキャッシュのみ使う
+    if (Date.now() - at > 10 * 60 * 1000) return null;
+    return data;
+  } catch { return null; }
+}
 
 type Row = {
   id: string;
@@ -19,47 +36,82 @@ export default function AdvancedAnalyticsPage() {
     rows: Row[];
   } | null>(null);
 
-  // 初期ソートを 'play' (再生数順) に固定
   const [sort, setSort] = useState<"play" | "click" | "ctr">("play");
   const [selectedGenre, setSelectedGenre] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
+  const [isStale, setIsStale] = useState(false); // キャッシュ表示中フラグ
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [countdown, setCountdown] = useState(AUTO_REFRESH_SEC);
+  const countdownRef = useRef<number | null>(null);
 
-  // 🚀 データの取得と正規化
-  const loadStats = useCallback(async () => {
-    setLoading(true);
+  const applyJson = useCallback((json: any) => {
+    if (!json?.ok) return false;
+    const normalizedRows = (json.rows || []).map((r: any) => ({
+      ...r,
+      play:      Number(r.play      || 0),
+      click:     Number(r.click     || 0),
+      ctr:       Number(r.ctr       || 0),
+      createdAt: Number(r.createdAt || 0),
+    }));
+    const d = {
+      totals: {
+        play:  Number(json.totals?.play  || 0),
+        click: Number(json.totals?.click || 0),
+        ctr:   Number(json.totals?.ctr   || 0),
+      },
+      rows: normalizedRows,
+    };
+    setData(d);
+    return d;
+  }, []);
+
+  const loadStats = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await fetch("/api/stats/summary", { cache: "no-store" });
       const json = await res.json();
-      
-      if (json.ok) {
-        // APIからのデータを念のためフロント側でも数値に変換（安全策）
-        const normalizedRows = (json.rows || []).map((r: any) => ({
-          ...r,
-          play: Number(r.play || 0),
-          click: Number(r.click || 0),
-          ctr: Number(r.ctr || 0),
-          createdAt: Number(r.createdAt || 0)
-        }));
-
-        setData({
-          totals: {
-            play: Number(json.totals?.play || 0),
-            click: Number(json.totals?.click || 0),
-            ctr: Number(json.totals?.ctr || 0),
-          },
-          rows: normalizedRows
-        });
+      const d = applyJson(json);
+      if (d) {
+        saveCache(json);      // 次回起動用にキャッシュ保存
+        setIsStale(false);
+        setLastUpdated(new Date());
+        setCountdown(AUTO_REFRESH_SEC);
       }
     } catch (e) {
       console.error("Analytics Load Error:", e);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, []);
+  }, [applyJson]);
 
+  // 初回：まずlocalStorageキャッシュを即表示 → 裏でAPI取得
   useEffect(() => {
-    loadStats();
+    const cached = loadCache();
+    if (cached) {
+      applyJson(cached);
+      setIsStale(true);   // 古いデータである印
+      setLoading(false);
+      loadStats(true);    // サイレントで最新取得
+    } else {
+      loadStats(false);   // キャッシュなし → 通常ロード
+    }
+  }, [applyJson, loadStats]);
+
+  // 30秒ごとに自動更新（バックグラウンドでサイレント更新）
+  useEffect(() => {
+    const interval = setInterval(() => loadStats(true), AUTO_REFRESH_SEC * 1000);
+    return () => clearInterval(interval);
   }, [loadStats]);
+
+  // カウントダウン表示
+  useEffect(() => {
+    setCountdown(AUTO_REFRESH_SEC);
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    countdownRef.current = window.setInterval(() => {
+      setCountdown((c) => (c <= 1 ? AUTO_REFRESH_SEC : c - 1));
+    }, 1000);
+    return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
+  }, [lastUpdated]);
 
   const genreOptions = useMemo(() => {
     if (!data?.rows) return ["ALL"];
@@ -99,10 +151,13 @@ export default function AdvancedAnalyticsPage() {
 
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
+  // データが全くない場合だけフルスクリーンローダー（通常は一瞬で消える）
   if (loading && !data) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center font-black italic tracking-widest">
-        ANALYZING...
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center gap-4">
+        <div style={{ width: 36, height: 36, borderRadius: "50%", border: "3px solid rgba(255,255,255,0.1)", borderTopColor: "rgba(255,255,255,0.8)", animation: "spin 0.7s linear infinite" }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <p className="text-[11px] text-white/30 font-mono tracking-widest">LOADING ANALYTICS...</p>
       </div>
     );
   }
@@ -112,7 +167,17 @@ export default function AdvancedAnalyticsPage() {
       <header className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-black italic tracking-tighter uppercase">Dashboard</h1>
-          <p className="text-[10px] text-indigo-500 font-bold tracking-widest uppercase italic">Ranking Mode: {sort}</p>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-[10px] text-indigo-500 font-bold tracking-widest uppercase italic">Ranking: {sort}</p>
+            {isStale && (
+              <span className="text-[9px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full font-bold animate-pulse">更新中...</span>
+            )}
+            {lastUpdated && !isStale && (
+              <p className="text-[10px] text-white/30 font-mono">
+                {lastUpdated.toLocaleTimeString("ja-JP")} · {countdown}s
+              </p>
+            )}
+          </div>
         </div>
         <Link href="/admin" className="rounded-2xl bg-white text-black px-5 py-2 text-xs font-black transition active:scale-95">
           BACK
@@ -132,14 +197,14 @@ export default function AdvancedAnalyticsPage() {
           <button onClick={() => setSort("click")} className={btn(sort === "click")}>クリック順</button>
           <button onClick={() => setSort("ctr")} className={btn(sort === "ctr")}>効率順</button>
           
-          <button 
-            onClick={() => {
-              setData(null);
-              loadStats();
-            }} 
-            className="ml-auto bg-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black tracking-widest active:scale-95 transition"
+          <button
+            onClick={() => loadStats()}
+            disabled={loading}
+            className="ml-auto bg-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black tracking-widest active:scale-95 transition disabled:opacity-40 flex items-center gap-2"
           >
-            REFRESH
+            {loading ? (
+              <span style={{ display: "inline-block", width: 10, height: 10, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+            ) : "↺"} REFRESH
           </button>
         </div>
         

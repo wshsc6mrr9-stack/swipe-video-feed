@@ -3,56 +3,80 @@ import { redis } from "@/lib/redis";
 
 export const dynamic = "force-dynamic";
 
+// 30秒間サーバーサイドでキャッシュ（Vercelのエッジで有効）
+export const revalidate = 30;
+
 export async function GET() {
   try {
-    const global = (await redis.hgetall("stats:global")) as Record<string, string> | null;
-    const rows = await redis.lrange("videos", 0, 199);
-    
-    if (!rows || rows.length === 0) {
-      return NextResponse.json({ ok: true, totals: { play: 0, click: 0, ctr: 0 }, rows: [] });
+    // llen + chunked lrange → lrange(0,-1) の1回に削減
+    // 動画リストと統計を並行取得
+    const [rawRows] = await Promise.all([
+      redis.lrange("videos", 0, -1),
+    ]);
+
+    if (!rawRows || rawRows.length === 0) {
+      return NextResponse.json(
+        { ok: true, totals: { play: 0, click: 0, ctr: 0 }, rows: [] },
+        { headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" } }
+      );
     }
 
-    const videoList = rows.map((r) => (typeof r === "string" ? JSON.parse(r) : r));
-    const pipeline = redis.pipeline();
+    const videoList = rawRows
+      .map((r) => {
+        try { return typeof r === "string" ? JSON.parse(r) : r; }
+        catch { return null; }
+      })
+      .filter(Boolean);
 
+    if (videoList.length === 0) {
+      return NextResponse.json(
+        { ok: true, totals: { play: 0, click: 0, ctr: 0 }, rows: [] },
+        { headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" } }
+      );
+    }
+
+    // 全動画の統計を1回のパイプラインで並行取得
+    const pipeline = redis.pipeline();
     videoList.forEach((v: any) => {
-      // 🚨 trim() を徹底し、IDの完全一致を狙う
       const cleanId = String(v.id || v._id || "").trim();
       pipeline.hgetall(`stats:video:${cleanId}`);
     });
-
     const allStats = await pipeline.exec();
 
-    const statsData = videoList.map((v: any, index: number) => {
-      const s = allStats[index] as Record<string, string> | null;
-      
-      // 🚨 Redisからは文字列で返るため、確実に数値変換。プロパティ名も 'play' に統一。
-      const p = s ? parseInt(s.play || "0", 10) : 0;
-      const c = s ? parseInt(s.click || "0", 10) : 0;
+    let totalPlay = 0;
+    let totalClick = 0;
 
+    const statsData = videoList.map((v: any, i: number) => {
+      const s = allStats[i] as Record<string, string> | null;
+      const p = s ? parseInt(String(s.play  || "0"), 10) : 0;
+      const c = s ? parseInt(String(s.click || "0"), 10) : 0;
+      totalPlay  += p;
+      totalClick += c;
       return {
-        id: v.id,
-        title: v.title || "Untitled",
-        genres: v.genres || [],
-        play: p,
-        click: c,
-        ctr: p > 0 ? (c / p) : 0,
-        createdAt: v.createdAt || 0
+        id:        String(v.id || v._id || ""),
+        title:     v.title || "Untitled",
+        genres:    Array.isArray(v.genres) ? v.genres : [],
+        play:      p,
+        click:     c,
+        ctr:       p > 0 ? c / p : 0,
+        createdAt: Number(v.createdAt || 0),
       };
     });
 
-    return NextResponse.json({
-      ok: true,
-      totals: {
-        play: parseInt(global?.play || "0", 10),
-        click: parseInt(global?.click || "0", 10),
-        ctr: parseInt(global?.play || "0", 10) > 0 
-          ? (parseInt(global?.click || "0", 10) / parseInt(global?.play || "0", 10)) 
-          : 0,
+    return NextResponse.json(
+      {
+        ok: true,
+        totals: {
+          play:  totalPlay,
+          click: totalClick,
+          ctr:   totalPlay > 0 ? totalClick / totalPlay : 0,
+        },
+        rows: statsData,
       },
-      rows: statsData
-    });
+      { headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" } }
+    );
   } catch (e) {
-    return NextResponse.json({ ok: false }, { status: 500 });
+    console.error("stats/summary error:", e);
+    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }
 }
