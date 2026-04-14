@@ -246,13 +246,13 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
       if (Hls.isSupported()) {
         /**
          * ★ ポイント：
-         *   isActive → 7秒から直接バッファ（即再生）
-         *   neighbor → 0秒からバッファ開始（20秒分）
-         *     → アクティブ化時に7秒は既にバッファ済み → シークが即時
+         *   active / neighbor ともに START_OFFSET_SEC から直接バッファ開始。
+         *   neighbor がアクティブ化されるとき el.currentTime >= START_OFFSET_SEC
+         *   になっているので enforceStartOffset によるシークが不要 → 黒フラッシュなし。
          */
         const hls = new Hls({
-          startPosition:    isActive ? START_OFFSET_SEC : 0,
-          maxBufferLength:  20,   // neighbor も余裕をもってバッファ
+          startPosition:    START_OFFSET_SEC, // 常に再生開始位置からバッファ
+          maxBufferLength:  20,
           maxMaxBufferLength: 40,
           capLevelToPlayerSize: true,
           startFragPrefetch:    true,
@@ -349,7 +349,15 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
         el.muted   = true;
         const p = el.play();
         if (p !== undefined) {
-          p.then(() => { el.pause(); neighborPrimedRef.current = true; }).catch(() => {});
+          p.then(() => {
+            // 再生開始後、START_OFFSET_SEC 付近にいなければシーク
+            // （HLS は startPosition で既に7秒、MP4 は 0秒スタートなので補正）
+            if (el.currentTime < START_OFFSET_SEC - START_TOLERANCE_SEC && el.readyState >= 2) {
+              try { el.currentTime = START_OFFSET_SEC; } catch {}
+            }
+            el.pause();
+            neighborPrimedRef.current = true;
+          }).catch(() => { neighborPrimedRef.current = true; });
         }
       }
       setShowTapToUnmute(false);
@@ -527,15 +535,15 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
 
       <div style={{ position: "relative", width: "100%", height: "100%", backgroundColor: "#000", overflow: "hidden" }}>
 
-        {/* ポスター（バッファ中に即表示） */}
+        {/* ポスター: アクティブでバッファ中 OR ネイバーでまだ再生されていない間は表示 */}
         {posterUrl && (
           <div style={{
             position: "absolute", inset: 0, zIndex: 0,
             backgroundImage: `url(${posterUrl})`,
             backgroundSize: "contain", backgroundPosition: "center", backgroundRepeat: "no-repeat",
             backgroundColor: "#000",
-            opacity: isActive && isBuffering ? 1 : 0,
-            transition: "opacity 0.25s ease",
+            opacity: (isActive && isBuffering) || (isNeighbor && !playing) ? 1 : 0,
+            transition: "opacity 0.2s ease",
           }} />
         )}
 
@@ -547,7 +555,9 @@ export default function VideoPlayer({ video, isActive = false, isNeighbor = fals
           style={{
             width: "100%", height: "100%", objectFit: "contain",
             position: "absolute", inset: 0, zIndex: 1,
-            opacity: isActive ? 1 : 0.001, transition: "none", backgroundColor: "transparent",
+            // ネイバーも opacity:1 にして、スワイプ中に動画フレームが見えるようにする
+            // （opacity:0.001 だとスワイプアニメーション中が真っ黒になる）
+            opacity: 1, transition: "none", backgroundColor: "transparent",
           }}
         />
 

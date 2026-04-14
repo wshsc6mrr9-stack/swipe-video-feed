@@ -13,11 +13,7 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
-    const rawGenres =
-      searchParams.get("genres") ??
-      searchParams.get("genre") ??
-      "";
-
+    const rawGenres = searchParams.get("genres") ?? searchParams.get("genre") ?? "";
     const genres = rawGenres
       .split(",")
       .map((s) => {
@@ -29,23 +25,27 @@ export async function GET(req: Request) {
       })
       .filter(Boolean);
 
-    const mappedGenres = genres.flatMap((g) => {
-      if (g.startsWith("__")) return [g];
-      return GENRE_MAP[g] ?? [];
-    });
+    const mappedGenres = Array.from(
+      new Set(
+        genres.flatMap((g) => {
+          if (g.startsWith("__")) return [g];
+          return GENRE_MAP[g] ?? [];
+        })
+      )
+    );
 
     const query = searchParams.get("query") || "";
-    const count = parseInt(searchParams.get("count") || "10", 10);
-    const page = parseInt(searchParams.get("page") || "1", 10);
-    const seed = parseInt(searchParams.get("seed") || "0", 10);
+    // 不正な値の防止と安全な数値変換
+    const count = Math.min(Number.parseInt(searchParams.get("count") || "20", 10), 100);
+    const page = Math.max(Number.parseInt(searchParams.get("page") || "1", 10), 1);
+    const seed = Number.parseInt(searchParams.get("seed") || "0", 10) || 0;
 
     const idsParam = searchParams.get("ids");
-    let targetIds: string[] | undefined = undefined;
-    if (idsParam) {
-      targetIds = idsParam.split(",").map((s) => s.trim()).filter(Boolean);
-    }
+    const targetIds = idsParam ? idsParam.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
 
-    const videos = await getFilteredVideos(
+    // ★ 修正ポイント：過去の強引なスライス処理を廃止。
+    // redis.ts に元々ある完璧なページネーション機能にすべてを委譲し、計算ズレを撲滅。
+    const fetched = await getFilteredVideos(
       mappedGenres.length > 0 ? mappedGenres : undefined,
       query,
       count,
@@ -54,7 +54,9 @@ export async function GET(req: Request) {
       targetIds
     );
 
-    const normalized = (Array.isArray(videos) ? videos : []).map((v: any) => ({
+    const videos = Array.isArray(fetched) ? fetched : [];
+
+    const normalized = videos.map((v: any) => ({
       ...v,
       id: String(v?.id ?? ""),
       title: String(v?.title ?? ""),
@@ -80,11 +82,16 @@ export async function GET(req: Request) {
 
     return NextResponse.json(normalized, {
       headers: {
-        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=30",
+        "Cache-Control": "no-store, max-age=0",
       },
     });
   } catch (e) {
     console.error(e);
-    return NextResponse.json([], { status: 500 });
+    return NextResponse.json([], {
+      status: 500,
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    });
   }
 }

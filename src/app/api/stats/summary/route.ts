@@ -2,9 +2,7 @@ import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 
 export const dynamic = "force-dynamic";
-
-// 30秒間サーバーサイドでキャッシュ（Vercelのエッジで有効）
-export const revalidate = 30;
+// Cache-Controlヘッダーでエッジキャッシュを制御（revalidateはforce-dynamicと競合するため削除）
 
 export async function GET() {
   try {

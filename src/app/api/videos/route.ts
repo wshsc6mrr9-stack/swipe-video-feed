@@ -1,8 +1,8 @@
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 import { NextResponse } from "next/server";
-import { redis } from "@/lib/redis"; 
+import { redis } from "@/lib/redis";
+import { invalidateVideosCache } from "@/lib/redis";
 import { revalidatePath } from "next/cache";
 
 // ✅ AnalyticsやAdmin一覧用 (GET)
@@ -63,5 +63,45 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, video: newVideo });
   } catch (e: any) {
     return NextResponse.json({ ok: false }, { status: 500 });
+  }
+}
+
+// ✅ 動画削除用 (DELETE) - 管理画面の削除ボタンが使用
+export async function DELETE(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id")?.trim();
+
+    if (!id) {
+      return NextResponse.json({ ok: false, error: "missing id" }, { status: 400 });
+    }
+
+    // "videos" リストから対象IDを全件スキャンして削除
+    const rows = await redis.lrange("videos", 0, -1);
+    let deleted = 0;
+
+    for (const row of rows) {
+      try {
+        const obj = typeof row === "string" ? JSON.parse(row) : row;
+        if (String(obj?.id ?? "") === id) {
+          await redis.lrem("videos", 0, row);
+          deleted++;
+        }
+      } catch {}
+    }
+
+    if (deleted === 0) {
+      return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });
+    }
+
+    // キャッシュを無効化して次回フィードに反映
+    await invalidateVideosCache();
+    revalidatePath("/");
+    revalidatePath("/admin");
+
+    return NextResponse.json({ ok: true, deleted });
+  } catch (e: any) {
+    console.error("[DELETE /api/videos] error:", e?.message ?? e);
+    return NextResponse.json({ ok: false, error: "DELETE_FAILED" }, { status: 500 });
   }
 }

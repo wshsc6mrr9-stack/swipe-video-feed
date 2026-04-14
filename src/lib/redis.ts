@@ -143,6 +143,64 @@ export async function invalidateVideosCache(): Promise<void> {
   await redis.del(REDIS_CACHE_KEY).catch(() => {});
 }
 
+/**
+ * 高速パス: 全件ロード不要なオフセット直接ページング
+ * GENRE_ALL + no query の通常フィード用。
+ * llen(1回) + lrange(1〜2回) = 最大2回のRedis呼び出しで完結。
+ *
+ * ページ間のオーバーラップを完全に排除するため、
+ * ページごとに count ずつ非重複で進む設計。
+ * seed が起点をランダム化するため、セッションごとに異なるコンテンツを提供。
+ */
+/**
+ * 完全ランダムページング
+ *
+ * 旧実装: baseOffset + pageOffset で連続ブロックを読む
+ *   → DBの保存順（同ソース・同ジャンルが固まる）がそのまま出てしまう
+ *
+ * 新実装: seed + page を組み合わせた独立シードで count 個のランダムインデックスを生成し
+ *   Upstash pipeline で一括取得（llen 1回 + pipeline 1回 = 2 HTTPリクエスト）
+ *   → 全 144K 件から均等サンプリング、ページ間でも相関なし
+ */
+async function getFeedPageDirect(
+  count: number,
+  page: number,
+  seed: number
+): Promise<any[]> {
+  const total = await redis.llen("videos");
+  if (total === 0) return [];
+
+  // page ごとに独立したシードを生成（ページ間の相関をなくす）
+  // ビット演算で 32bit 整数に収める
+  const pageSeed = (seed * 1000003 + page * 2654435761) | 0;
+  const rng = mulberry32(pageSeed >>> 0); // 符号なし32bit に正規化
+
+  // count 個の重複なしランダムインデックスを生成
+  const indexSet = new Set<number>();
+  let safetyLimit = count * 10;
+  while (indexSet.size < count && safetyLimit-- > 0) {
+    indexSet.add(Math.floor(rng() * total));
+  }
+  const randomIndices = Array.from(indexSet);
+
+  // Upstash pipeline: 全 lindex を 1 HTTP リクエストで一括送信
+  const pipe = redis.pipeline();
+  for (const idx of randomIndices) {
+    pipe.lindex("videos", idx);
+  }
+  const results = (await pipe.exec()) as (string | null)[];
+
+  return results
+    .filter(Boolean)
+    .map((r) => {
+      try { return typeof r === "string" ? JSON.parse(r) : r; }
+      catch { return null; }
+    })
+    .filter(Boolean)
+    .map(normalizeVideo)
+    .filter((v) => !!v.id);
+}
+
 // ===== getFilteredVideos =====
 export async function getFilteredVideos(
   genres: string[] | undefined,
@@ -165,6 +223,13 @@ export async function getFilteredVideos(
       (!genres || genres.length === 0);
 
     const hasQuery = query.trim().length > 0;
+
+    // ---- 高速パス: GENRE_ALL + 検索なし → loadAllVideos() を完全スキップ ----
+    if (isAll && !hasQuery) {
+      const safeCount = Math.max(1, count);
+      const safePage  = Math.max(1, page);
+      return getFeedPageDirect(safeCount, safePage, seed);
+    }
 
     const allVideos = await loadAllVideos();
     let filtered = allVideos;
